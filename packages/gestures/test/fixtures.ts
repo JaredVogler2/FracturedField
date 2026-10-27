@@ -13,7 +13,7 @@ export function still(seconds: number, extra: Partial<TimelineSpec> = {}): Landm
 
 /** Open hand, then a quick push toward the camera (apparent size +27 % in 0.2 s) and back. */
 export function pulse(
-  opts: { growth?: number; pushS?: number; aspect?: number; seed?: number } = {},
+  opts: { growth?: number; pushS?: number; aspect?: number; seed?: number; fps?: number } = {},
 ) {
   const g = opts.growth ?? 1.27;
   const push = opts.pushS ?? 0.2;
@@ -21,6 +21,7 @@ export function pulse(
     seconds: 2.4,
     aspect: opts.aspect ?? 16 / 9,
     seed: opts.seed ?? 3,
+    ...(opts.fps ? { fps: opts.fps } : {}),
     keys: [
       { t: 0, hand: { ...HOME, shape: 'open' } },
       { t: 1.0, hand: { size: HOME.size } },
@@ -53,12 +54,13 @@ export function swipe(
 export function sign(
   shape: 'fist' | 'vee' | 'thumb' | 'point' | 'three' | 'ok',
   holdS: number,
-  extra: { roll?: number; handedness?: 'left' | 'right'; seed?: number } = {},
+  extra: { roll?: number; handedness?: 'left' | 'right'; seed?: number; fps?: number } = {},
 ) {
   const base = { ...HOME, handedness: extra.handedness ?? 'right' } as const;
   return timeline({
     seconds: 0.8 + holdS + 0.8,
     seed: extra.seed ?? 5,
+    ...(extra.fps ? { fps: extra.fps } : {}),
     keys: [
       { t: 0, hand: { ...base, shape: 'open', roll: 0 } },
       { t: 0.8, hand: { shape, roll: extra.roll ?? 0 } },

@@ -22,6 +22,7 @@ import { Hud, type HudSeat } from './Hud';
 import { Banners, DenyToast, MatchEndPanel, PauseMenu } from './Overlays';
 import { TouchControls } from './TouchControls';
 import { LoadoutPicker, parseLoadout } from './Loadout';
+import { CameraControl } from './camera/CameraControl';
 import { NetStatusOverlay, OnlineLobby } from './Online';
 import { teamOf } from './teams';
 import { DevHud } from '../hud/DevHud';
@@ -145,6 +146,9 @@ export function MatchView({
   const [rematchWaiting, setRematchWaiting] = useState(false);
   const [denied, setDenied] = useState<ReadonlySet<string>>(new Set());
   const [inputMode, setInputMode] = useState<InputSource>(touch ? 'touch' : 'keyboard');
+  const [manager, setManager] = useState<InputManager | null>(null);
+  const [cameraReady, setCameraReady] = useState(false);
+  const fallbackMode: InputSource = touch ? 'touch' : 'keyboard';
   const matchEnd = useHud((s) => s.matchEnd);
   const phase = useHud((s) => s.match?.phase);
   const lobby = useHud((s) => s.lobby);
@@ -183,7 +187,54 @@ export function MatchView({
   useEffect(() => {
     if (!new URLSearchParams(window.location.search).has('test')) return;
     const w = window as unknown as Record<string, unknown>;
+    // Recent authority verdicts and cast events, numbered so a test can look only at what came
+    // after a point in time (a short cooldown is easy to miss by polling the snapshot).
+    let n = 0;
+    const acks: {
+      n: number;
+      /** Arrival time (performance.now), for input → verdict latency. */
+      at: number;
+      slot: number;
+      action: string | undefined;
+      accepted: boolean;
+      reason?: string;
+    }[] = [];
+    const casts: {
+      n: number;
+      tick: number;
+      slot: number;
+      ability: string;
+      phase: string;
+      /** Ability-specific magnitude (PULSE: strength on the core, 0 = missed it). */
+      mag: number;
+    }[] = [];
+    const offAcks = client.acks.on(({ slot, result }) => {
+      acks.push({
+        n: ++n,
+        at: performance.now(),
+        slot,
+        action: input.current?.actionForSeq(slot, result.seq),
+        accepted: result.accepted,
+        ...(result.reason ? { reason: result.reason } : {}),
+      });
+      if (acks.length > 200) acks.shift();
+    });
+    const offEvents = client.events.on((e) => {
+      if (e.type !== 'cast') return;
+      casts.push({
+        n: ++n,
+        tick: e.tick,
+        slot: e.slot,
+        ability: e.ability,
+        phase: e.phase,
+        mag: e.mag,
+      });
+      if (casts.length > 200) casts.shift();
+    });
     w.__ffDebug = {
+      mark: () => n,
+      acks: () => [...acks],
+      casts: () => [...casts],
       snapshot: () => client.buffer.latest,
       project: (x: number, y: number, z: number) => view.worldToClient(x, y, z),
       slot: () => useHud.getState().mySlot,
@@ -192,6 +243,8 @@ export function MatchView({
       matchEnd: () => useHud.getState().matchEnd,
     };
     return () => {
+      offAcks();
+      offEvents();
       delete w.__ffDebug;
     };
   }, [client]);
@@ -298,9 +351,9 @@ export function MatchView({
   const start = useCallback(() => {
     sfx.unlock();
     sfx.play('ui');
-    session.current?.setReady(true, touch ? 'touch' : 'keyboard', seatLoadouts);
+    session.current?.setReady(true, inputMode, seatLoadouts);
     setStarted(true);
-  }, [touch, seatLoadouts]);
+  }, [inputMode, seatLoadouts]);
 
   const setOnlineReady = (ready: boolean) => {
     sfx.unlock();
@@ -404,7 +457,12 @@ export function MatchView({
           portraitSlot={mySlot}
         >
           {setup.seats.length > 0 ? (
-            <InputBridge seats={seats} managerRef={input} session={session} />
+            <InputBridge
+              seats={seats}
+              managerRef={input}
+              session={session}
+              onManager={setManager}
+            />
           ) : null}
         </GameScene>
         {mode.kind !== 'attract' ? (
@@ -434,7 +492,28 @@ export function MatchView({
           </>
         ) : null}
         {!started && !online ? (
-          <ReadyGate mode={mode} onStart={start} onExit={exit} touch={touch} />
+          <ReadyGate
+            mode={mode}
+            onStart={start}
+            onExit={exit}
+            touch={touch}
+            inputMode={inputMode}
+            onInputMode={setInputMode}
+            cameraReady={cameraReady}
+          />
+        ) : null}
+        {inputMode === 'camera' && setup.localSlots.length === 1 ? (
+          <CameraControl
+            slot={setup.localSlots[0]!}
+            manager={manager}
+            loadout={seatLoadouts[setup.localSlots[0]!] ?? DEFAULT_LOADOUT}
+            paused={paused || matchEnd !== null || (online ? inLobby : !started)}
+            onFallback={() => {
+              setCameraReady(false);
+              setInputMode(fallbackMode);
+            }}
+            onReady={setCameraReady}
+          />
         ) : null}
         {online && inLobby ? (
           <OnlineLobby
@@ -444,6 +523,7 @@ export function MatchView({
             onInputMode={setInputMode}
             onReady={setOnlineReady}
             onLeave={exit}
+            cameraReady={cameraReady}
             loadout={loadout}
             onLoadout={(next) => useSettings.getState().set('loadout', next)}
           />
@@ -485,10 +565,13 @@ function InputBridge({
   seats,
   managerRef,
   session,
+  onManager,
 }: {
   seats: readonly SeatConfig[];
   managerRef: React.RefObject<InputManager | null>;
   session: React.RefObject<SessionDriver | null>;
+  /** Adapters outside the canvas (camera) re-attach when the manager is replaced. */
+  onManager: (m: InputManager | null) => void;
 }) {
   const gl = useThree((s) => s.gl);
   const client = useGameClient();
@@ -497,11 +580,13 @@ function InputBridge({
       session.current?.sendIntent(slot, intent),
     );
     managerRef.current = m;
+    onManager(m);
     return () => {
       m.dispose();
       managerRef.current = null;
+      onManager(null);
     };
-  }, [gl, seats, managerRef, session]);
+  }, [gl, seats, managerRef, session, onManager]);
   useFrame(() => {
     managerRef.current?.update(client.buffer.latest);
   });
@@ -513,11 +598,17 @@ function ReadyGate({
   onStart,
   onExit,
   touch,
+  inputMode,
+  onInputMode,
+  cameraReady,
 }: {
   mode: MatchMode;
   onStart: () => void;
   onExit: () => void;
   touch: boolean;
+  inputMode: InputSource;
+  onInputMode: (m: InputSource) => void;
+  cameraReady: boolean;
 }) {
   const loadout = useSettings((s) => s.loadout);
   const loadoutP2 = useSettings((s) => s.loadoutP2);
@@ -574,8 +665,22 @@ function ReadyGate({
         ) : (
           <LoadoutPicker value={loadout} onChange={(v) => set('loadout', v)} />
         )}
+        {mode.kind === 'bot' ? (
+          <ControlChoice
+            value={inputMode}
+            touch={touch}
+            onChange={onInputMode}
+            cameraReady={cameraReady}
+          />
+        ) : null}
         <div className="row">
-          <button className="btn primary big" onClick={onStart} data-testid="start-match" autoFocus>
+          <button
+            className="btn primary big"
+            onClick={onStart}
+            data-testid="start-match"
+            disabled={inputMode === 'camera' && !cameraReady}
+            autoFocus
+          >
             Start match
           </button>
           <button className="btn" onClick={onExit}>
@@ -583,6 +688,43 @@ function ReadyGate({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Keyboard & mouse / touch / camera for the local player (camera opens its own setup). */
+export function ControlChoice({
+  value,
+  touch,
+  onChange,
+  cameraReady,
+  disabled = false,
+}: {
+  value: InputSource;
+  touch: boolean;
+  onChange: (m: InputSource) => void;
+  cameraReady: boolean;
+  disabled?: boolean;
+}) {
+  const options: [InputSource, string][] = [
+    [touch ? 'touch' : 'keyboard', touch ? 'Touch' : 'Keyboard & mouse'],
+    ['camera', cameraReady ? 'Camera ✓' : 'Camera'],
+  ];
+  return (
+    <div className="seg control-choice" role="radiogroup" aria-label="Your controls">
+      {options.map(([m, label]) => (
+        <button
+          key={m}
+          role="radio"
+          aria-checked={value === m}
+          className={value === m ? 'on' : ''}
+          disabled={disabled}
+          onClick={() => onChange(m)}
+          data-testid={`controls-${m}`}
+        >
+          {label}
+        </button>
+      ))}
     </div>
   );
 }

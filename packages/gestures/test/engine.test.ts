@@ -108,6 +108,90 @@ describe('gesture recognition: positives', () => {
   });
 });
 
+describe('every camera rate from 30 down to 5 fps (device, model delegate and load vary)', () => {
+  const RATES = [30, 24, 20, 15, 12, 10, 8, 6, 5];
+  const first = (frames: readonly LandmarksFrame[], action: string) =>
+    casts(run(frames).events).filter((e) => e.action === action);
+
+  for (const fps of RATES) {
+    it(`${fps} fps: every push speed casts PULSE exactly once; signs and strokes too`, () => {
+      const pushLatency: number[] = [];
+      for (let seed = 1; seed <= 10; seed++) {
+        for (const pushS of [0.15, 0.2, 0.3, 0.4]) {
+          const got = first(pulse({ fps, seed, pushS }), 'pulse');
+          expect(got, `pulse seed ${seed} push ${pushS}s`).toHaveLength(1);
+          pushLatency.push(got[0]!.t - 2000); // the push starts 1 s into the fixture (t0 1000)
+        }
+      }
+      const signs = [
+        ['fist', 'lift', 0],
+        ['vee', 'wet', 0],
+        ['thumb', 'heat', THUMB_UP_ROLL],
+        ['point', 'pick1', 0],
+        ['ok', 'pick2', 0],
+      ] as const;
+      const signLatency: number[] = [];
+      for (const [shape, action, roll] of signs) {
+        const got = first(sign(shape, 1.2, { fps, roll }), action);
+        expect(got, action).toHaveLength(1);
+        signLatency.push(got[0]!.t - 1800); // the sign forms 0.8 s in
+      }
+      for (const secs of [0.2, 0.3, 0.4]) {
+        const left = first(swipe([0.62, 0.55], [0.32, 0.55], secs, { fps }), 'sweep');
+        const right = first(swipe([0.32, 0.55], [0.62, 0.55], secs, { fps }), 'sweep');
+        expect(left.map((e) => e.dir)).toEqual([[1, 0]]); // mirrored selfie view
+        expect(right.map((e) => e.dir)).toEqual([[-1, 0]]);
+      }
+      // Detection latency on the synthetic clock (motion onset → event): a push is recognised
+      // within ~0.6 s even on slow cameras; a sign after its 280 ms dwell plus a few frames.
+      expect(Math.max(...pushLatency)).toBeLessThanOrEqual(fps >= 15 ? 550 : 750);
+      expect(Math.max(...signLatency)).toBeLessThanOrEqual(fps >= 15 ? 550 : 1000);
+    });
+  }
+
+  it('a doubled-noise still hand stays silent at 30, 15 and 8 fps (10 minutes each)', () => {
+    for (const fps of [30, 15, 8]) {
+      let total = 0;
+      for (let seed = 200; seed < 210; seed++) {
+        const frames = timeline({
+          seconds: 60,
+          fps,
+          seed,
+          noise: 0.005,
+          keys: [{ t: 0, hand: { ...HOME, shape: 'relaxed' } }],
+        });
+        total += casts(run(frames).events).length;
+      }
+      expect(total, `${fps} fps`).toBe(0);
+    }
+  });
+});
+
+describe('slow cameras (8 and 4 fps: weak devices, heavy load)', () => {
+  for (const fps of [8, 4]) {
+    it(`${fps} fps: PULSE, SWEEP, LIFT and the signs still cast exactly once`, () => {
+      expect(summary(run(pulse({ fps })).events), 'pulse').toEqual(['pulse:tap']);
+      expect(casts(run(swipe([0.62, 0.55], [0.32, 0.55], 0.3, { fps })).events), 'sweep').toEqual([
+        expect.objectContaining({ action: 'sweep', dir: [1, 0] }),
+      ]);
+      expect(summary(run(sign('fist', 1.2, { fps })).events), 'lift').toEqual([
+        'lift:start',
+        'lift:end',
+      ]);
+      expect(summary(run(sign('vee', 1.0, { fps })).events), 'wet').toEqual(['wet:tap']);
+    });
+  }
+
+  it('4 fps idle stays silent (2 minutes)', () => {
+    let total = 0;
+    for (let seed = 1; seed <= 2; seed++) {
+      const frames = idle(60, seed * 7).filter((_, i) => i % 7 === 0); // ~4.3 fps
+      total += casts(run(frames).events).length;
+    }
+    expect(total).toBe(0);
+  });
+});
+
 describe('gesture recognition: negatives and borderline', () => {
   it('idle: 20 minutes of relaxed aiming produce no cast (budget < 1 per 5 min)', () => {
     let total = 0;
@@ -246,6 +330,38 @@ describe('tracking: dropouts, bystanders, handedness, mirroring, aspect ratios',
     expect(events[1]!.t - lostAt).toBeLessThan(600);
     // While lost, status says so and the aim is withheld; nothing re-lifts on return by itself.
     expect(outputs.some((o) => o.status.state === 'lost' && o.aim === null)).toBe(true);
+  });
+
+  it('S12: a 200 ms dropout is smoothed over; a 2 s dropout ends the hold ~0.5 s in, no re-lift', () => {
+    const short = run(
+      timeline({
+        seconds: 3.4,
+        dropouts: [[1.6, 1.8]],
+        keys: [
+          { t: 0, hand: { ...HOME, shape: 'open' } },
+          { t: 0.8, hand: { shape: 'fist' } },
+          { t: 2.6, hand: { shape: 'open' } },
+        ],
+      }),
+    ).events;
+    expect(summary(short)).toEqual(['lift:start', 'lift:end']);
+    // Ended by opening the hand at 2.6 s — the hold survived the 200 ms gap.
+    expect(short[1]!.t).toBeGreaterThanOrEqual(1000 + 2600);
+
+    const long = run(
+      timeline({
+        seconds: 4.4,
+        dropouts: [[1.6, 3.6]],
+        keys: [
+          { t: 0, hand: { ...HOME, shape: 'open' } },
+          { t: 0.8, hand: { shape: 'fist' } },
+        ],
+      }),
+    ).events;
+    // The fist is still closed when the hand returns: it must not lift again by itself.
+    expect(summary(long)).toEqual(['lift:start', 'lift:end']);
+    expect(long[1]!.t - (1000 + 1600)).toBeGreaterThanOrEqual(500);
+    expect(long[1]!.t - (1000 + 1600)).toBeLessThan(600);
   });
 
   it('a bystander hand does not take control (scale and continuity gates)', () => {

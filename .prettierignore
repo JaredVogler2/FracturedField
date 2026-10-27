@@ -9,3 +9,4 @@ docs/visual-evidence/**/*.png
 *.md
 prompts
 .claude
+apps/web/public/vision

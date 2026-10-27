@@ -4,14 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "node ../../scripts/prepare-vision-assets.mjs && vite",
+    "build": "node ../../scripts/prepare-vision-assets.mjs && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json"
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "vision-assets": "node ../../scripts/prepare-vision-assets.mjs"
   },
   "dependencies": {
     "@ff/controls": "workspace:*",
     "@ff/game-data": "workspace:*",
+    "@ff/gestures": "workspace:*",
     "@ff/protocol": "workspace:*",
     "@ff/room-core": "workspace:*",
     "@ff/sim": "workspace:*",

@@ -379,6 +379,27 @@ kbd {
 .settings .btn {
   margin-top: 16px;
 }
+.settings {
+  max-height: min(86vh, 760px);
+  overflow-y: auto;
+}
+.settings-group {
+  border: 0;
+  margin: 14px 0 0;
+  padding: 0;
+}
+.settings-group legend {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding: 0;
+}
+.settings .setting .btn.small {
+  margin-top: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+}
 
 /* ---------------------------------------------------------------- HUD */
 .hud {
@@ -1209,4 +1230,203 @@ kbd {
     border-left: 0;
     border-top: 1px solid var(--panel-border);
   }
+}
+
+/* ---------------------------------------------------------------- camera control */
+.panel.camera-setup {
+  width: min(560px, 100%);
+  /* Opaque: the ready gate underneath must not show through the setup text. */
+  background: rgb(8, 18, 28);
+}
+.cam-modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.cam-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-border);
+  background: rgba(154, 170, 183, 0.06);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.cam-mode small {
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+.cam-mode.on {
+  border-color: var(--cyan);
+  background: rgba(80, 216, 232, 0.12);
+}
+.cam-mode:focus-visible {
+  outline: 3px solid var(--cyan);
+  outline-offset: 2px;
+}
+.cam-warn {
+  color: #ffd08a;
+}
+.cam-opts {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.cam-preview {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  max-height: 46vh;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #02070c;
+  border: 1px solid var(--panel-border);
+  margin: 8px 0 10px;
+}
+.cam-preview.small {
+  max-height: 26vh;
+}
+.cam-preview video,
+.cam-pip video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.cam-preview.mirrored video,
+.cam-pip.mirrored video {
+  transform: scaleX(-1);
+}
+.cam-frame-guide {
+  position: absolute;
+  inset: 18% 22% 12%;
+  border: 2px dashed rgba(80, 216, 232, 0.55);
+  border-radius: 18px;
+  pointer-events: none;
+}
+.cam-hint {
+  font-weight: 700;
+  margin: 4px 0 8px;
+}
+.cam-progress {
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(154, 170, 183, 0.15);
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.cam-progress i {
+  display: block;
+  height: 100%;
+  background: var(--cyan);
+  transition: width 0.1s linear;
+}
+.cam-practice {
+  margin: 4px 0 10px;
+  padding-left: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+.cam-practice li::before {
+  content: '○ ';
+  color: var(--text-dim);
+}
+.cam-practice li.done::before {
+  content: '✓ ';
+  color: #9be8a4;
+}
+.gesture-help {
+  list-style: none;
+  margin: 6px 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.gesture-help li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.g-sign {
+  color: var(--text-dim);
+}
+.g-what {
+  font-weight: 700;
+  white-space: nowrap;
+}
+.cam-chip {
+  position: fixed;
+  left: 50%;
+  top: calc(62px + var(--safe-top));
+  transform: translateX(-50%);
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 12px;
+  border-radius: 999px;
+  background: rgba(5, 12, 19, 0.78);
+  border: 1px solid var(--panel-border);
+  font-size: 12px;
+  color: var(--text);
+  max-width: calc(100vw - 24px);
+}
+.cam-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ffb36b;
+  flex: 0 0 auto;
+}
+.cam-chip.tracking .cam-dot {
+  background: #9be8a4;
+}
+.cam-chip.lost .cam-dot {
+  background: #ff6b6b;
+}
+.cam-last {
+  color: var(--cyan);
+}
+.cam-help-btn {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: rgba(154, 170, 183, 0.1);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.cam-pip {
+  position: fixed;
+  right: calc(12px + var(--safe-right));
+  top: calc(60px + var(--safe-top));
+  width: min(180px, 30vw);
+  aspect-ratio: 4 / 3;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--panel-border);
+  z-index: 14;
+  opacity: 0.85;
+  pointer-events: none;
+}
+.cam-help.panel,
+.cam-fail.panel {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 30;
+  width: min(460px, calc(100vw - 32px));
+}
+.control-choice {
+  margin-bottom: 14px;
 }

@@ -253,6 +253,71 @@ function ControlsPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** Camera-control preferences (applied live to an active camera seat). */
+function CameraSettings() {
+  const cam = useSettings((st) => st.camera);
+  const patch = (p: Partial<typeof cam>) => {
+    const st = useSettings.getState();
+    st.set('camera', { ...st.camera, ...p });
+  };
+  return (
+    <fieldset className="settings-group" data-testid="camera-settings">
+      <legend>Camera control</legend>
+      <label className="setting">
+        <span>Playing hand</span>
+        <select
+          value={cam.dominant}
+          onChange={(e) => patch({ dominant: e.target.value === 'left' ? 'left' : 'right' })}
+        >
+          <option value="right">Right</option>
+          <option value="left">Left</option>
+        </select>
+      </label>
+      <label className="setting">
+        <span>Gesture sensitivity</span>
+        <input
+          type="range"
+          min={0.5}
+          max={1.5}
+          step={0.05}
+          value={cam.sensitivity}
+          aria-valuetext={`${Math.round(cam.sensitivity * 100)} %`}
+          onChange={(e) => patch({ sensitivity: Number(e.target.value) })}
+        />
+      </label>
+      <label className="setting">
+        <span>Hold a sign for ({cam.dwellMs} ms)</span>
+        <input
+          type="range"
+          min={180}
+          max={600}
+          step={20}
+          value={cam.dwellMs}
+          onChange={(e) => patch({ dwellMs: Number(e.target.value) })}
+        />
+      </label>
+      <label className="setting">
+        <span>Show my camera (stays on this device)</span>
+        <input
+          type="checkbox"
+          checked={cam.preview}
+          onChange={(e) => patch({ preview: e.target.checked })}
+        />
+      </label>
+      <div className="setting">
+        <span>{cam.calibration ? 'Calibration saved' : 'Not calibrated (default range)'}</span>
+        <button
+          className="btn small"
+          disabled={!cam.calibration}
+          onClick={() => patch({ calibration: null })}
+        >
+          Forget calibration
+        </button>
+      </div>
+    </fieldset>
+  );
+}
+
 function SettingsPanel({ onClose }: { onClose: () => void }) {
   const s = useSettings();
   return (
@@ -319,6 +384,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
             onChange={(e) => s.set('devHud', e.target.checked)}
           />
         </label>
+        <CameraSettings />
         <button className="btn primary" onClick={onClose} autoFocus>
           Done
         </button>

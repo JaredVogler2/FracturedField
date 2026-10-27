@@ -38,7 +38,9 @@ jobs:
   runtime:
     name: e2e browser + live worker
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Software-rendered browsers: the camera suites (real model inference on CPU, a camera-driven
+    # match to a goal and a rematch) add several minutes.
+    timeout-minutes: 35
     needs: static
     steps:
       - uses: actions/checkout@v4

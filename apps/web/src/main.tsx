@@ -25,6 +25,14 @@ function Router() {
   }
 }
 
+// Test hook (?test=1): run the hand model on a still image (verifies shapes on real model output).
+if (new URLSearchParams(window.location.search).has('test')) {
+  (window as unknown as Record<string, unknown>).__ffVision = {
+    classify: async (url: string) =>
+      (await import('./input/camera/vision-image')).classifyImage(url),
+  };
+}
+
 const root = document.getElementById('root');
 if (!root) throw new Error('#root missing');
 createRoot(root).render(

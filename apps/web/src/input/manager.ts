@@ -509,6 +509,11 @@ export class InputManager {
     return this.seats.get(slot)?.actionForSeq(seq);
   }
 
+  /** A seat's shared aim/intent state, for adapters that live outside the manager (camera). */
+  seat(slot: PlayerSlot): SeatInput | undefined {
+    return this.seats.get(slot);
+  }
+
   /** Programmatic ability edge (touch buttons, accessibility controls). */
   action(slot: PlayerSlot, edge: ActionEdge): void {
     this.seats.get(slot)?.edge(edge, performance.now());

@@ -9,8 +9,10 @@ import { LM, type Handedness, type Point3 } from './types.js';
 export interface HandFeatures {
   /** Palm centre (mean of wrist and the four finger MCPs), aspect-corrected image units. */
   readonly center: V3;
-  /** Apparent palm size: robust to in-plane rotation, partially to tilt. */
+  /** Apparent palm size: robust to in-plane rotation, partially to tilt (shape ratios). */
   readonly scale: number;
+  /** Steadier apparent size for motion measures (push toward the camera, stroke length). */
+  readonly size: number;
   /** Unit palm normal pointing out of the palm (toward the camera when the palm faces it). */
   readonly normal: V3;
   /** Bend angle (radians) of index, middle, ring, pinky — 0 = straight. */
@@ -70,6 +72,11 @@ export function handFeatures(
     z: (w.z + iM.z + mM.z + rM.z + pM.z) / 5,
   };
   const scale = Math.max(dist(w, mM), dist(iM, pM) * 1.6, 1e-6);
+  // Apparent size for motion (push depth, stroke length): the wrist → knuckle distances averaged
+  // (≈ wrist → middle knuckle, far steadier than one distance); the knuckle span (≈ 0.65–0.7 of
+  // it) takes over only when the palm tilts by more than ~28° and its length foreshortens.
+  const length = (dist(w, iM) + dist(w, mM) + dist(w, rM) + dist(w, pM)) / (4 * 0.953);
+  const size = Math.max(length, dist(iM, pM) * 1.35, 1e-6);
   // In the raw (unmirrored) frame of a camera facing the user, (index − wrist) × (pinky − wrist)
   // points out of a right palm; a left hand is the mirror image, so its sign flips.
   const n = norm(cross(sub(iM, w), sub(pM, w)));
@@ -83,7 +90,7 @@ export function handFeatures(
   const lateral = norm(sub(iM, pM));
   const thumbLateral = dot(sub(tT, center), lateral) / scale;
   const pinch = dist(tT, p[LM.INDEX_TIP]!) / scale;
-  if (!Number.isFinite(scale + center.x + center.y + thumbReach + thumbLateral + pinch))
+  if (!Number.isFinite(scale + size + center.x + center.y + thumbReach + thumbLateral + pinch))
     return null;
-  return { center, scale, normal, bend, thumbReach, thumbBend, thumbLateral, pinch };
+  return { center, scale, size, normal, bend, thumbReach, thumbBend, thumbLateral, pinch };
 }

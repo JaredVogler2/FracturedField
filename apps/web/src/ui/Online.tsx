@@ -166,6 +166,7 @@ export function OnlineLobby({
   onInputMode,
   onReady,
   onLeave,
+  cameraReady,
   loadout,
   onLoadout,
 }: {
@@ -175,6 +176,8 @@ export function OnlineLobby({
   onInputMode: (m: InputSource) => void;
   onReady: (ready: boolean) => void;
   onLeave: () => void;
+  /** Camera setup finished (READY needs it when the camera is chosen). */
+  cameraReady: boolean;
   loadout: readonly [AdvancedAbilityId, AdvancedAbilityId];
   onLoadout: (next: [AdvancedAbilityId, AdvancedAbilityId]) => void;
 }) {
@@ -243,6 +246,7 @@ export function OnlineLobby({
             [
               ['keyboard', 'Keyboard & mouse'],
               ['touch', 'Touch'],
+              ['camera', cameraReady ? 'Camera ✓' : 'Camera'],
             ] as const
           ).map(([m, label]) => (
             <button
@@ -252,6 +256,7 @@ export function OnlineLobby({
               className={inputMode === m ? 'on' : ''}
               disabled={ready}
               onClick={() => onInputMode(m)}
+              data-testid={`controls-${m}`}
             >
               {label}
             </button>
@@ -265,7 +270,7 @@ export function OnlineLobby({
           <button
             className="btn primary big"
             data-testid="ready"
-            disabled={!connected}
+            disabled={!connected || (!ready && inputMode === 'camera' && !cameraReady)}
             onClick={() => onReady(!ready)}
           >
             {ready ? 'Not ready' : 'Ready'}

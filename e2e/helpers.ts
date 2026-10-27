@@ -98,7 +98,10 @@ export async function autopilotUntilGoal(
 const VIEW = { width: 960, height: 540 };
 
 /** Host creates a room, a second browser context (another "device") joins by invite link. */
-export async function openRoom(browser: Browser) {
+export async function openRoom(
+  browser: Browser,
+  opts: { beforeNavigate?: (host: Page, guest: Page) => void } = {},
+) {
   const ctxA = await browser.newContext({ viewport: VIEW });
   const ctxB = await browser.newContext({ viewport: VIEW });
   const a = await ctxA.newPage();
@@ -106,6 +109,7 @@ export async function openRoom(browser: Browser) {
   const errors: string[] = [];
   a.on('pageerror', (e) => errors.push(`A: ${e.message}`));
   b.on('pageerror', (e) => errors.push(`B: ${e.message}`));
+  opts.beforeNavigate?.(a, b);
 
   // Host creates a room (fast test rules are honoured by development room services only).
   await a.goto('/?fast=1&test=1&quality=low');

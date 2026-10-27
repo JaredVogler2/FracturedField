@@ -5,6 +5,7 @@ import {
   DEFAULT_LOADOUT,
   type AdvancedAbilityId,
 } from '@ff/game-data';
+import type { Calibration } from '@ff/gestures';
 import type { QualityTier } from '../render/art-tokens';
 
 export interface Settings {
@@ -19,6 +20,58 @@ export interface Settings {
   loadout: [AdvancedAbilityId, AdvancedAbilityId];
   /** Player 2's picks in a shared-screen duel. */
   loadoutP2: [AdvancedAbilityId, AdvancedAbilityId];
+  /** Camera control preferences (stored on this device only). */
+  camera: CameraPrefs;
+}
+
+export interface CameraPrefs {
+  /** Camera stand (upper body, device set down) or close-up hands (seated). */
+  setup: 'stand' | 'close';
+  /** Which physical camera to open. */
+  facing: 'user' | 'environment';
+  dominant: 'right' | 'left';
+  /** 0.5 strict … 1.5 sensitive. */
+  sensitivity: number;
+  /** Hand-sign hold time before it casts (ms). */
+  dwellMs: number;
+  /** Small mirrored self-view in a corner during play. */
+  preview: boolean;
+  /** Last calibration (palm size and working range) — reused until recalibrated. */
+  calibration: Calibration | null;
+}
+
+export const DEFAULT_CAMERA: CameraPrefs = {
+  setup: 'close',
+  facing: 'user',
+  dominant: 'right',
+  sensitivity: 1,
+  dwellMs: 280,
+  preview: false,
+  calibration: null,
+};
+
+function validCamera(v: unknown): CameraPrefs {
+  if (typeof v !== 'object' || v === null) return { ...DEFAULT_CAMERA };
+  const c = v as Partial<CameraPrefs>;
+  const num = (x: unknown, lo: number, hi: number, d: number) =>
+    typeof x === 'number' && Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : d;
+  const cal = c.calibration;
+  const calOk =
+    cal &&
+    typeof cal === 'object' &&
+    typeof cal.range === 'object' &&
+    [cal.range.x0, cal.range.x1, cal.range.y0, cal.range.y1].every(Number.isFinite) &&
+    cal.range.x1 > cal.range.x0 &&
+    cal.range.y1 > cal.range.y0;
+  return {
+    setup: c.setup === 'stand' ? 'stand' : 'close',
+    facing: c.facing === 'environment' ? 'environment' : 'user',
+    dominant: c.dominant === 'left' ? 'left' : 'right',
+    sensitivity: num(c.sensitivity, 0.5, 1.5, 1),
+    dwellMs: num(c.dwellMs, 180, 600, 280),
+    preview: c.preview === true,
+    calibration: calOk ? cal : null,
+  };
 }
 
 /** Advanced moves that can currently be picked (implemented and enabled). */
@@ -56,6 +109,7 @@ function load(): Settings {
     hints: true,
     loadout: [...DEFAULT_LOADOUT],
     loadoutP2: [...DEFAULT_LOADOUT],
+    camera: { ...DEFAULT_CAMERA },
   };
   try {
     const raw = localStorage.getItem(KEY);
@@ -64,6 +118,7 @@ function load(): Settings {
     const merged = { ...defaults, ...parsed };
     if (!validLoadout(merged.loadout)) merged.loadout = [...DEFAULT_LOADOUT];
     if (!validLoadout(merged.loadoutP2)) merged.loadoutP2 = [...DEFAULT_LOADOUT];
+    merged.camera = validCamera(merged.camera);
     return merged;
   } catch {
     return defaults;
@@ -90,6 +145,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
         hints: st.hints,
         loadout: st.loadout,
         loadoutP2: st.loadoutP2,
+        camera: st.camera,
       };
       localStorage.setItem(KEY, JSON.stringify(plain));
     } catch {

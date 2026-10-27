@@ -16,3 +16,5 @@ test-results/
 blob-report/
 /artifacts/
 .DS_Store
+# On-device camera assets (prepared by scripts/prepare-vision-assets.mjs)
+apps/web/public/vision/

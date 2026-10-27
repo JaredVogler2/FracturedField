@@ -111,4 +111,14 @@ export interface GestureOutput {
   readonly aim: readonly [number, number] | null;
   readonly events: readonly GestureEvent[];
   readonly status: TrackStatus;
+  /** The locked hand this frame (aspect-corrected units) — for calibration and UI guides. */
+  readonly hand: {
+    readonly center: { readonly x: number; readonly y: number };
+    readonly scale: number;
+    /** Palm speed in palm widths per second. */
+    readonly speed: number;
+    /** Palm normal z (negative = palm facing the camera, given the hand's label). */
+    readonly normalZ: number;
+    readonly handedness: Handedness;
+  } | null;
 }

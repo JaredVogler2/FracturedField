@@ -15,6 +15,8 @@ export default defineConfig(
       'test-results/**',
       'docs/**',
       'prompts/**',
+      // Generated on-device vision runtime (copied from @mediapipe/tasks-vision).
+      'apps/web/public/vision/**',
     ],
   },
   js.configs.recommended,

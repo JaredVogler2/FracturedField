@@ -278,6 +278,68 @@ function synthPose(hand: SynthHand, lm: readonly Point3[], aspect: number): Pose
   return { landmarks: pts, score: 0.9 };
 }
 
+export type HandPose = Partial<SynthHand> & { shape?: ShapeName };
+
+/** The host's timers and clock (browser or Node): this package does not depend on DOM types. */
+const host = globalThis as unknown as {
+  setInterval(cb: () => void, ms: number): unknown;
+  clearInterval(id: unknown): void;
+  performance: { now(): number };
+};
+
+/**
+ * A live synthetic hand: renders the current pose at a fixed camera rate into `sink` until
+ * stopped, stamped with the real clock. The pose can change at any moment, so a closed-loop test
+ * "player" can watch the game and move its hand like a person would. `null` = hand out of frame.
+ */
+export class SyntheticCamera {
+  private hand: SynthHand | null = null;
+  private timer: unknown = null;
+  private readonly rnd: () => number;
+  private readonly aspect: number;
+
+  constructor(
+    private readonly sink: (frame: LandmarksFrame) => void,
+    private readonly opts: { fps?: number; aspect?: number; noise?: number; seed?: number } = {},
+    private readonly now: () => number = () => host.performance.now(),
+  ) {
+    this.rnd = rng(opts.seed ?? 1);
+    this.aspect = opts.aspect ?? 16 / 9;
+  }
+
+  /** Updates the hand (merged into the current pose); `null` takes it out of frame. */
+  set(pose: HandPose | null): void {
+    this.hand = pose ? applyKey(this.hand ?? DEFAULT_HAND, { t: 0, hand: pose }) : null;
+    this.timer ??= host.setInterval(() => this.emit(), 1000 / (this.opts.fps ?? 15));
+  }
+
+  /** Renders one frame of the current pose now. */
+  emit(): void {
+    const height = 720;
+    const hands: HandObservation[] = this.hand
+      ? [
+          {
+            landmarks: synthHand(this.hand, this.aspect, this.opts.noise ?? 0.0025, this.rnd),
+            handedness: this.hand.handedness,
+            score: this.hand.score,
+          },
+        ]
+      : [];
+    this.sink({
+      t: this.now(),
+      hands,
+      pose: null,
+      width: Math.round(height * this.aspect),
+      height,
+    });
+  }
+
+  stop(): void {
+    if (this.timer !== null) host.clearInterval(this.timer);
+    this.timer = null;
+  }
+}
+
 /** Renders a timeline to camera-rate frames (default 30 fps, 16:9). */
 export function timeline(spec: TimelineSpec): LandmarksFrame[] {
   const fps = spec.fps ?? 30;

@@ -8,5 +8,6 @@ export {
   type Calibration,
   type CalibrationPhase,
   type CalibrationProgress,
+  type CalibrationSample,
 } from './calibration.js';
 export { GestureEngine, DEFAULT_GESTURE_CONFIG, type GestureConfig } from './engine.js';

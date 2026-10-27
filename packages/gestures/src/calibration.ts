@@ -1,4 +1,12 @@
-import type { HandFeatures } from './features.js';
+import type { Handedness } from './types.js';
+
+/** The tracked hand as the calibrator needs it (palm centre and apparent size). */
+export interface CalibrationSample {
+  readonly center: { readonly x: number; readonly y: number };
+  readonly scale: number;
+  readonly normalZ?: number;
+  readonly handedness?: Handedness;
+}
 
 /**
  * Per-player calibration in aspect-corrected frame units (x ∈ [0, aspect], y ∈ [0, 1]). Nothing
@@ -17,6 +25,14 @@ export interface Calibration {
     readonly y0: number;
     readonly y1: number;
   };
+  /** The hand label seen on the calibrated (playing) hand. */
+  readonly hand?: Handedness;
+  /**
+   * Median palm-normal z while the player showed an open palm to the camera. Positive means the
+   * hand labels are inverted for this camera (mirroring / model convention): the caller flips
+   * labels so palm orientation (GUARD, PULSE) reads correctly.
+   */
+  readonly palmFacing?: number;
 }
 
 /** Uncalibrated default: the middle half of the frame horizontally, upper-middle vertically. */
@@ -57,6 +73,8 @@ export class Calibrator {
   private phaseStart: number | null = null;
   private lastSeen: number | null = null;
   private scales: number[] = [];
+  private normals: number[] = [];
+  private hands: Handedness[] = [];
   private cxs: number[] = [];
   private cys: number[] = [];
   private result: Calibration | null = null;
@@ -68,13 +86,20 @@ export class Calibrator {
     this.phaseStart = null;
     this.lastSeen = null;
     this.scales = [];
+    this.normals = [];
+    this.hands = [];
     this.cxs = [];
     this.cys = [];
     this.result = null;
   }
 
   /** Feed the tracked dominant hand (or null when not visible) once per camera frame. */
-  update(t: number, f: HandFeatures | null, open: boolean, speed: number): CalibrationProgress {
+  update(
+    t: number,
+    f: CalibrationSample | null,
+    open: boolean,
+    speed: number,
+  ): CalibrationProgress {
     if (this.phase === 'done' || this.phase === 'failed') return this.progress(t);
     if (!f) {
       if (this.lastSeen !== null && t - this.lastSeen > FAIL_LOST_MS) this.phase = 'failed';
@@ -90,11 +115,15 @@ export class Calibrator {
       if (!open || speed > 1.2) {
         this.phaseStart = t;
         this.scales = [];
+        this.normals = [];
+        this.hands = [];
         this.cxs = [];
         this.cys = [];
         return this.progress(t);
       }
       this.phaseStart ??= t;
+      if (f.normalZ !== undefined) this.normals.push(f.normalZ);
+      if (f.handedness) this.hands.push(f.handedness);
       this.scales.push(f.scale);
       this.cxs.push(f.center.x);
       this.cys.push(f.center.y);
@@ -102,10 +131,16 @@ export class Calibrator {
         const s = [...this.scales].sort((a, b) => a - b);
         const xs = [...this.cxs].sort((a, b) => a - b);
         const ys = [...this.cys].sort((a, b) => a - b);
+        const ns = [...this.normals].sort((a, b) => a - b);
+        const rights = this.hands.filter((h) => h === 'right').length;
         this.result = {
           palmScale: percentile(s, 0.5),
           center: { x: percentile(xs, 0.5), y: percentile(ys, 0.5) },
           range: defaultCalibration(this.aspect).range,
+          ...(this.hands.length > 0
+            ? { hand: rights * 2 >= this.hands.length ? ('right' as const) : ('left' as const) }
+            : {}),
+          ...(ns.length > 0 ? { palmFacing: percentile(ns, 0.5) } : {}),
         };
         this.phase = 'range';
         this.phaseStart = t;

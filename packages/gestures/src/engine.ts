@@ -16,8 +16,8 @@ import {
 } from './types.js';
 
 export interface GestureConfig {
-  /** Hand that aims and casts. */
-  readonly dominant: Handedness;
+  /** Hand that aims and casts; 'any' = whichever single hand is shown (calibration). */
+  readonly dominant: Handedness | 'any';
   /** 0.5 = strict (bigger, slower motions needed) … 1.5 = sensitive. */
   readonly sensitivity: number;
   /** Time a hand shape must be held before it casts (ms). */
@@ -67,6 +67,8 @@ interface Ctx {
   readonly cfg: GestureConfig;
   /** Thumb tip above the index knuckle (thumbs-up orientation). */
   readonly thumbUp: boolean;
+  /** Typical interval between camera frames (ms) — recognisers adapt to slow devices. */
+  readonly frameMs: number;
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -127,7 +129,7 @@ class ShapeGesture implements Recognizer {
         if (!match) {
           // Debounce: a mismatch must last > 2 frames (~70 ms) to break the dwell.
           this.missSince ??= c.t;
-          if (c.t - this.missSince > 70) {
+          if (c.t - this.missSince > Math.max(70, c.frameMs * 1.5)) {
             this.state = 'armed';
             this.missSince = null;
           }
@@ -182,13 +184,18 @@ class ShapeGesture implements Recognizer {
 }
 
 /**
+ * A push must grow the hand by the threshold within this long (a lean toward the camera is far
+ * slower). Slow cameras stretch it so the window still holds a few samples.
+ */
+const PUSH_RISE_MS = 550;
+
+/**
  * PULSE: an open palm facing the camera pushed toward it — its apparent size grows quickly while
  * it stays in place. A torso visible in the same frames must not grow with it (that would be the
  * camera moving, not the hand).
  */
 class PulseGesture implements Recognizer {
   private latched = false;
-  private above = 0;
   private latchedAt = 0;
   private formingNow = false;
 
@@ -203,7 +210,7 @@ class PulseGesture implements Recognizer {
     if (!now) return [];
     if (this.latched) {
       // Re-arm once the push is over (size settled) and the cooldown elapsed.
-      const prev = c.history[c.history.length - 4];
+      const prev = c.history[c.history.length - (c.frameMs > 100 ? 2 : 4)];
       const settled = !prev || now.scale <= prev.scale * 1.01;
       if (settled && c.t - this.latchedAt > 350) this.latched = false;
       return [];
@@ -211,26 +218,38 @@ class PulseGesture implements Recognizer {
     // A hand entering (or re-entering) the frame is not a push: only growth that starts after
     // 300 ms of steady tracking counts.
     const trackStart = c.t - c.trackedMs;
-    const window = c.history.filter((s) => c.t - s.t <= 300 && s.t - trackStart >= 300);
-    if (window.length < 4) return [];
-    let min = window[0]!;
-    for (const s of window) if (s.scale < min.scale) min = s;
-    // Robust baseline: the second-lowest size in the window (a lone noise trough doesn't count).
-    const sorted = window.map((s) => s.scale).sort((a, b) => a - b);
-    const baseline = sorted[Math.min(1, sorted.length - 1)]!;
-    const growth = Math.log(now.scale / baseline);
+    const span = Math.max(PUSH_RISE_MS, c.frameMs * 3.2);
+    const window = c.history.filter((s) => c.t - s.t <= span && s.t - trackStart >= 300);
+    if (window.length < 3) return [];
     const k = clamp(c.cfg.sensitivity, 0.5, 1.5);
     const threshold = 0.17 / k;
-    this.formingNow = growth > threshold * 0.4;
-    if (growth < threshold || now.t - min.t < 60) {
-      this.above = 0;
-      return [];
+    let min = window[0]!;
+    for (const s of window) if (s.scale < min.scale) min = s;
+    this.formingNow = Math.log(now.scale / min.scale) > threshold * 0.4;
+    // Sustained size: the smallest of the last few frames (~100 ms; fewer on slow cameras), so a
+    // noise spike must persist to count.
+    const h = c.history;
+    const need = c.frameMs <= 50 ? 3 : c.frameMs <= 100 ? 2 : 1;
+    if (h.length < need + 2) return [];
+    let post = Infinity;
+    for (let j = h.length - need; j < h.length; j++) post = Math.min(post, h[j]!.scale);
+    // Rise: the most recent moment the hand was still small — two consecutive samples, so a lone
+    // noise trough can't pose as the start of a push — after the previous push.
+    const small = post / Math.exp(threshold);
+    let from: (typeof h)[number] | null = null;
+    for (let j = h.length - need - 1; j > 0; j--) {
+      const s = h[j]!;
+      if (c.t - s.t > span || s.t - trackStart < 300 || s.t <= this.latchedAt) break;
+      if (s.scale <= small && h[j - 1]!.scale <= small) {
+        from = s;
+        break;
+      }
     }
-    // Sustained: three consecutive frames over the threshold (~100 ms; noise bursts are shorter).
-    if (++this.above < 3) return [];
+    if (!from || now.t - from.t < 60) return [];
+    const growth = Math.log(post / from.scale);
     const openShare = window.filter((s) => s.open && s.facing).length / window.length;
     if (openShare < 0.75) return [];
-    const drift = Math.hypot(now.x - min.x, now.y - min.y) / now.scale;
+    const drift = Math.hypot(now.x - from.x, now.y - from.y) / now.scale;
     if (drift > 0.8) return []; // moving across the frame: a swipe, not a push
     if (now.torso !== null) {
       let minTorso = Infinity;
@@ -290,11 +309,11 @@ class SweepGesture implements Recognizer {
       const a = h[i - 1]!;
       const b = h[i]!;
       const v = Math.hypot(b.x - a.x, b.y - a.y) / b.scale / Math.max(1e-3, (b.t - a.t) / 1000);
-      if (v < 1.5 || c.t - a.t > 450) break;
+      if (v < 1.5 || c.t - a.t > Math.max(450, c.frameMs * 3.2)) break;
       i--;
     }
     const stroke = h.slice(Math.max(0, i - 1));
-    if (stroke.length < 4) return [];
+    if (stroke.length < (c.frameMs > 100 ? 2 : c.frameMs > 50 ? 3 : 4)) return [];
     const first = stroke[0]!;
     // Ego-motion: subtract torso motion when a pose is visible (a camera pan moves both).
     const torsoDx = now.tx !== null && first.tx !== null ? now.tx - first.tx : 0;
@@ -303,18 +322,21 @@ class SweepGesture implements Recognizer {
     const dy = now.y - first.y - torsoDy;
     const scale = Math.max(1e-6, now.scale);
     const disp = Math.hypot(dx, dy) / scale;
-    const secs = Math.max(1e-3, (now.t - first.t) / 1000);
+    // Displacement counts from the resting sample before the stroke; its duration from the first
+    // moving sample (at a slow camera rate the rest interval would otherwise halve the speed).
+    const secs = Math.max(c.frameMs, now.t - stroke[1]!.t) / 1000;
     if (disp < 2.6 / k || disp / secs < 6 / k) return [];
-    // Consistent direction: almost every step of the stroke moves along it.
+    // Consistent direction: almost no step of the stroke moves back against it (the resting
+    // anchor step, which barely moves, is neither for nor against).
     const ux = dx / (Math.hypot(dx, dy) || 1);
     const uy = dy / (Math.hypot(dx, dy) || 1);
-    let along = 0;
+    let against = 0;
     for (let j = 1; j < stroke.length; j++) {
       const a = stroke[j - 1]!;
       const b = stroke[j]!;
-      if ((b.x - a.x) * ux + (b.y - a.y) * uy > 0) along++;
+      if (((b.x - a.x) * ux + (b.y - a.y) * uy) / scale < -0.1) against++;
     }
-    if (along / (stroke.length - 1) < 0.8) return [];
+    if (against / (stroke.length - 1) > 0.2) return [];
     if (stroke.filter((s) => s.open).length / stroke.length < 0.7) return [];
     this.latched = true;
     this.slowSince = null;
@@ -426,12 +448,16 @@ export class GestureEngine {
   private raw: { x: number; y: number; scale: number }[] = [];
   private torsoRaw: number[] = [];
   private thumbUpState = false;
+  /** Hand currently locked (used when the dominant hand is 'any'). */
+  private lockedHand: Handedness | null = null;
   private last: HandFeatures | null = null;
   private lastSeen: number | null = null;
   private trackStart: number | null = null;
   private reacquire = 0;
   private lostReleased = false;
   private aim: [number, number] | null = null;
+  /** Median frame interval of recent tracking (ms); sizes the motion history. */
+  private frameMs = 33;
   private frozenAim: [number, number] | null = null;
   private lastShape: HandShape = 'unknown';
   private rejected = 0;
@@ -485,10 +511,18 @@ export class GestureEngine {
     let best: HandObservation | null = null;
     let bestScore = Infinity;
     let off: HandObservation | null = null;
-    const anchor = poseWrist(frame, this.cfg.dominant, aspect);
+    const dominant = this.cfg.dominant;
+    // With 'any', keep following the hand that was locked; otherwise take the most confident.
+    const want: Handedness | null =
+      dominant !== 'any'
+        ? dominant
+        : (this.lockedHand ??
+          [...frame.hands].sort((a, b) => b.score - a.score)[0]?.handedness ??
+          null);
+    const anchor = want ? poseWrist(frame, want, aspect) : null;
     for (const h of frame.hands) {
       if (h.score < 0.5 || h.landmarks.length !== 21) continue;
-      if (h.handedness !== this.cfg.dominant) {
+      if (h.handedness !== want) {
         off ??= h;
         continue;
       }
@@ -564,6 +598,7 @@ export class GestureEngine {
     let state: TrackState;
     let coasting = false;
     if (f) {
+      this.lockedHand = main!.handedness;
       this.reacquire = 0;
       this.lostReleased = false;
       this.trackStart ??= t;
@@ -599,7 +634,7 @@ export class GestureEngine {
       if (rise < -0.3) this.thumbUpState = true;
       else if (rise > -0.12) this.thumbUpState = false;
       thumbUp = this.thumbUpState;
-      this.raw.push({ x: f.center.x, y: f.center.y, scale: f.scale });
+      this.raw.push({ x: f.center.x, y: f.center.y, scale: f.size });
       if (this.raw.length > 3) this.raw.shift();
       const med = (k: 'x' | 'y' | 'scale') => {
         const v = this.raw.map((r) => r[k]).sort((a, b) => a - b);
@@ -630,7 +665,9 @@ export class GestureEngine {
         tx: tor?.x ?? null,
         ty: tor?.y ?? null,
       });
-      while (this.history.length > 0 && t - this.history[0]!.t > 700) this.history.shift();
+      // Keep ~0.8 s of motion, and at least 6 frames on a slow camera.
+      const keep = Math.max(800, this.frameMs * 6);
+      while (this.history.length > 0 && t - this.history[0]!.t > keep) this.history.shift();
     }
     this.lastShape = shape;
     let offF: HandFeatures | null = null;
@@ -639,7 +676,12 @@ export class GestureEngine {
       offF = handFeatures(off.landmarks, aspect, off.handedness);
       if (offF) offShape = this.offShapes.classify(offF);
     }
-    // Smooth the speed estimate a little (frame-to-frame jitter).
+    const gaps: number[] = [];
+    for (let k = Math.max(1, this.history.length - 6); k < this.history.length; k++)
+      gaps.push(this.history[k]!.t - this.history[k - 1]!.t);
+    gaps.sort((a, b) => a - b);
+    const frameMs = gaps.length > 0 ? gaps[gaps.length >> 1]! : 33;
+    this.frameMs = frameMs;
     const ctx: Ctx = {
       t,
       f,
@@ -652,6 +694,7 @@ export class GestureEngine {
       offShape,
       cfg: this.cfg,
       thumbUp,
+      frameMs,
     };
     for (const r of this.recognizers) events.push(...r.update(ctx));
 
@@ -674,9 +717,20 @@ export class GestureEngine {
       this.frozenAim = null;
     }
     const outAim = this.frozenAim ?? this.aim;
+    const last = this.history[this.history.length - 1];
     return {
       aim: outAim ? [outAim[0], outAim[1]] : null,
       events,
+      hand:
+        f && last && main
+          ? {
+              center: { x: last.x, y: last.y },
+              scale: last.scale,
+              speed,
+              normalZ: f.normal.z,
+              handedness: main.handedness,
+            }
+          : null,
       status: {
         state,
         handsVisible: frame.hands.length,
