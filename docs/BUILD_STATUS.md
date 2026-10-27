@@ -9,7 +9,7 @@ Nothing here is advertised as deployed or device-tested unless the evidence colu
 | 02 Local vertical slice | COMPLETE | `60d901f` | [PHASE-02](progress/PHASE-02.md): full local match loop with real input (E2E: score → win → rematch), 2 simultaneous keyboard adapters, bot, 6 D02 shots, 87 unit + 7 e2e tests, desktop + phone captures |
 | 03 Online multiplayer | COMPLETE (local) — remote leg NOT TESTED | `64a684d` | [PHASE-03](progress/PHASE-03.md): two browser contexts play create → invite → join → ready → goals → identical match digest → rematch through local workerd; refresh resume; forfeit on leave; 11 in-process two-client tests (50/100/200 ms RTT + jitter + 2 % TCP loss, reset/silent-link/restart recovery); 99 unit + 10 e2e tests. Cross-network / physical devices need a deployed Worker (Phase 12 credentials) |
 | 04 Matter/energy physics | COMPLETE (local) | `2b9aaee` | [PHASE-04](progress/PHASE-04.md): R1–R10 each change a scoring trajectory vs a control (golden-hashed fixtures); 14 element tests (Δv, conduction, ice hysteresis, fracture budget, finite gravity, exactly-once events, determinism, 1,000 random sequences, steam counterplay); loadouts end to end (local + online E2E); `/lab` Physics Lab (step/rewind/overlays/material toggles); worst-case element benchmark p99 ≤ 0.9 ms (Node) / 2 ms (local workerd) per 33 ms tick; 126 unit + 13 e2e tests. VFX art pass deferred to 7C |
-| 05 Camera gestures | NOT STARTED | — | — |
+| 05 Camera gestures | COMPLETE (local) — physical devices / live people NOT TESTED | `24fbd69` | [PHASE-05](progress/PHASE-05.md): on-device MediaPipe hand (+ stand-mode pose) landmarks in a module worker → pure gesture engine → the same `ActionIntent`s as keyboard/touch; real model on real hand photos (fake camera) → authoritative casts; gesture suite at 30 → 4 fps (PULSE 80/80 per rate, 0 false casts in 10 min of doubled-noise idle at 30/15/8 fps); a camera-only stand-in scores and rematches; dropout releases holds on the server; online with both seats on camera and no media uplink; denied/blocked → one-tap fallback; 180 unit + 20 e2e tests. Device/lighting/bystander tests and the animated gesture-tutorial silhouettes are owed (Phase 11/D15, Phase 09) |
 | 06 Mobile sensors/control | NOT STARTED | — | — |
 | 07 Visual production | NOT STARTED | — | — |
 | 08 Game depth/balance | NOT STARTED | — | — |
@@ -43,7 +43,12 @@ screenshot-driven visual review.
 - Run `pnpm install && pnpm check` first; `pnpm test:e2e` and `pnpm test:worker` need no secrets.
 - Local dev: `pnpm dev:worker` (port 8787) and `pnpm dev` (port 5173). `apps/room-worker/.dev.vars`
   is copied from `.dev.vars.example` (development-only secret).
-- Earliest incomplete phase: **05** — see the "Next instruction" in docs/progress/PHASE-04.md.
+- Earliest incomplete phase: **06** — see the "Next instruction" in docs/progress/PHASE-05.md.
+- Camera control: `pnpm dev`/`build` first run `scripts/prepare-vision-assets.mjs` (copies the
+  MediaPipe WASM, downloads the two pinned models once, ~14 MB, into the git-ignored
+  `apps/web/public/vision/`). Camera play needs HTTPS or localhost. `pnpm benchmark:gestures`
+  prints the synthetic detection table; `node scripts/capture-camera-ui.mjs <url> <dir> <y4m>`
+  captures the camera UI with the photo-hand fake camera (`scripts/make-hand-video.mjs`).
 - Physics Lab: `pnpm dev` then open `/lab` (e.g. `/lab?fx=R5&t=13&cam=close`); element benchmarks:
   `pnpm benchmark:elements` and `BENCH_SCENARIO=elements pnpm benchmark:worker`.
 - Online play locally: `pnpm dev:worker` + `pnpm dev`, then Online duel → Create room; open
