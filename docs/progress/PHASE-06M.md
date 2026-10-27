@@ -190,10 +190,15 @@ taught, and which mappings they find natural.
   clients see the grip; it fails without the fix.
 - **Browser tests** (`e2e/phase06m-match.spec.ts`, local SwiftShader): a camera player, hands-on
   by default, scores against the bot by gripping, swinging and letting go — no sign or move
-  sent, only aims carrying the hand (3 throws, 1.1 min, local authority at half speed); online,
-  both seats hands-on with the mouse grip the core in turn through the room, both devices see
-  each grip, and the room refuses no intent (1.4 min). The camera tests of the sign scheme now
-  select it explicitly (`hands=0`); the settings test covers the *Hands* group.
+  sent, only aims carrying the hand. In its final form it scored in 3 of 3 runs (0.5–1.1 min,
+  local authority at half speed), each time with one held throw down the middle at 13–21 m/s;
+  in two runs an earlier swing had already lost its grip before the let-go, and the core stayed
+  back. Earlier forms of the player failed: they stopped after too few tries, and let go past
+  the reach limit from off-centre spots. They were fixed in the player (a time budget; a carry
+  to a set-up spot first), not in the rules. Online, both seats hands-on with the mouse grip
+  the core in turn through the room, both devices see each grip, and the room refuses no intent
+  (1.4 min). The camera tests of the sign scheme now select it explicitly (`hands=0`); the
+  settings test covers the *Hands* group.
 - **Not yet:** the bot still plays with discrete moves (Phase 10); the handheld-motion mapping;
   a touch or gamepad player in a match in the browser; anything on a physical device; the
   people study.
