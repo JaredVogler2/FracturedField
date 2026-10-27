@@ -67,6 +67,14 @@ taught, and which mappings they find natural.
   hand drags bodies only where it moves faster than they do; push / pull press away from or draw
   toward the hand. A stale hand, a disconnect, a pause, a goal or a reset lets go. A PULSE or a
   LIFT by the same player takes over from the grip.
+- **Only a described hand acts.** A seat whose input describes no hand (keys, touch without
+  hands-on, the bot) moves a force point, never a hand: it neither sweeps nor pushes. (Found
+  while building M3: as first written, a seat without a hand channel counted as an open hand, so
+  a keyboard force point rushing past the resting core dragged it to 7.75 m/s.)
+- **The hand's velocity is smoothed** (`velocitySmoothing` 0.12 s) before a stroke or a carry
+  follows it, and a stroke fades in from 1.5 to 3 m/s instead of kicking in at the threshold: a
+  15 fps camera's tracking jitter on a hand held still otherwise read as strokes and walked a
+  resting core out of the ring (seen in a browser trace: 3.4 m in 10 s).
 - **Tests** (`packages/sim/test/hand.test.ts`, 12): grip engages above 0.6 (not at 0.5), carries
   the core to the hold height on the hand; swinging −8 → −2 m and opening throws the core along
   +x at > 5 m/s and ≤ 1.35 × the hand's top speed; a light grip (0.5) tracks a swaying hand ≥ 1.8×
@@ -78,11 +86,13 @@ taught, and which mappings they find natural.
   dead zone does nothing, both cost energy; holding still costs ≈ 4/s, a full throw 3–25 energy;
   running out of energy lets go; NaN / ±Infinity / ±1e308 hand values never reach the state;
   the same hand log gives the same state hash, and a checkpoint taken mid-grip continues
-  identically.
+  identically. Plus (14 now): a force point with no hand channel rushing past at 12 m/s leaves the
+  core at rest (< 0.05 m/s; it was 7.75 before the fix), and an open hand held still with ±6 cm
+  of camera-like jitter for 5 s leaves a resting core within 0.1 m (it walked 1.14 m before).
 - **Discrete play unchanged:** the D04 golden fixtures and the 100-tick physics golden hash
   exactly as before (hand state enters the state hash only when present).
 
-### M2 — inputs (core built; adapters next)
+### M2 — inputs (camera, mouse, touch and gamepad built; handheld motion not yet)
 
 - **Camera mapper** (`@ff/gestures → ContinuousMapper`, pure, clocked by frame timestamps): grip
   from each finger's bend between the open palm and the fist (median of 3, 45 ms smoothing);
@@ -91,19 +101,69 @@ taught, and which mappings they find natural.
   the hand was held when it was first seen (or a calibrated neutral), less 4° of tremor, over
   50°. The gesture engine now reports the locked hand's features and knuckle angle.
 - **Intent emitter** (`@ff/controls`): the hand rides on aim intents — clamped, sent on change,
-  re-sent every 100 ms while active (the authority's stale time is 300 ms), sent once more when
-  the hand opens.
+  re-sent every 100 ms while an input describes one, open and still included (the authority's
+  stale time is 300 ms, and only a present hand sweeps); when an input stops describing a hand an
+  open hand is sent once, so whatever it held is let go at once.
+- **Adapters** (`apps/web/src/input`), active when the seat is hands-on (the Hands Lab, the
+  `handsOn` control setting, or `?hands=1`); only the device that owns the aim describes the
+  hand, and a change of device lets go:
+  - *camera* (`CameraController`): every tracked frame feeds the mapper; while an element or pick
+    sign is shown the grip reads 0; fist holds, palm pushes and strokes no longer fire LIFT /
+    PULSE / SWEEP (gripping, pushing and sweeping are the hand's own motion); pausing or losing
+    the camera opens the hand;
+  - *mouse*: the left button closes the hand (ramped at 10/s); the wheel pushes / pulls with an
+    open hand (a rate: it eases back) and, while holding, turns the grip — which stays turned,
+    like a knob, until the hand opens (a first trace showed a twist that eased back within half
+    a second left a thrown core almost spinless); right button PULSE, middle GUARD;
+  - *touch*: a finger that lands within 1.8 m of a body holds it until lifted; on open floor it
+    is an open hand; a second finger turning around the first twists (60° = full);
+  - *gamepad*: RT is an analog grip (it no longer PULSEs; A does), the right stick twists (x) and
+    pushes / pulls (y);
+  - *handheld motion*: not yet (ADR-0009 §4 row unbuilt).
 - **Tests** (`packages/gestures/test/continuous.test.ts` 12, `packages/controls` +1): open → fist
   → open ramps grip through the engage and release grips at 30 / 15 / 8 fps; a relaxed,
   trembling hand stays well below the engage grip; an approach pushes (> 0.5), drawing back
   pulls, holding still settles inside the dead zone; at typical jitter < 5 % of still frames pass
   the push dead zone (at double jitter < 15 %, and weakly); a clockwise turn reads positive for
   either hand anywhere in the frame; a lost hand reads open at once and re-zeroes its twist on
-  return; tremor stays inside the twist dead zone.
+  return; tremor stays inside the twist dead zone. Adapters: the camera mapper's thresholds equal
+  the authority's; closing, pushing and turning a tracked hand become the seat's hand with no LIFT
+  or PULSE fired; a thumbs-up never grips and still casts HEAT; pausing opens the hand; the mouse
+  button grips and the wheel turns the grip, which stays turned until the hand opens; a touch
+  whose pointer can no longer be captured still aims; a finger landing on a body holds it, one on
+  open floor does not; turned off, a seat opens its hand once and then sends none; the pad's
+  trigger and right stick map to grip, twist and push, it takes the seat over, and pausing or
+  unplugging opens the hand.
 
-### M3 — Hands Lab (judge built; page next)
+### M3 — Hands Lab (built; browser evidence below)
 
 - **Task judge** (`apps/web/src/lab/hands-tasks.ts`, pure): *place*, *throw*, *curve* and *clear*
-  judged only from authoritative snapshots and events; tests (6) cover a gentle placement versus
-  rolling through, a throw versus a push, a bent free flight (a bounce ends the measurement)
-  versus a straight one, and a boulder swept out versus carried out.
+  judged only from authoritative snapshots and events, on the authority's clock (snapshot
+  ticks), so a slow or stalling page measures the same as a fast one. A try begins on the first
+  frame that shows the task's bodies where it starts (frames from before the setup are ignored).
+  A throw is a goal scored while the core is still flying from the release — let go at ≥ 3 m/s,
+  not gripped or come to rest since — however long the flight; a curve is such a goal whose free
+  flight bent ≥ 12° before any bounce. Tests (7): a gentle placement versus rolling through;
+  stale frames from before the setup never judged; a long throw counts, a set-down then nudged
+  in or a throw that came to rest does not; a bent flight versus a straight one (a bounce ends
+  the measurement); a boulder swept out versus carried out, and the other boulder never judged.
+- **Page** (`/lab/hands`, or `?mode=lab`): a local authority with `LAB_RULES` (an endless round,
+  no kickoff push, no idle drift; holding and work cost no energy — the lab measures handling,
+  not energy management). Its start screen says one sentence (*"Use your hand to move things"*)
+  and offers every input; tabs for the four tasks (a task's setup lets go of anything held and
+  puts its bodies at rest); a "what the game sees" panel (grip, push, twist, the body held, the
+  input and the camera's tracking state); results (task, tries, seconds to first success,
+  seconds the camera lost the hand, input, time) kept in this browser's storage and exported as
+  JSON only on request; the ring and the lane drawn on the field; no scoreboard.
+- **Browser tests** (`e2e/phase06m.spec.ts`, local SwiftShader, authority at half speed — test
+  runs only): a mouse player completes *place*, *throw*, *curve* (one wheel notch turns the grip)
+  and *clear* (open-hand strokes), and the export holds exactly `id, attempts, seconds,
+  lostSeconds, input, at` per task — 1.5 min; a synthetic camera hand (landmarks through the real
+  gesture engine, mapper and camera controller) completes all four — 1.1 min. The players are
+  closed loops (they time a release by the core's position, and the camera player nudges its aim
+  by eye over the ring), standing in for a person, not measuring one. Building them exposed and
+  fixed: the authority's sweep without a hand (M1 above), camera jitter read as strokes, a mouse
+  twist that faded before the throw, a judge clocked by the page instead of the authority, and a
+  try judged from frames before its setup.
+- **Not covered:** a touch or gamepad player completing the tasks in the browser (their adapters
+  have unit tests only), and the people study.

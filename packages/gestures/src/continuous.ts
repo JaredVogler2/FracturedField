@@ -65,6 +65,18 @@ export const DEFAULT_CONTINUOUS_CONFIG: ContinuousConfig = {
   twistTau: 80,
 };
 
+/**
+ * The authority's hand thresholds this mapper is tuned against (DEFAULT_RULES.hand in
+ * @ff/game-data — this package stays dependency-free; the web app's tests check they agree): a
+ * still, relaxed or trembling hand must stay below the engage grip and inside the dead zones.
+ */
+export const AUTHORITY_THRESHOLDS = {
+  engageGrip: 0.6,
+  releaseGrip: 0.35,
+  pushDeadZone: 0.15,
+  twistDeadZone: 0.12,
+} as const;
+
 export interface HandChannel {
   readonly grip: number;
   readonly push: number;

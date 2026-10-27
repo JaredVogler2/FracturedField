@@ -1,12 +1,15 @@
 import { DEFAULT_ABILITIES } from '@ff/game-data';
 import {
   Calibrator,
+  ContinuousMapper,
   GestureEngine,
+  OPEN_HAND,
   type Calibration,
   type GestureConfig,
   type GestureEvent,
   type GestureOutput,
   type Handedness,
+  type HandShape,
   type LandmarksFrame,
 } from '@ff/gestures';
 import type { ActionEdge } from '@ff/controls';
@@ -19,14 +22,25 @@ export type CameraControlMode = 'calibrate' | 'practice' | 'play';
 
 export { screenAimToArena } from '../screen-aim';
 
+/** Signs that name an element or a pick: while one is shown, the hand never grips. */
+const SIGN_SHAPES: ReadonlySet<HandShape> = new Set(['vee', 'thumb', 'point', 'three', 'ok']);
+/** Discrete moves the hand's own motion replaces in hands-on play (ADR-0009). */
+const CONTINUOUS_REPLACES: ReadonlySet<string> = new Set(['pulse', 'lift', 'sweep']);
+
 /**
  * Camera input adapter for one local seat. Landmark frames (from the on-device vision worker, or
  * synthetic ones in tests) go through the gesture engine; the result drives the seat exactly like
  * keyboard or touch: the same reticle, the same ActionIntents, the same validation by the
  * authority. During calibration and practice nothing is sent to the game.
+ *
+ * Hands-on (the seat's `handsOn`, ADR-0009): the tracked hand's closure, approach and wrist turn
+ * become the seat's continuous hand (grip, push, twist) every frame; fist holds, palm pushes and
+ * strokes no longer fire LIFT / PULSE / SWEEP — gripping, pushing and sweeping are the hand's own
+ * motion now. Element and pick signs stay, and never grip while they are shown.
  */
 export class CameraController {
   readonly engine: GestureEngine;
+  private readonly continuous = new ContinuousMapper();
   private seat: SeatInput | null = null;
   private calibrator: Calibrator | null = null;
   private mode: CameraControlMode = 'play';
@@ -102,6 +116,8 @@ export class CameraController {
   private releaseHolds(): void {
     const now = performance.now();
     this.apply(this.engine.cancel(now), now);
+    this.continuous.reset();
+    this.seat?.setHand(OPEN_HAND, 'camera');
   }
 
   feed(input: LandmarksFrame): GestureOutput | null {
@@ -150,6 +166,12 @@ export class CameraController {
       this.seat.setReticle(p.x, p.z);
       this.seat.claim('camera', now);
     }
+    if (this.seat.handsOn) {
+      const h = out.hand;
+      const channel = this.continuous.update(h?.features ?? null, h?.roll ?? null, frame.t);
+      const signing = SIGN_SHAPES.has(out.status.shape);
+      this.seat.setHand(signing ? { ...channel, grip: 0 } : channel, 'camera');
+    }
     this.apply(out.events, now);
     return out;
   }
@@ -158,6 +180,7 @@ export class CameraController {
     const seat = this.seat;
     if (!seat || this.mode !== 'play') return;
     for (const e of events) {
+      if (seat.handsOn && CONTINUOUS_REPLACES.has(e.action)) continue;
       const edge = this.toEdge(e, seat);
       if (edge) seat.edge(edge, now, 'camera');
     }

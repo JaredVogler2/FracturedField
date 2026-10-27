@@ -25,6 +25,17 @@ export type ToSimWorker =
       readonly timeScale?: number;
       /** Advanced-move picks per seat. */
       readonly loadouts?: readonly [readonly AbilityId[], readonly AbilityId[]];
+      /** The Hands Lab sandbox: lab rules; the empty second seat counts as ready. */
+      readonly lab?: boolean;
+    }
+  | {
+      /** Hands Lab only: set up a task (the core, and a boulder moved into place). */
+      readonly type: 'labPlace';
+      readonly core: readonly [number, number];
+      readonly boulder?: {
+        readonly from: readonly [number, number];
+        readonly to: readonly [number, number];
+      };
     }
   | { readonly type: 'intent'; readonly slot: PlayerSlot; readonly intent: ActionIntent }
   | {

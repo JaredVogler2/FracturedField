@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  AUTHORITY_THRESHOLDS,
   ContinuousMapper,
   knuckleRoll,
   type HandChannel,
@@ -15,11 +16,7 @@ import {
 import { aspectCorrect, handFeatures } from '../src/features.js';
 import { SHAPES, timeline, type Key } from '../src/synthetic.js';
 
-/**
- * The authority's thresholds (DEFAULT_RULES.hand in @ff/game-data; this package stays
- * dependency-free, and the web app's tests check the two agree).
- */
-const H = { engageGrip: 0.6, releaseGrip: 0.35, pushDeadZone: 0.15, twistDeadZone: 0.12 };
+const H = AUTHORITY_THRESHOLDS;
 const FPS = [30, 15, 8] as const;
 
 interface Sample extends HandChannel {

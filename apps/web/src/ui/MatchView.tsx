@@ -8,6 +8,9 @@ import { useHud } from '../game/store';
 import { useHistory } from '../game/history';
 import { resolveQuality, useSettings } from '../game/settings';
 import { WorkerSession } from '../net/worker-session';
+import { HandsLabPanel } from '../lab/HandsLabPanel';
+import { LabMarkers } from '../lab/LabMarkers';
+import type { HandsTask } from '../lab/hands-tasks';
 import { RemoteSession } from '../net/remote-session';
 import { roomServiceUrl, roomSocketUrl } from '../net/room-service';
 import { forgetSeat, updateSeatTicket, type StoredSeat } from '../net/seat-store';
@@ -80,7 +83,9 @@ export type MatchMode =
   | { kind: 'attract' }
   | { kind: 'bot'; difficulty: BotDifficulty }
   | { kind: 'duel' }
-  | { kind: 'online'; seat: StoredSeat };
+  | { kind: 'online'; seat: StoredSeat }
+  /** The Hands Lab sandbox (ADR-0009): no opponent, hands-on control, physical tasks. */
+  | { kind: 'lab' };
 
 interface ModeSetup {
   readonly localSlots: readonly PlayerSlot[];
@@ -128,6 +133,14 @@ function setupFor(mode: MatchMode): ModeSetup {
         ],
         labels: ['PLAYER 1', 'PLAYER 2'],
       };
+    case 'lab':
+      return {
+        localSlots: [0],
+        bots: [],
+        seats: [{ slot: 0, bindings: SOLO_BINDINGS, pointer: true, gamepad: true }],
+        hudSeats: [{ slot: 0, label: 'YOU · HANDS LAB', bindings: SOLO_BINDINGS, local: true }],
+        labels: ['YOU', '—'],
+      };
     case 'online': {
       const me = mode.seat.slot;
       const rival: PlayerSlot = me === 0 ? 1 : 0;
@@ -160,6 +173,12 @@ function startingMode(saved: ControlMode | null, caps: Capabilities): ControlMod
  * One match (or the attract demo behind the menu): owns the GameClient, the local authority
  * worker and the input manager, and renders scene + HUD + overlays.
  */
+/** Puts a Hands Lab task's bodies at its start (the clear task borrows the north boulder). */
+function labPlacer(session: WorkerSession): (task: HandsTask) => void {
+  return (task) =>
+    session.labPlace(task.core, task.lane ? { from: [0, -8.2], to: task.lane.boulder } : undefined);
+}
+
 /**
  * Test runs only (`?test=1&timescale=0.5`): the local authority's wall-clock speed. A scripted
  * stand-in whose every reaction goes through a software-rendered page reacts many times slower
@@ -205,6 +224,8 @@ export function MatchView({
   );
   const session = useRef<SessionDriver | null>(null);
   const [remote, setRemote] = useState<RemoteSession | null>(null);
+  /** The Hands Lab's local authority (task setup goes to it). */
+  const [labSession, setLabSession] = useState<WorkerSession | null>(null);
   const input = useRef<InputManager | null>(null);
   const [started, setStarted] = useState(mode.kind === 'attract');
   const [paused, setPaused] = useState(false);
@@ -247,6 +268,22 @@ export function MatchView({
   useEffect(() => {
     if (manager && soloSlot !== null) manager.setBindings(soloSlot, soloBindings);
   }, [manager, soloSlot, soloBindings]);
+  const labPlace = useMemo(() => (labSession ? labPlacer(labSession) : null), [labSession]);
+  // What the Hands Lab's "what the game sees" meters read (stable, so its loop is not restarted).
+  const labHand = useCallback(() => manager?.seats.get(0)?.hand ?? null, [manager]);
+  const labSource = useCallback(() => manager?.seats.get(0)?.source ?? 'keyboard', [manager]);
+  // Hands-on control (ADR-0009): the solo player's input describes a hand. `?hands=1` (any
+  // build) turns it on for this page without changing the saved setting.
+  const handsOn = useMemo(
+    () =>
+      mode.kind === 'lab' ||
+      controls.handsOn ||
+      new URLSearchParams(window.location.search).get('hands') === '1',
+    [mode.kind, controls.handsOn],
+  );
+  useEffect(() => {
+    if (manager && soloSlot !== null) manager.setHandsOn(soloSlot, handsOn);
+  }, [manager, soloSlot, handsOn]);
   const matchEnd = useHud((s) => s.matchEnd);
   const phase = useHud((s) => s.match?.phase);
   const lobby = useHud((s) => s.lobby);
@@ -297,6 +334,7 @@ export function MatchView({
       case 'duel':
         return { 0: loadout, 1: loadoutP2 };
       case 'bot':
+      case 'lab':
         return { 0: loadout };
       case 'online':
         return mode.seat.slot === 0 ? { 0: loadout } : { 1: loadout };
@@ -395,14 +433,17 @@ export function MatchView({
       setRemote(r);
       s = r;
     } else {
-      s = new WorkerSession(client, {
+      const w = new WorkerSession(client, {
         localSlots: setup.localSlots,
         bots: setup.bots,
         autoStart: mode.kind === 'attract',
         fast,
         ...(seed !== undefined ? { seed } : {}),
         ...(timeScale !== undefined ? { timeScale } : {}),
+        ...(mode.kind === 'lab' ? { lab: true } : {}),
       });
+      if (mode.kind === 'lab') setLabSession(w);
+      s = w;
     }
     session.current = s;
     client.attach(s);
@@ -616,10 +657,19 @@ export function MatchView({
               onManager={setManager}
             />
           ) : null}
+          {mode.kind === 'lab' ? <LabMarkers /> : null}
         </GameScene>
+        {mode.kind === 'lab' && started && manager && labPlace ? (
+          <HandsLabPanel client={client} place={labPlace} hand={labHand} source={labSource} />
+        ) : null}
         {mode.kind !== 'attract' ? (
           <>
-            <Hud seats={hudSeats} denied={denied} mirror={mySlot === 1} />
+            <Hud
+              seats={hudSeats}
+              denied={denied}
+              mirror={mySlot === 1}
+              scoreboard={mode.kind !== 'lab'}
+            />
             <Banners client={client} />
             <DenyToast
               client={client}
@@ -805,6 +855,38 @@ function ReadyGate({
   useEffect(() => {
     startRef.current?.focus({ preventScroll: true });
   }, []);
+  if (mode.kind === 'lab') {
+    // The study protocol (PHASE-06M) gives players one sentence and no demonstration.
+    return (
+      <div className="modal-backdrop soft">
+        <div className="panel ready-gate" data-testid="ready-gate">
+          <div className="me-eyebrow">HANDS LAB</div>
+          <div className="me-title">Use your hand to move things</div>
+          <p className="hints">Try each task. Your results stay on this device.</p>
+          <ControlPicker
+            caps={caps}
+            value={controlMode}
+            onChange={onControlMode}
+            cameraReady={cameraReady}
+          />
+          <div className="row">
+            <button
+              className="btn primary big"
+              onClick={onStart}
+              data-testid="start-match"
+              disabled={controlMode === 'camera' && !cameraReady}
+              ref={startRef}
+            >
+              Start
+            </button>
+            <button className="btn" onClick={onExit}>
+              Back
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="modal-backdrop soft">
       <div className="panel ready-gate" data-testid="ready-gate">

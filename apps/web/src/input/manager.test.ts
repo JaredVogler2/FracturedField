@@ -4,8 +4,8 @@
  * then on every intent carries the new mode's source. A minimal event-target DOM stands in for
  * the browser: the manager only adds and removes listeners on window, document and the canvas.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { ActionIntent } from '@ff/protocol';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ActionIntent, WorldSnapshot } from '@ff/protocol';
 import { SOLO_BINDINGS } from './bindings';
 import { InputManager } from './manager';
 import type { ControlMode } from './capabilities';
@@ -99,5 +99,105 @@ describe('InputManager control modes', () => {
     (g.document as EventTarget).dispatchEvent(new Event('visibilitychange'));
     expect(last()).toMatchObject({ action: 'lift', phase: 'end' });
     m.dispose();
+  });
+});
+
+describe('hands-on control (ADR-0009)', () => {
+  /** A controllable clock and a fixed screen → arena mapping (no WebGL camera in unit tests). */
+  async function handsRig(mode?: ControlMode, pointer = false) {
+    const { view } = await import('../render/view');
+    let now = 1000;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const project = vi
+      .spyOn(view, 'screenToArena')
+      .mockImplementation((x: number, y: number) => ({ x: -20 + x / 10, z: -12 + y / 10 }));
+    const sent: ActionIntent[] = [];
+    const canvas = new EventTarget() as unknown as HTMLElement;
+    const m = new InputManager(
+      [{ slot: 0, bindings: SOLO_BINDINGS, pointer, ...(mode ? { mode } : {}) }],
+      canvas,
+      (_slot, intent) => sent.push(intent),
+    );
+    m.setHandsOn(0, true);
+    const ev = (type: string, init: Record<string, unknown>) =>
+      Object.assign(new Event(type), { pointerId: 1, button: 0, ...init });
+    const frames = (ms: number, snapshot: WorldSnapshot | null = null) => {
+      for (let t = 0; t < ms; t += 16) {
+        now += 16;
+        m.update(snapshot);
+      }
+    };
+    const hands = () => sent.filter((i) => i.action === 'aim' && i.hand).map((i) => i.hand!);
+    const restore = () => {
+      m.dispose();
+      clock.mockRestore();
+      project.mockRestore();
+    };
+    return { m, sent, canvas, ev, frames, hands, restore };
+  }
+
+  it('mouse: holding the button closes the hand; the wheel turns the grip, which stays turned', async () => {
+    const r = await handsRig(undefined, true);
+    r.canvas.dispatchEvent(
+      r.ev('pointermove', { pointerType: 'mouse', clientX: 140, clientY: 120 }),
+    );
+    r.canvas.dispatchEvent(r.ev('pointerdown', { pointerType: 'mouse', button: 0 }));
+    r.frames(200);
+    expect(r.hands().at(-1)).toMatchObject({ grip: 1, push: 0 });
+    expect(r.sent.every((i) => i.action === 'aim')).toBe(true); // no PULSE from the left button
+    r.canvas.dispatchEvent(
+      Object.assign(new Event('wheel'), { deltaY: -100, preventDefault: () => {} }),
+    );
+    r.frames(50);
+    expect(r.hands().at(-1)!.twist).toBeCloseTo(0.4, 6);
+    r.frames(2000);
+    expect(r.hands().at(-1)!.twist).toBeCloseTo(0.4, 6); // held: the grip stays turned
+    (globalThis.window as unknown as EventTarget).dispatchEvent(
+      r.ev('pointerup', { pointerType: 'mouse', button: 0 }),
+    );
+    r.frames(2000);
+    expect(r.hands().at(-1)).toMatchObject({ grip: 0, twist: 0 }); // let go; the hand eases back
+    r.restore();
+  });
+
+  it('touch: a finger that lands on a body holds it until lifted; on open floor it does not', async () => {
+    const r = await handsRig('touch');
+    const core = { id: 1, kind: 'core', owner: -1, p: [-6, 1.2, 0], q: [0, 0, 0, 1], v: [0, 0, 0] };
+    const player = { m: [-15, 0] };
+    const snap = { entities: [core], players: [player, player] } as unknown as WorldSnapshot;
+    r.frames(32, snap);
+    // (−6, 0) on the arena is screen (140, 120) in this rig.
+    r.canvas.dispatchEvent(
+      r.ev('pointerdown', { pointerType: 'touch', clientX: 140, clientY: 120 }),
+    );
+    r.frames(100, snap);
+    expect(r.hands().at(-1)).toMatchObject({ grip: 1 });
+    (globalThis.window as unknown as EventTarget).dispatchEvent(
+      r.ev('pointerup', { pointerType: 'touch' }),
+    );
+    r.frames(100, snap);
+    expect(r.hands().at(-1)).toMatchObject({ grip: 0 });
+    r.canvas.dispatchEvent(r.ev('pointerdown', { pointerType: 'touch', clientX: 60, clientY: 40 }));
+    r.frames(100, snap);
+    expect(r.hands().at(-1)).toMatchObject({ grip: 0 });
+    r.restore();
+  });
+
+  it('turned off, the seat opens its hand once (what it held is let go), then sends no hand', async () => {
+    const r = await handsRig(undefined, true);
+    r.canvas.dispatchEvent(
+      r.ev('pointermove', { pointerType: 'mouse', clientX: 140, clientY: 120 }),
+    );
+    r.canvas.dispatchEvent(r.ev('pointerdown', { pointerType: 'mouse', button: 0 }));
+    r.frames(200);
+    expect(r.hands().at(-1)!.grip).toBe(1);
+    r.m.setHandsOn(0, false);
+    const n = r.sent.length;
+    r.frames(600);
+    const after = r.sent.slice(n).filter((i) => i.action === 'aim');
+    expect(after.length).toBeGreaterThan(1);
+    expect(after[0]!.hand).toEqual({ grip: 0, push: 0, twist: 0 });
+    expect(after.slice(1).every((i) => i.hand === undefined)).toBe(true);
+    r.restore();
   });
 });

@@ -56,10 +56,13 @@ export function Hud({
   seats,
   denied,
   mirror = false,
+  scoreboard = true,
 }: {
   seats: readonly HudSeat[];
   denied: ReadonlySet<string>;
   mirror?: boolean;
+  /** The score, clock and rounds (off in the Hands Lab, which has no match to keep). */
+  scoreboard?: boolean;
 }) {
   const match = useHud((s) => s.match);
   const players = useHud((s) => s.players);
@@ -67,7 +70,7 @@ export function Hud({
   const [left, right]: [PlayerSlot, PlayerSlot] = mirror ? [1, 0] : [0, 1];
   return (
     <div className="hud" data-testid="hud">
-      <div className="scoreboard" role="status" aria-live="polite">
+      <div className="scoreboard" role="status" aria-live="polite" hidden={!scoreboard}>
         <div className="sb-team sb-left" style={{ ['--team' as string]: teamOf(left).color }}>
           <Glyph slot={left} size={22} />
           <span className="sb-name">{teamOf(left).name}</span>

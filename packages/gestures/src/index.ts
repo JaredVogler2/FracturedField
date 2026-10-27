@@ -12,6 +12,7 @@ export {
 } from './calibration.js';
 export { GestureEngine, DEFAULT_GESTURE_CONFIG, type GestureConfig } from './engine.js';
 export {
+  AUTHORITY_THRESHOLDS,
   ContinuousMapper,
   DEFAULT_CONTINUOUS_CALIBRATION,
   DEFAULT_CONTINUOUS_CONFIG,

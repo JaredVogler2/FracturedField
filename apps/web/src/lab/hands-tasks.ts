@@ -5,14 +5,16 @@
  * player's own input, so a camera, a mouse and a touch screen are measured the same way.
  *
  * - **place** — set the core down inside a ring (grip, carry, a gentle release);
- * - **throw** — throw the core into the rival gate (swing and let go: a goal right after a release);
+ * - **throw** — throw the core into the rival gate (swing and let go: it scores still flying from
+ *   the release);
  * - **curve** — throw it so its path bends in flight (twist while holding);
  * - **clear** — sweep a boulder out of a lane with an open hand (no grip on it).
  *
- * Pure: frames and times are passed in.
+ * Pure: frames are passed in, and time is the authority's own (snapshot ticks), so a slow or
+ * stalling page measures the same as a fast one.
  */
 import { DEFAULT_RULES, MERIDIAN_ARENA } from '@ff/game-data';
-import type { EntityId, GameEvent, WorldSnapshot } from '@ff/protocol';
+import type { EntityId, EntitySnapshot, GameEvent, WorldSnapshot } from '@ff/protocol';
 
 export type HandsTaskId = 'place' | 'throw' | 'curve' | 'clear';
 
@@ -83,18 +85,26 @@ export interface TaskResult {
 
 /** Heading change (degrees) in free flight that counts as a bent path. */
 export const CURVE_DEGREES = 12;
-/** A goal counts as a throw when the core was let go of no more than this long before (s). */
-const THROW_WINDOW_S = 3;
+/** Letting go of the core at this speed (m/s) or more throws it; slower is setting it down. */
+export const THROW_SPEED = 3;
+/** A thrown core that slows below this (m/s) has stopped flying: a later goal is not the throw. */
+const REST_SPEED = 1;
+
+/** How close (m) a task's body must be to its start for the try to begin. */
+const IN_PLACE = 0.6;
 
 /**
  * Judges one task from authoritative frames. `update` returns true on the first frame the task is
- * complete; later frames change nothing.
+ * complete; later frames change nothing. A try begins — and its clock starts — on the first frame
+ * that shows the task's bodies where it starts (frames from before the setup are ignored).
  */
 export class TaskJudge {
   private attempts = 0;
+  private startedAt: number | null = null;
   private doneAt: number | null = null;
   private placedSince: number | null = null;
-  private releasedAt: number | null = null;
+  /** The core is flying from a throw: let go fast, not gripped or come to rest since. */
+  private flying = false;
   /** Free-flight heading after the last release (radians), and the largest turn since. */
   private flightHeading: number | null = null;
   private flightTurn = 0;
@@ -107,8 +117,8 @@ export class TaskJudge {
 
   constructor(
     readonly task: HandsTask,
-    private readonly startedAt: number,
     private readonly slot: 0 | 1 = 0,
+    private readonly tickRate: number = DEFAULT_RULES.match.tickRate,
   ) {}
 
   get done(): boolean {
@@ -119,28 +129,40 @@ export class TaskJudge {
     return {
       id: this.task.id,
       attempts: this.attempts,
-      seconds: this.doneAt === null ? null : (this.doneAt - this.startedAt) / 1000,
+      seconds:
+        this.doneAt === null || this.startedAt === null
+          ? null
+          : (this.doneAt - this.startedAt) / 1000,
       lostSeconds: this.lostMs / 1000,
     };
   }
 
   /** Time (ms) the camera reported the hand lost since the last call. */
   addLost(ms: number): void {
-    if (!this.done) this.lostMs += Math.max(0, ms);
+    if (!this.done && this.startedAt !== null) this.lostMs += Math.max(0, ms);
   }
 
-  update(s: WorldSnapshot, events: readonly GameEvent[], now: number): boolean {
+  update(s: WorldSnapshot, events: readonly GameEvent[]): boolean {
     if (this.done) return false;
+    const now = (s.tick * 1000) / this.tickRate;
     const core = s.entities.find((e) => e.kind === 'core');
     if (!core) return false;
+    if (this.startedAt === null) {
+      if (this.inPlace(s, core)) this.startedAt = now;
+      return false;
+    }
     for (const e of events) {
       if (e.type === 'grip' && e.slot === this.slot) {
         if (e.phase === 'start') {
           this.gripped = e.entity;
-          if (e.entity === core.id) this.attempts += this.task.id === 'clear' ? 0 : 1;
+          if (e.entity === core.id) {
+            this.attempts += this.task.id === 'clear' ? 0 : 1;
+            this.flying = false;
+          }
         } else {
           if (e.entity === core.id) {
-            this.releasedAt = now;
+            const speed = Math.hypot(e.v[0], e.v[1], e.v[2]);
+            this.flying = speed >= THROW_SPEED;
             this.flightHeading = Math.hypot(e.v[0], e.v[2]) > 2 ? Math.atan2(e.v[2], e.v[0]) : null;
             this.flightTurn = 0;
           }
@@ -148,12 +170,14 @@ export class TaskJudge {
         }
       }
       if (e.type === 'impact' && (e.a === core.id || e.b === core.id)) this.flightHeading = null;
-      if (e.type === 'goal' && e.scorer === this.slot && this.thrown(now)) {
+      if (e.type === 'goal' && e.scorer === this.slot && this.flying) {
         if (this.task.id === 'throw') return this.finish(now);
         if (this.task.id === 'curve' && this.flightTurn >= (CURVE_DEGREES * Math.PI) / 180)
           return this.finish(now);
       }
     }
+    if (this.flying && Math.hypot(core.v[0], core.v[1], core.v[2]) < REST_SPEED)
+      this.flying = false;
     switch (this.task.id) {
       case 'place':
         return this.judgePlace(core, s, now);
@@ -164,10 +188,6 @@ export class TaskJudge {
       case 'clear':
         return this.judgeClear(s, now);
     }
-  }
-
-  private thrown(now: number): boolean {
-    return this.releasedAt !== null && now - this.releasedAt <= THROW_WINDOW_S * 1000;
   }
 
   private trackFlight(core: WorldSnapshot['entities'][number]): void {
@@ -201,20 +221,21 @@ export class TaskJudge {
     return false;
   }
 
+  /** The task's bodies are where it starts (the clear task's boulder is identified here). */
+  private inPlace(s: WorldSnapshot, core: EntitySnapshot): boolean {
+    const near = (e: EntitySnapshot, [x, z]: readonly [number, number]) =>
+      Math.hypot(e.p[0] - x, e.p[2] - z) < IN_PLACE;
+    if (!near(core, this.task.core)) return false;
+    const lane = this.task.lane;
+    if (!lane) return true;
+    const b = s.entities.find((e) => e.kind === 'boulder' && near(e, lane.boulder));
+    if (!b) return false;
+    this.boulderId = b.id;
+    return true;
+  }
+
   private judgeClear(s: WorldSnapshot, now: number): boolean {
     const lane = this.task.lane!;
-    if (this.boulderId < 0) {
-      // The boulder nearest the lane's start position is the one to clear.
-      let best = Infinity;
-      for (const e of s.entities) {
-        if (e.kind !== 'boulder') continue;
-        const d = Math.hypot(e.p[0] - lane.boulder[0], e.p[2] - lane.boulder[1]);
-        if (d < best) {
-          best = d;
-          this.boulderId = e.id;
-        }
-      }
-    }
     const b = s.entities.find((e) => e.id === this.boulderId);
     if (!b) return false;
     const moving = Math.hypot(b.v[0], b.v[2]) > 1;
