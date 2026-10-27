@@ -34,7 +34,18 @@ export interface BoulderObstacle {
   readonly material: MaterialId;
 }
 
-export type ObstacleDef = PillarObstacle | BoulderObstacle;
+/** Steel sphere: the only metal body MAGNETIZE and energized charge act on. */
+export interface LodestoneObstacle {
+  readonly kind: 'lodestone';
+  readonly id: string;
+  readonly x: number;
+  readonly z: number;
+  readonly radius: number;
+  readonly mass: number;
+  readonly material: MaterialId;
+}
+
+export type ObstacleDef = PillarObstacle | BoulderObstacle | LodestoneObstacle;
 
 export interface ArenaLayout {
   readonly id: string;
@@ -122,6 +133,26 @@ export const MERIDIAN_ARENA: ArenaLayout = {
       radius: 0.75,
       mass: 22,
       material: 'basaltFractured',
+    },
+    // Behind the boulders, against the side walls: neutral metal either player can magnetize or
+    // energize with CHARGE to bend a passing shot (mirror-symmetric in both axes).
+    {
+      kind: 'lodestone',
+      id: 'lodestone-n',
+      x: 0,
+      z: -10.9,
+      radius: 0.55,
+      mass: 16,
+      material: 'steel',
+    },
+    {
+      kind: 'lodestone',
+      id: 'lodestone-s',
+      x: 0,
+      z: 10.9,
+      radius: 0.55,
+      mass: 16,
+      material: 'steel',
     },
   ],
   spawnX: 15,

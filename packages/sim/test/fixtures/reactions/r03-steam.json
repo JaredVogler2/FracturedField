@@ -1,0 +1,24 @@
+{
+  "id": "R3",
+  "title": "water + heat → steam floats the core (and veils it) over a guard",
+  "seed": 5,
+  "ticks": 220,
+  "script": [
+    { "t": 0, "place": "core", "p": [3.2, 1.15, 0] },
+    { "t": 55, "slot": 1, "act": "guard", "at": [11, 0], "dir": [1, 0] },
+    { "t": 56, "slot": 0, "act": "pulse", "at": [1.4, 0] }
+  ],
+  "variants": {
+    "control": { "expect": { "notGoal": 0, "reactions": { "boil": 0 }, "coreVeiled": false } },
+    "reaction": {
+      "pools": [{ "owner": 0, "x": 3.2, "z": 0, "r": 2.2, "depth": 0.8 }],
+      "script": [{ "t": 1, "slot": 0, "act": "infuse", "at": [1.6, 0], "modifier": 1 }],
+      "expect": {
+        "goal": 0,
+        "reactions": { "boil": 1 },
+        "coreVeiled": true,
+        "maxCoreHeight": { "atLeast": 2.5 }
+      }
+    }
+  }
+}

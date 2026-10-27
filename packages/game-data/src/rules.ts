@@ -1,3 +1,4 @@
+import { DEFAULT_ELEMENTS, type ElementRules } from './elements.js';
 /**
  * Match-level rules. All durations are expressed in seconds here and converted to integer
  * ticks by the simulation (`secondsToTicks`). Never read wall-clock time in the simulation.
@@ -94,6 +95,7 @@ export interface GameRules {
   readonly core: CoreRules;
   readonly manipulator: ManipulatorRules;
   readonly network: NetworkRules;
+  readonly elements: ElementRules;
   readonly gravity: number;
 }
 
@@ -157,6 +159,7 @@ export const DEFAULT_RULES: GameRules = {
     lobbyIdleSeconds: 600,
     roomTtlSeconds: 3600,
   },
+  elements: DEFAULT_ELEMENTS,
   gravity: 9.81,
 };
 

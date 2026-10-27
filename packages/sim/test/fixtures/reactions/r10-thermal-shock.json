@@ -1,0 +1,22 @@
+{
+  "id": "R10",
+  "title": "heated then quenched stone is weakened: the shot it would deflect smashes through",
+  "seed": 5,
+  "ticks": 240,
+  "script": [
+    { "t": 0, "place": "boulder:0", "p": [-6, 0.75, 6] },
+    { "t": 60, "place": "boulder:0", "p": [8, 0.75, 0] },
+    { "t": 62, "place": "core", "p": [3.5, 1.15, 0] },
+    { "t": 62, "slot": 0, "act": "pulse", "at": [1.5, 0] }
+  ],
+  "variants": {
+    "control": { "expect": { "notGoal": 0, "reactions": { "quench": 0, "fracture": 0 } } },
+    "reaction": {
+      "script": [
+        { "t": 1, "slot": 0, "act": "infuse", "at": [-6, 6], "modifier": 1 },
+        { "t": 28, "slot": 0, "act": "infuse", "at": [-6, 6], "modifier": 0 }
+      ],
+      "expect": { "goal": 0, "reactions": { "quench": 1, "fracture": 1 } }
+    }
+  }
+}

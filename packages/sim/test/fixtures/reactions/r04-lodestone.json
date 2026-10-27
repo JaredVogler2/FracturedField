@@ -1,0 +1,18 @@
+{
+  "id": "R4",
+  "title": "metal + charge → an energized lodestone bends a passing shot",
+  "seed": 5,
+  "ticks": 200,
+  "script": [
+    { "t": 0, "place": "lodestone:0", "p": [4.6, 0.55, 2.4] },
+    { "t": 12, "place": "core", "p": [3.0, 1.15, 0] },
+    { "t": 12, "slot": 0, "act": "pulse", "at": [1.4, 0] }
+  ],
+  "variants": {
+    "control": { "expect": { "goal": 0, "reactions": { "energize": 0 } } },
+    "reaction": {
+      "script": [{ "t": 2, "slot": 0, "act": "charge", "at": [1.9, 2.4] }],
+      "expect": { "notGoal": 0, "reactions": { "energize": 1 } }
+    }
+  }
+}

@@ -58,7 +58,7 @@ export interface ActionIntent {
   readonly source: InputSource;
 }
 
-export const ENTITY_KINDS = ['core', 'boulder', 'guard', 'shard', 'ice'] as const;
+export const ENTITY_KINDS = ['core', 'boulder', 'guard', 'shard', 'ice', 'lodestone'] as const;
 export type EntityKind = (typeof ENTITY_KINDS)[number];
 
 export interface EntitySnapshot {
@@ -71,6 +71,19 @@ export interface EntitySnapshot {
   readonly v: Vec3;
   /** Remaining lifetime in ticks for transient entities, -1 if permanent. */
   readonly ttl: number;
+  /* Authoritative element state, present only when not neutral (keeps snapshots small). */
+  /** Wetness 0..1. */
+  readonly w?: number;
+  /** Temperature proxy (°C, rounded) when away from ambient. */
+  readonly h?: number;
+  /** Electric charge 0..1 (transient). */
+  readonly c?: number;
+  /** 1 while inside steam: the server marks the body as veiled (aim previews are withheld). */
+  readonly veil?: 1;
+  /** 1 while thermally shocked (weakened stone). */
+  readonly sh?: 1;
+  /** Remaining energized ticks of an electromagnet (lodestone). */
+  readonly en?: number;
 }
 
 export interface PlayerSnapshot {
@@ -87,8 +100,16 @@ export interface PlayerSnapshot {
   readonly connected: boolean;
 }
 
-export const EFFECT_KINDS = ['sweep'] as const;
+export const EFFECT_KINDS = ['sweep', 'pool', 'steam', 'flame', 'well', 'magnet'] as const;
 export type EffectKind = (typeof EFFECT_KINDS)[number];
+
+/** EffectSnapshot.f bit flags. */
+export const EFFECT_FLAG = {
+  /** A pool that is currently an ice plate (collider present). */
+  ICE: 1,
+  /** A pool carrying an electric charge (shock zone). */
+  ELECTRIFIED: 2,
+} as const;
 
 export interface EffectSnapshot {
   readonly id: number;
@@ -102,6 +123,12 @@ export interface EffectSnapshot {
   readonly s: number;
   /** Unit wind direction on the arena plane (world x, z). */
   readonly d: Vec2;
+  /** Strength 0..1: pool depth, steam density, well/magnet intensity. */
+  readonly m?: number;
+  /** Temperature proxy (°C, rounded) of a pool or flame. */
+  readonly T?: number;
+  /** EFFECT_FLAG bits. */
+  readonly f?: number;
 }
 
 export const MATCH_PHASES = [
@@ -188,7 +215,51 @@ export type GameEvent =
       readonly winner: PlayerSlot | -1;
       readonly reason: 'goals' | 'clock' | 'golden' | 'territory' | 'draw';
     })
-  | (EventBase & { readonly type: 'matchEnd'; readonly winner: PlayerSlot | -1 });
+  | (EventBase & { readonly type: 'matchEnd'; readonly winner: PlayerSlot | -1 })
+  | (EventBase & {
+      readonly type: 'reaction';
+      readonly kind: ReactionKind;
+      readonly p: Vec3;
+      /** Reaction strength (impulse, charge, depth …), for scaling feedback. */
+      readonly mag: number;
+      /** Primary entity involved (ice plate, boulder, guard, body), -1 if a region only. */
+      readonly entity: EntityId;
+      /** Effect (region) id involved, -1 if none. */
+      readonly effect: number;
+    })
+  | (EventBase & {
+      readonly type: 'charge';
+      readonly slot: PlayerSlot;
+      /** Conductors reached, in discharge order (first = closest to the caster). */
+      readonly nodes: readonly Vec3[];
+      /** Charge 0..1 per node. */
+      readonly q: readonly number[];
+      /** Discharge links as [from, to] indices into `nodes` (-1 = from the caster). */
+      readonly links: readonly (readonly [number, number])[];
+      readonly p: Vec3;
+    });
+
+/**
+ * Element reactions (Phase 04). Each changes server-owned state: a collider, a velocity field,
+ * a resource, or a visibility rule — never only a colour.
+ */
+export const REACTION_KINDS = [
+  'soak',
+  'ignite',
+  'chill',
+  'freeze',
+  'melt',
+  'boil',
+  'douse',
+  'shatter',
+  'fracture',
+  'quench',
+  'shock',
+  'overload',
+  'energize',
+  'well',
+] as const;
+export type ReactionKind = (typeof REACTION_KINDS)[number];
 
 export type GameEventType = GameEvent['type'];
 

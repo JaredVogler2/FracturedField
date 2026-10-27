@@ -90,8 +90,35 @@ export interface GuardDef extends AbilityBase {
   readonly restitution: number;
 }
 
+/** INFUSE soaks (wet) or ignites (heat) the area at the force point; element tuning in rules. */
+export interface InfuseDef extends AbilityBase {
+  readonly id: 'infuse';
+}
+
+/** FREEZE chills the area at the force point: water becomes an ice-ramp plate, hot stone shocks. */
+export interface FreezeDef extends AbilityBase {
+  readonly id: 'freeze';
+}
+
+/** CHARGE discharges through connected conductors (water, wet stone, metal, the core). */
+export interface ChargeDef extends AbilityBase {
+  readonly id: 'charge';
+}
+
+/** MAGNETIZE (hold) pulls nearby metal bodies (lodestones) toward the force point. */
+export interface MagnetizeDef extends AbilityBase {
+  readonly id: 'magnetize';
+  readonly maxHoldSeconds: number;
+}
+
+/** GRAVITY plants a short-lived, softened gravity well at the force point. */
+export interface GravityDef extends AbilityBase {
+  readonly id: 'gravity';
+  readonly durationSeconds: number;
+}
+
 export interface GenericAbilityDef extends AbilityBase {
-  readonly id: Exclude<AbilityId, 'pulse' | 'lift' | 'sweep' | 'guard'>;
+  readonly id: 'draw' | 'focus';
 }
 
 export interface AbilityTable {
@@ -100,12 +127,27 @@ export interface AbilityTable {
   readonly sweep: SweepDef;
   readonly guard: GuardDef;
   readonly draw: GenericAbilityDef;
-  readonly infuse: GenericAbilityDef;
-  readonly freeze: GenericAbilityDef;
-  readonly charge: GenericAbilityDef;
-  readonly magnetize: GenericAbilityDef;
-  readonly gravity: GenericAbilityDef;
+  readonly infuse: InfuseDef;
+  readonly freeze: FreezeDef;
+  readonly charge: ChargeDef;
+  readonly magnetize: MagnetizeDef;
+  readonly gravity: GravityDef;
   readonly focus: GenericAbilityDef;
+}
+
+/** Every player always has these. */
+export const BASE_ABILITIES = ['pulse', 'lift', 'sweep', 'guard', 'infuse'] as const;
+/** Hot-swappable advanced moves; each player picks LOADOUT_SIZE of them before a match. */
+export const ADVANCED_ABILITIES = ['freeze', 'charge', 'magnetize', 'gravity', 'focus'] as const;
+export type AdvancedAbilityId = (typeof ADVANCED_ABILITIES)[number];
+export const LOADOUT_SIZE = 2;
+export const DEFAULT_LOADOUT: readonly [AdvancedAbilityId, AdvancedAbilityId] = [
+  'freeze',
+  'charge',
+];
+
+export function isAdvancedAbility(id: AbilityId): id is AdvancedAbilityId {
+  return (ADVANCED_ABILITIES as readonly string[]).includes(id);
 }
 
 /** Starting tuning (docs/GAME_DESIGN.md). Adjust here only — never inline in systems. */
@@ -172,12 +214,54 @@ export const DEFAULT_ABILITIES: AbilityTable = {
     breakImpulse: 300,
     restitution: 0.85,
   },
+  infuse: {
+    id: 'infuse',
+    kind: 'tap',
+    cost: 18,
+    costPerSecond: 0,
+    cooldownSeconds: 0.8,
+    lockoutSeconds: 0.25,
+    available: true,
+  },
+  freeze: {
+    id: 'freeze',
+    kind: 'tap',
+    cost: 22,
+    costPerSecond: 0,
+    cooldownSeconds: 1.2,
+    lockoutSeconds: 0.25,
+    available: true,
+  },
+  charge: {
+    id: 'charge',
+    kind: 'tap',
+    cost: 20,
+    costPerSecond: 0,
+    cooldownSeconds: 1.2,
+    lockoutSeconds: 0.25,
+    available: true,
+  },
+  magnetize: {
+    id: 'magnetize',
+    kind: 'hold',
+    cost: 8,
+    costPerSecond: 9,
+    cooldownSeconds: 1,
+    lockoutSeconds: 0.2,
+    available: true,
+    maxHoldSeconds: 3,
+  },
+  gravity: {
+    id: 'gravity',
+    kind: 'tap',
+    cost: 55,
+    costPerSecond: 0,
+    cooldownSeconds: 6,
+    lockoutSeconds: 0.3,
+    available: true,
+    durationSeconds: 1.2,
+  },
   draw: base('draw', 'hold', 0, 7),
-  infuse: base('infuse', 'tap', 18, 0),
-  freeze: base('freeze', 'tap', 22, 0),
-  charge: base('charge', 'tap', 20, 0),
-  magnetize: base('magnetize', 'hold', 8, 9),
-  gravity: base('gravity', 'tap', 55, 0),
   focus: base('focus', 'hold', 45, 0),
 };
 

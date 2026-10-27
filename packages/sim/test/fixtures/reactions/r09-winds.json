@@ -1,0 +1,18 @@
+{
+  "id": "R9",
+  "title": "a crosswind bends a wide shot into the goal; an opposing wind cancels it",
+  "seed": 5,
+  "ticks": 200,
+  "script": [
+    { "t": 0, "place": "core", "p": [3.2, 1.15, 0] },
+    { "t": 0, "slot": 0, "act": "sweep", "at": [1.6507, -0.3998], "modifier": 1 },
+    { "t": 6, "slot": 0, "act": "pulse", "at": [1.6507, -0.3998] }
+  ],
+  "variants": {
+    "control": { "expect": { "goal": 0 } },
+    "reaction": {
+      "script": [{ "t": 0, "slot": 1, "act": "sweep", "at": [1.6507, -0.3998], "dir": [0, 1] }],
+      "expect": { "notGoal": 0 }
+    }
+  }
+}

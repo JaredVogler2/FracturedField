@@ -13,6 +13,7 @@ export const GROUP = {
   BOULDER: 1 << 2,
   GUARD: 1 << 3,
   SHARD: 1 << 4,
+  ICE: 1 << 5,
 } as const;
 
 const ALL = 0xffff;
@@ -173,6 +174,105 @@ export class PhysicsWorld {
       body,
     );
     return this.register('boulder', -1, body, col, material, radius, -1);
+  }
+
+  /** Steel sphere (lodestone): the metal body that MAGNETIZE and energized charge act on. */
+  createLodestone(x: number, z: number, radius: number, mass: number): EntityId {
+    const mat = MATERIALS.steel;
+    const body = this.world.createRigidBody(
+      RAPIER.RigidBodyDesc.dynamic()
+        .setTranslation(x, radius, z)
+        .setLinearDamping(0.7)
+        .setAngularDamping(1)
+        // Magnets can move it fast; CCD keeps it from tunnelling through thin barriers.
+        .setCcdEnabled(true),
+    );
+    const col = this.world.createCollider(
+      RAPIER.ColliderDesc.ball(radius)
+        .setMass(mass)
+        .setRestitution(mat.restitution)
+        .setFriction(mat.friction)
+        .setCollisionGroups(groups(GROUP.BOULDER))
+        .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
+        .setContactForceEventThreshold(this.impactThreshold * this.rules.match.tickRate * 0.8),
+      body,
+    );
+    return this.register('lodestone', -1, body, col, 'steel', radius, -1);
+  }
+
+  /**
+   * Fixed ice plate frozen from a water pool: a low frustum whose sloped rim works as a ramp
+   * (the hovering core's underside rides at ~0.3 m, below the plate top), with ice restitution
+   * and near-zero friction. Returns -1 if Rapier cannot build the hull (degenerate input).
+   */
+  createIcePlate(
+    x: number,
+    z: number,
+    radius: number,
+    height: number,
+    topScale: number,
+    restitution: number,
+    friction: number,
+  ): EntityId {
+    const seg = 14;
+    const pts = new Float32Array(seg * 2 * 3);
+    for (let i = 0; i < seg; i++) {
+      const a = (i / seg) * Math.PI * 2;
+      const c = Math.cos(a);
+      const s = Math.sin(a);
+      pts.set([c * radius, -height / 2, s * radius], i * 6);
+      pts.set([c * radius * topScale, height / 2, s * radius * topScale], i * 6 + 3);
+    }
+    const desc = RAPIER.ColliderDesc.convexHull(pts);
+    if (!desc) return -1;
+    const body = this.world.createRigidBody(
+      RAPIER.RigidBodyDesc.fixed().setTranslation(x, height / 2, z),
+    );
+    const col = this.world.createCollider(
+      desc
+        .setRestitution(restitution)
+        .setRestitutionCombineRule(RAPIER.CoefficientCombineRule.Max)
+        .setFriction(friction)
+        .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
+        .setCollisionGroups(groups(GROUP.ICE))
+        .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
+        .setContactForceEventThreshold(this.impactThreshold * this.rules.match.tickRate * 0.8),
+      body,
+    );
+    return this.register('ice', -1, body, col, 'ice', radius, -1);
+  }
+
+  /** Physical fracture fragment (budgeted; extra debris is cosmetic on the client). */
+  createShard(
+    x: number,
+    y: number,
+    z: number,
+    radius: number,
+    mass: number,
+    vx: number,
+    vy: number,
+    vz: number,
+    ttl: number,
+  ): EntityId {
+    const mat = MATERIALS.basaltFractured;
+    const body = this.world.createRigidBody(
+      RAPIER.RigidBodyDesc.dynamic()
+        .setTranslation(x, y, z)
+        .setLinvel(vx, vy, vz)
+        .setLinearDamping(1.1)
+        .setAngularDamping(1.4),
+    );
+    const col = this.world.createCollider(
+      RAPIER.ColliderDesc.ball(radius)
+        .setMass(mass)
+        .setRestitution(mat.restitution)
+        .setFriction(mat.friction)
+        .setCollisionGroups(groups(GROUP.SHARD))
+        .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
+        .setContactForceEventThreshold(this.impactThreshold * this.rules.match.tickRate * 0.8),
+      body,
+    );
+    return this.register('shard', -1, body, col, 'basaltFractured', radius, ttl);
   }
 
   /** Static barrier collider (GUARD). Fixed bodies never move once placed. */

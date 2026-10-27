@@ -1,0 +1,21 @@
+{
+  "id": "R8",
+  "title": "earth impact → cover struck hard enough fractures and the lane opens",
+  "seed": 5,
+  "ticks": 240,
+  "script": [
+    { "t": 0, "place": "boulder:0", "p": [8, 0.75, 0] },
+    { "t": 60, "place": "core", "p": [3.5, 1.15, 0] },
+    { "t": 60, "slot": 0, "act": "pulse", "at": [1.5, 0] }
+  ],
+  "variants": {
+    "control": {
+      "script": [{ "t": 0, "place": "boulder:1", "p": [8, 0.75, -4], "v": [0, 0, 12] }],
+      "expect": { "notGoal": 0, "reactions": { "fracture": 0 } }
+    },
+    "reaction": {
+      "script": [{ "t": 0, "place": "boulder:1", "p": [8, 0.75, -4], "v": [0, 0, 17] }],
+      "expect": { "goal": 0, "reactions": { "fracture": 2 } }
+    }
+  }
+}

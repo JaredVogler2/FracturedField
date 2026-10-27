@@ -1,12 +1,19 @@
 import {
   DEFAULT_ABILITIES,
+  DEFAULT_LOADOUT,
   DEFAULT_RULES,
+  INFUSE_ELEMENTS,
+  LOADOUT_SIZE,
+  MATERIALS,
   MERIDIAN_ARENA,
+  isAdvancedAbility,
   secondsToTicks,
   type AbilityId,
   type AbilityTable,
+  type AdvancedAbilityId,
   type ArenaLayout,
   type GameRules,
+  type MaterialId,
 } from '@ff/game-data';
 import type {
   ActionIntent,
@@ -19,25 +26,44 @@ import type {
   MatchSnapshot,
   PlayerSlot,
   PlayerSnapshot,
+  ReactionKind,
   RejectReason,
+  Vec3,
   WorldSnapshot,
 } from '@ff/protocol';
-import { q3, q4 } from '@ff/protocol';
+import { EFFECT_FLAG, q3, q4 } from '@ff/protocol';
 import { initPhysics, RAPIER } from './rapier.js';
 import { PhysicsWorld, restoreRapierWorld, GROUP, type EntityRecord } from './physics.js';
 import { Rng, type RngState } from './rng.js';
 import { clamp, length2, linearFalloff, quatFromYaw } from './math.js';
 import { detectGoalCrossing } from './goal.js';
 import { StateHasher } from './hash.js';
+import { discharge, discWeight, relaxToward, softenedPull, type Conductor } from './elements.js';
 
 /* ------------------------------------------------------------------------------------------ */
 /* State                                                                                       */
 /* ------------------------------------------------------------------------------------------ */
 
-const IMPLEMENTED: readonly AbilityId[] = ['pulse', 'lift', 'sweep', 'guard'];
+const IMPLEMENTED: readonly AbilityId[] = [
+  'pulse',
+  'lift',
+  'sweep',
+  'guard',
+  'infuse',
+  'freeze',
+  'charge',
+  'magnetize',
+  'gravity',
+];
+
+/** Bodies that abilities and fields may move (fixed guards and ice plates never move). */
+const MOVABLE = new Set<string>(['core', 'boulder', 'lodestone', 'shard']);
+/** Bodies that carry element state (wetness, heat, charge). */
+const ELEMENTAL = new Set<string>(['core', 'boulder', 'lodestone', 'shard', 'guard']);
 
 interface HoldState {
-  ability: 'lift';
+  ability: 'lift' | 'magnetize';
+  /** Lifted entity (LIFT) or -1 (MAGNETIZE acts on every lodestone in range). */
   target: EntityId;
   ticks: number;
 }
@@ -56,11 +82,14 @@ interface PlayerState {
   lastSeq: number;
   connected: boolean;
   guards: EntityId[];
+  /** Advanced moves picked for this match (base moves are always available). */
+  loadout: AdvancedAbilityId[];
 }
 
 interface EffectState {
   id: number;
-  kind: 'sweep';
+  /** sweep = crosswind field; well = GRAVITY well (sign/dx/dz unused). */
+  kind: 'sweep' | 'well';
   owner: PlayerSlot;
   x: number;
   z: number;
@@ -90,11 +119,67 @@ interface MatchState {
   roundDecided: boolean;
 }
 
+/** Neutral movable obstacle spawn (boulder / lodestone); id is -1 while fractured. */
 interface BoulderSpawn {
   id: EntityId;
+  kind: 'boulder' | 'lodestone';
   x: number;
   z: number;
   radius: number;
+  mass: number;
+  material: MaterialId;
+}
+
+/** Water patch on the floor; `ice` is the plate entity while frozen (-1 when liquid). */
+interface PoolState {
+  id: number;
+  owner: PlayerSlot;
+  x: number;
+  z: number;
+  r: number;
+  /** Liquid depth proxy 0..1. */
+  depth: number;
+  temp: number;
+  ice: EntityId;
+  /** Ticks of electrification left (shock zone). */
+  electrified: number;
+  charge: number;
+  /** Ticks until a liquid pool soaks away (frozen plates melt by temperature instead). */
+  ttl: number;
+}
+
+interface SteamState {
+  id: number;
+  owner: PlayerSlot;
+  x: number;
+  z: number;
+  r: number;
+  density: number;
+  ttl: number;
+  maxTtl: number;
+}
+
+interface FlameState {
+  id: number;
+  owner: PlayerSlot;
+  x: number;
+  z: number;
+  r: number;
+  ttl: number;
+  maxTtl: number;
+}
+
+/** Element state of one body; absent = neutral (dry, ambient, uncharged). */
+interface BodyElementState {
+  wet: number;
+  temp: number;
+  charge: number;
+  chargeTicks: number;
+  /** Electromagnet ticks left (lodestones). */
+  energized: number;
+  /** Thermal shock ticks left (weakened stone). */
+  shocked: number;
+  veiled: boolean;
 }
 
 export interface TickInput {
@@ -121,6 +206,8 @@ export interface WorldOptions {
   readonly arena?: ArenaLayout;
   /** Start directly in a running match (tests, practice). Default: lobby. */
   readonly autoStart?: boolean;
+  /** Advanced-move picks per seat (defaults to DEFAULT_LOADOUT). */
+  readonly loadouts?: readonly [readonly AbilityId[], readonly AbilityId[]];
 }
 
 interface SerializedState {
@@ -137,6 +224,10 @@ interface SerializedState {
   readonly coreId: EntityId;
   readonly boulders: readonly BoulderSpawn[];
   readonly prevCore: { x: number; y: number; z: number };
+  readonly pools: readonly PoolState[];
+  readonly steams: readonly SteamState[];
+  readonly flames: readonly FlameState[];
+  readonly bodyEl: readonly (readonly [EntityId, BodyElementState])[];
 }
 
 export interface WorldCheckpoint {
@@ -155,14 +246,17 @@ const MAX_INTENTS_PER_TICK = 8;
  * The authoritative RIFTBALL simulation. Identical code runs in the Cloudflare Durable Object, the
  * Node fallback server and the browser's local/practice driver.
  *
- * Fixed tick order (documented in docs/decisions/ADR-0004-tick-order.md):
+ * Fixed tick order (documented in docs/decisions/ADR-0004-tick-order.md, ADR-0006):
  *   1. drain queued intents (slot order alternates by tick parity) -> validate -> apply
  *   2. move manipulators toward their targets at the capped speed
- *   3. accumulate sustained fields (hover, lift, sweep) -> clamp -> apply as impulses
- *   4. Rapier fixed step (dt = 1 / tickRate)
- *   5. impacts -> events, guard damage / breakage
- *   6. goal crossing test (playing phase only)
- *   7. timers: effects, guards, cooldowns, energy, match clock and phase transitions
+ *   3. element stage: flames drift/heat, pools mix/relax/freeze/melt/boil, steam spreads,
+ *      bodies wet/dry/cool (material conversions that change colliders happen here)
+ *   4. accumulate sustained fields (hover + steam lift, lift, sweep, magnet, energized
+ *      lodestones, gravity wells, pool drag, shock zones, steam updraft) -> clamp -> impulses
+ *   5. Rapier fixed step (dt = 1 / tickRate)
+ *   6. impacts -> events, guard damage, ice shatter, stone fracture (with shards)
+ *   7. goal crossing test (playing phase only)
+ *   8. timers: effects, entities, cooldowns, energy, match clock and phase transitions
  */
 export class GameWorld {
   readonly rules: GameRules;
@@ -184,6 +278,13 @@ export class GameWorld {
   private events: GameEvent[] = [];
   private results: SeatResult[] = [];
   private readonly fieldAcc = new Map<EntityId, { x: number; y: number; z: number }>();
+  private pools: PoolState[] = [];
+  private steams: SteamState[] = [];
+  private flames: FlameState[] = [];
+  private readonly bodyEl = new Map<EntityId, BodyElementState>();
+  private readonly pull = { x: 0, y: 0, z: 0 };
+  /** Velocities of movable bodies just before the physics step (fracture pass-through). */
+  private readonly preVel = new Map<EntityId, { x: number; y: number; z: number }>();
   private disposed = false;
 
   private constructor(
@@ -207,6 +308,10 @@ export class GameWorld {
       this.nextEffectId = s.nextEffectId;
       this.nextEventId = s.nextEventId;
       this.prevCore = { ...s.prevCore };
+      this.pools = s.pools.map((x) => ({ ...x }));
+      this.steams = s.steams.map((x) => ({ ...x }));
+      this.flames = s.flames.map((x) => ({ ...x }));
+      for (const [id, st] of s.bodyEl) this.bodyEl.set(id, { ...st });
       return;
     }
     this.physics = new PhysicsWorld(this.rules, this.arena);
@@ -215,11 +320,24 @@ export class GameWorld {
     this.coreId = this.physics.createCore(core, 0, core.hoverHeight, 0);
     this.prevCore = { x: 0, y: core.hoverHeight, z: 0 };
     for (const o of this.arena.obstacles) {
-      if (o.kind !== 'boulder') continue;
-      const id = this.physics.createBoulder(o.x, o.z, o.radius, o.mass, o.material);
-      this.boulders.push({ id, x: o.x, z: o.z, radius: o.radius });
+      if (o.kind === 'pillar') continue;
+      const spawn: BoulderSpawn = {
+        id: -1,
+        kind: o.kind,
+        x: o.x,
+        z: o.z,
+        radius: o.radius,
+        mass: o.mass,
+        material: o.material,
+      };
+      this.spawnObstacle(spawn);
+      this.boulders.push(spawn);
     }
     this.players = [this.freshPlayer(0), this.freshPlayer(1)];
+    if (opts.loadouts) {
+      // Validated like setLoadout (invalid picks keep the default).
+      for (const slot of [0, 1] as const) this.applyLoadout(slot, opts.loadouts[slot]);
+    }
     this.match = {
       phase: 'lobby',
       round: 1,
@@ -294,7 +412,39 @@ export class GameWorld {
       lastSeq: -1,
       connected: true,
       guards: [],
+      loadout: [...DEFAULT_LOADOUT],
     };
+  }
+
+  private spawnObstacle(s: BoulderSpawn): void {
+    s.id =
+      s.kind === 'lodestone'
+        ? this.physics.createLodestone(s.x, s.z, s.radius, s.mass)
+        : this.physics.createBoulder(s.x, s.z, s.radius, s.mass, s.material);
+  }
+
+  /**
+   * Chooses a seat's advanced moves (LOADOUT_SIZE distinct, available advanced abilities). Invalid
+   * picks are refused and the current loadout is kept. Only allowed outside live play.
+   */
+  setLoadout(slot: PlayerSlot, picks: readonly AbilityId[]): boolean {
+    if (this.match.phase === 'playing' || this.match.phase === 'countdown') return false;
+    return this.applyLoadout(slot, picks);
+  }
+
+  private applyLoadout(slot: PlayerSlot, picks: readonly AbilityId[]): boolean {
+    const unique = [...new Set(picks)];
+    if (unique.length !== LOADOUT_SIZE) return false;
+    for (const id of unique) {
+      if (!isAdvancedAbility(id) || !this.abilities[id].available || !IMPLEMENTED.includes(id))
+        return false;
+    }
+    this.players[slot].loadout = unique as AdvancedAbilityId[];
+    return true;
+  }
+
+  loadout(slot: PlayerSlot): readonly AdvancedAbilityId[] {
+    return this.players[slot].loadout;
   }
 
   /* ---------------------------------------------------------------------------------------- */
@@ -416,14 +566,23 @@ export class GameWorld {
     // 2. manipulators
     this.moveManipulators();
 
-    // 3. fields
+    // 3. element regions and body states
+    this.stepElements();
+
+    // 4. fields
     this.applyFields();
 
-    // 4. physics
+    // 5. physics
+    this.preVel.clear();
+    for (const e of this.physics.entities.values()) {
+      if (!MOVABLE.has(e.kind)) continue;
+      const b = this.physics.body(e.id);
+      if (b) this.preVel.set(e.id, { ...b.linvel() });
+    }
     const { impacts, invalid } = this.physics.step();
     for (const id of invalid) this.recoverInvalidBody(id);
 
-    // 5. impacts and guard damage
+    // 6. impacts: guard damage, ice shatter, stone fracture
     for (const imp of impacts) {
       this.emit({
         type: 'impact',
@@ -432,11 +591,11 @@ export class GameWorld {
         p: [q3(imp.x), q3(imp.y), q3(imp.z)],
         impulse: q3(imp.impulse),
       });
-      this.damageIfGuard(imp.a, imp.impulse);
-      if (imp.b >= 0) this.damageIfGuard(imp.b, imp.impulse);
+      this.onImpact(imp.a, imp.impulse, imp.b);
+      if (imp.b >= 0) this.onImpact(imp.b, imp.impulse, imp.a);
     }
 
-    // 6. goals
+    // 7. goals
     const core = this.physics.body(this.coreId);
     if (core) {
       const t = core.translation();
@@ -447,7 +606,7 @@ export class GameWorld {
       this.prevCore = { x: t.x, y: t.y, z: t.z };
     }
 
-    // 7. timers
+    // 8. timers
     this.tickTimers();
 
     this.tickNo++;
@@ -508,6 +667,7 @@ export class GameWorld {
     }
 
     if (!def.available || !IMPLEMENTED.includes(ability)) return deny('not_available');
+    if (isAdvancedAbility(ability) && !p.loadout.includes(ability)) return deny('not_available');
     if (this.match.phase !== 'playing') return deny('not_playing');
     if ((def.kind === 'tap') !== (intent.phase === 'tap')) return deny('invalid');
     if ((p.cooldowns[ability] ?? 0) > 0) return deny('cooldown');
@@ -529,6 +689,21 @@ export class GameWorld {
       case 'lift':
         outcome = this.startLift(p);
         break;
+      case 'infuse':
+        outcome = this.castInfuse(p, intent.modifier);
+        break;
+      case 'freeze':
+        outcome = this.castFreeze(p);
+        break;
+      case 'charge':
+        outcome = this.castCharge(p);
+        break;
+      case 'gravity':
+        outcome = this.castGravity(p);
+        break;
+      case 'magnetize':
+        outcome = this.startMagnetize(p);
+        break;
       default:
         outcome = 'not_available';
     }
@@ -549,11 +724,11 @@ export class GameWorld {
     const def = this.abilities.pulse;
     const oy = this.rules.manipulator.height;
     // Release into the shot: a pulse ends the caster's own lift so the body can actually fly.
-    if (p.hold) this.releaseHold(p, true);
+    if (p.hold?.ability === 'lift') this.releaseHold(p, true);
     const loftHeight = this.rules.core.hoverHeight + def.loftThreshold;
     let coreMag = 0;
     for (const e of this.physics.entities.values()) {
-      if (e.kind !== 'core' && e.kind !== 'boulder') continue;
+      if (!MOVABLE.has(e.kind)) continue;
       if (e.kind === 'core' && this.match.kickoffShield > 0) continue;
       const body = this.physics.body(e.id);
       if (!body) continue;
@@ -737,7 +912,7 @@ export class GameWorld {
     let best: EntityId = -1;
     let bestD = Infinity;
     for (const e of this.physics.entities.values()) {
-      if (e.kind !== 'core' && e.kind !== 'boulder') continue;
+      if (!MOVABLE.has(e.kind)) continue;
       if (e.kind === 'core' && this.match.kickoffShield > 0) continue;
       const b = this.physics.body(e.id);
       if (!b) continue;
@@ -759,6 +934,318 @@ export class GameWorld {
       p: [q3(p.mx), q3(this.rules.manipulator.height), q3(p.mz)],
       mag: best,
     });
+    return null;
+  }
+
+  /* ---------------------------------------------------------------------------------------- */
+  /* Element casts (Phase 04)                                                                  */
+  /* ---------------------------------------------------------------------------------------- */
+
+  private castEvent(p: PlayerState, ability: AbilityId, phase: 'tap' | 'start', mag: number): void {
+    this.emit({
+      type: 'cast',
+      slot: p.slot,
+      ability,
+      phase,
+      p: [q3(p.mx), q3(this.rules.manipulator.height), q3(p.mz)],
+      mag: q3(mag),
+    });
+  }
+
+  private react(
+    kind: ReactionKind,
+    x: number,
+    y: number,
+    z: number,
+    mag: number,
+    entity: EntityId,
+    effect: number,
+  ): void {
+    this.emit({
+      type: 'reaction',
+      kind,
+      p: [q3(x), q3(y), q3(z)],
+      mag: q3(mag),
+      entity,
+      effect,
+    });
+  }
+
+  private bodyState(id: EntityId): BodyElementState {
+    let st = this.bodyEl.get(id);
+    if (!st) {
+      st = {
+        wet: 0,
+        temp: this.rules.elements.ambientTemp,
+        charge: 0,
+        chargeTicks: 0,
+        energized: 0,
+        shocked: 0,
+        veiled: false,
+      };
+      this.bodyEl.set(id, st);
+    }
+    return st;
+  }
+
+  /** Element-bearing bodies within `radius` (horizontal, plus body radius) of (x, z), by id. */
+  private elementalNear(x: number, z: number, radius: number): EntityId[] {
+    const out: EntityId[] = [];
+    for (const e of this.physics.entities.values()) {
+      if (!ELEMENTAL.has(e.kind)) continue;
+      const b = this.physics.body(e.id);
+      if (!b) continue;
+      const t = b.translation();
+      if (length2(t.x - x, t.z - z) <= radius + e.radius) out.push(e.id);
+    }
+    return out.sort((a, b) => a - b);
+  }
+
+  /** Hot stone that is suddenly wetted or chilled cracks internally (weaker until it recovers). */
+  private quench(id: EntityId, st: BodyElementState): void {
+    const e = this.physics.entities.get(id);
+    if (!e || (e.material !== 'basaltFractured' && e.material !== 'basalt')) return;
+    st.shocked = this.ticks(this.rules.elements.body.shockedSeconds);
+    const b = this.physics.body(id);
+    const t = b ? b.translation() : { x: 0, y: 0, z: 0 };
+    this.react('quench', t.x, t.y, t.z, st.temp, id, -1);
+  }
+
+  private castInfuse(p: PlayerState, modifier: number | undefined): RejectReason | null {
+    const element = INFUSE_ELEMENTS[modifier ?? 0];
+    if (element === undefined) return 'invalid';
+    const outcome = element === 'wet' ? this.infuseWet(p) : this.infuseHeat(p);
+    if (!outcome) this.castEvent(p, 'infuse', 'tap', modifier ?? 0);
+    return outcome;
+  }
+
+  /** WET: adds water at the force point (deepening a pool it lands in) and soaks bodies in reach. */
+  private infuseWet(p: PlayerState): RejectReason | null {
+    const el = this.rules.elements;
+    const x = p.mx;
+    const z = p.mz;
+    let pool: PoolState | undefined;
+    let best = Infinity;
+    for (const q of this.pools) {
+      if (q.ice >= 0) continue;
+      const d = length2(q.x - x, q.z - z);
+      if (d <= q.r + 0.6 && d < best) {
+        best = d;
+        pool = q;
+      }
+    }
+    const add = el.pool.depthPerInfuse;
+    if (pool) {
+      pool.temp = (pool.temp * pool.depth + el.ambientTemp * add) / (pool.depth + add);
+      pool.depth = Math.min(1, pool.depth + add);
+      pool.r = Math.min(el.pool.maxRadius, pool.r + el.pool.growPerInfuse);
+      pool.ttl = this.ticks(el.pool.lifetimeSeconds);
+    } else {
+      if (this.pools.length >= el.maxPools) return 'limit';
+      pool = {
+        id: this.nextEffectId++,
+        owner: p.slot,
+        x,
+        z,
+        r: el.pool.radius,
+        depth: add,
+        temp: el.ambientTemp,
+        ice: -1,
+        electrified: 0,
+        charge: 0,
+        ttl: this.ticks(el.pool.lifetimeSeconds),
+      };
+      this.pools.push(pool);
+    }
+    for (const id of this.elementalNear(x, z, el.infuse.radius)) {
+      const st = this.bodyState(id);
+      const gain = 1 - st.wet;
+      st.wet = 1;
+      if (gain >= 0.3 && st.temp >= el.infuse.quenchTemp) this.quench(id, st);
+    }
+    // Water on fire puts it out.
+    this.flames = this.flames.filter((f) => {
+      if (length2(f.x - x, f.z - z) > el.infuse.radius + f.r * 0.5) return true;
+      this.react('douse', f.x, 0.3, f.z, 1, -1, f.id);
+      return false;
+    });
+    this.react('soak', x, 0.05, z, pool.depth, -1, pool.id);
+    return null;
+  }
+
+  /** HEAT: instant heat in reach plus a lingering flame (which the wind can carry). */
+  private infuseHeat(p: PlayerState): RejectReason | null {
+    const el = this.rules.elements;
+    const x = p.mx;
+    const z = p.mz;
+    const R = el.infuse.radius;
+    for (const q of this.pools) {
+      if (length2(q.x - x, q.z - z) <= R + q.r * 0.5) q.temp += el.infuse.heatDelta;
+    }
+    for (const id of this.elementalNear(x, z, R)) this.bodyState(id).temp += el.infuse.heatDelta;
+    if (this.flames.length >= el.maxFlames) this.flames.shift();
+    const ttl = this.ticks(el.flame.lifetimeSeconds);
+    const flame: FlameState = {
+      id: this.nextEffectId++,
+      owner: p.slot,
+      x,
+      z,
+      r: el.flame.radius,
+      ttl,
+      maxTtl: ttl,
+    };
+    this.flames.push(flame);
+    this.react('ignite', x, 0.4, z, el.infuse.heatDelta, -1, flame.id);
+    return null;
+  }
+
+  /** FREEZE: a cold blast; pools below freezing become ice plates (next element step). */
+  private castFreeze(p: PlayerState): RejectReason | null {
+    const el = this.rules.elements;
+    const x = p.mx;
+    const z = p.mz;
+    const R = el.freeze.radius;
+    for (const q of this.pools) {
+      if (length2(q.x - x, q.z - z) <= R + q.r * 0.5) q.temp += el.freeze.coolDelta;
+    }
+    for (const id of this.elementalNear(x, z, R)) {
+      const st = this.bodyState(id);
+      const before = st.temp;
+      st.temp += el.freeze.coolDelta;
+      if (before >= el.infuse.quenchTemp) this.quench(id, st);
+    }
+    this.flames = this.flames.filter((f) => {
+      if (length2(f.x - x, f.z - z) > R + f.r * 0.5) return true;
+      this.react('douse', f.x, 0.3, f.z, 1, -1, f.id);
+      return false;
+    });
+    this.react('chill', x, 0.3, z, -el.freeze.coolDelta, -1, -1);
+    this.castEvent(p, 'freeze', 'tap', 1);
+    return null;
+  }
+
+  /**
+   * CHARGE: one discharge from the force point over the contact graph of conductors (liquid
+   * pools, metal, the core, and stone only while wet). Electrified pools become shock zones, a
+   * wet guard reached with enough charge overloads, and a charged lodestone becomes an
+   * electromagnet. Nothing conductive in reach = refused (no energy spent).
+   */
+  private castCharge(p: PlayerState): RejectReason | null {
+    const el = this.rules.elements;
+    const conductors: Conductor[] = [];
+    const refs: ({ pool: PoolState } | { id: EntityId })[] = [];
+    for (const q of this.pools) {
+      if (q.ice >= 0) continue;
+      conductors.push({ key: `p${pad(q.id)}`, x: q.x, y: 0, z: q.z, r: q.r, flat: true });
+      refs.push({ pool: q });
+    }
+    const ids = [...this.physics.entities.keys()].sort((a, b) => a - b);
+    for (const id of ids) {
+      const e = this.physics.entities.get(id)!;
+      if (!ELEMENTAL.has(e.kind)) continue;
+      const wet = this.bodyEl.get(id)?.wet ?? 0;
+      if (
+        MATERIALS[e.material].conductivity < el.charge.dryConductivity &&
+        wet < el.charge.wetConductive
+      )
+        continue;
+      const b = this.physics.body(id);
+      if (!b) continue;
+      const t = b.translation();
+      conductors.push({ key: `b${pad(id)}`, x: t.x, y: t.y, z: t.z, r: e.radius, flat: false });
+      refs.push({ id });
+    }
+    const res = discharge(conductors, p.mx, p.mz, el.charge, el.pool.contactHeight);
+    if (res.order.length === 0) return 'out_of_range';
+
+    const nodes: Vec3[] = [];
+    const q: number[] = [];
+    const indexOf = new Map<number, number>();
+    for (const i of res.order) {
+      const c = conductors[i]!;
+      indexOf.set(i, nodes.length);
+      nodes.push([q3(c.x), q3(c.flat ? 0.05 : c.y), q3(c.z)]);
+      q.push(q3(res.charge[i]!));
+    }
+    const links = res.links.map(
+      ([from, to]) => [from < 0 ? -1 : indexOf.get(from)!, indexOf.get(to)!] as const,
+    );
+    this.emit({
+      type: 'charge',
+      slot: p.slot,
+      nodes,
+      q,
+      links,
+      p: [q3(p.mx), q3(this.rules.manipulator.height), q3(p.mz)],
+    });
+
+    for (const i of res.order) {
+      const charge = res.charge[i]!;
+      const ref = refs[i]!;
+      if ('pool' in ref) {
+        const pool = ref.pool;
+        pool.charge = Math.max(pool.charge, charge);
+        pool.electrified = this.ticks(el.charge.electrifiedSeconds);
+        this.react('shock', pool.x, 0.05, pool.z, charge, -1, pool.id);
+        continue;
+      }
+      const e = this.physics.entities.get(ref.id);
+      if (!e) continue;
+      const st = this.bodyState(ref.id);
+      st.charge = Math.max(st.charge, charge);
+      st.chargeTicks = this.ticks(el.charge.chargeSeconds);
+      const b = this.physics.body(ref.id);
+      const t = b ? b.translation() : { x: 0, y: 0, z: 0 };
+      if (e.kind === 'guard' && charge >= el.charge.guardOverload) {
+        this.react('overload', t.x, t.y, t.z, charge, ref.id, -1);
+        this.despawn(ref.id, 'broken');
+        this.bodyEl.delete(ref.id);
+      } else if (e.kind === 'lodestone' && charge >= el.charge.energizeThreshold) {
+        st.energized = this.ticks(el.charge.energizedSeconds);
+        this.react('energize', t.x, t.y, t.z, charge, ref.id, -1);
+      }
+    }
+    this.castEvent(p, 'charge', 'tap', res.order.length);
+    return null;
+  }
+
+  /** GRAVITY: a short-lived softened well at the force point (own half + midline reach). */
+  private castGravity(p: PlayerState): RejectReason | null {
+    const def = this.abilities.gravity;
+    if (this.effects.length >= this.rules.limits.maxActiveEffects) return 'limit';
+    const ttl = this.ticks(def.durationSeconds);
+    const well: EffectState = {
+      id: this.nextEffectId++,
+      kind: 'well',
+      owner: p.slot,
+      x: p.mx,
+      z: p.mz,
+      radius: this.rules.elements.gravity.radius,
+      ttl,
+      maxTtl: ttl,
+      sign: 1,
+      dx: 0,
+      dz: 0,
+    };
+    this.effects.push(well);
+    this.react('well', p.mx, this.rules.elements.gravity.height, p.mz, 1, -1, well.id);
+    this.castEvent(p, 'gravity', 'tap', 1);
+    return null;
+  }
+
+  /** MAGNETIZE (hold): needs a lodestone in range; the pull is applied in the field stage. */
+  private startMagnetize(p: PlayerState): RejectReason | null {
+    if (p.hold) return 'invalid';
+    const range = this.rules.elements.magnet.range;
+    let near = false;
+    for (const e of this.physics.entities.values()) {
+      if (e.kind !== 'lodestone') continue;
+      const b = this.physics.body(e.id);
+      if (b && length2(b.translation().x - p.mx, b.translation().z - p.mz) <= range) near = true;
+    }
+    if (!near) return 'out_of_range';
+    p.hold = { ability: 'magnetize', target: -1, ticks: 0 };
+    this.castEvent(p, 'magnetize', 'start', 1);
     return null;
   }
 
@@ -826,7 +1313,7 @@ export class GameWorld {
     // Lift holds (energy drain, range checks, auto-release).
     for (const p of this.players) {
       const h = p.hold;
-      if (!h) continue;
+      if (!h || h.ability !== 'lift') continue;
       const def = this.abilities.lift;
       const drain = def.costPerSecond * dt;
       const body = this.physics.body(h.target);
@@ -859,13 +1346,14 @@ export class GameWorld {
     if (this.effects.length > 0) {
       const def = this.abilities.sweep;
       for (const e of this.physics.entities.values()) {
-        if (e.kind !== 'core' && e.kind !== 'boulder') continue;
+        if (!MOVABLE.has(e.kind)) continue;
         if (e.kind === 'core' && this.match.kickoffShield > 0) continue;
         const body = this.physics.body(e.id);
         if (!body) continue;
         const t = body.translation();
         const massScale = clamp(def.referenceMass / body.mass(), 0.2, 1.5);
         for (const fx of this.effects) {
+          if (fx.kind !== 'sweep') continue;
           const r = length2(t.x - fx.x, t.z - fx.z);
           if (r >= fx.radius) continue;
           const life = Math.min(1, fx.ttl / 6, (fx.maxTtl - fx.ttl + 1) / 4);
@@ -875,6 +1363,8 @@ export class GameWorld {
         }
       }
     }
+
+    this.applyElementFields();
 
     // Anti-stall drift: a slow core far from the centre line eases back toward it.
     const driftCore = this.physics.body(this.coreId);
@@ -918,13 +1408,11 @@ export class GameWorld {
     if (core && !coreLifted) {
       const c = this.rules.core;
       const t = core.translation();
-      if (t.y < c.hoverHeight + c.hoverBand) {
+      // Steam carries the core higher (it can float over a barrier while inside the cloud).
+      const floatY = c.hoverHeight + this.steamLift(t.x, t.y, t.z);
+      if (t.y < floatY + c.hoverBand) {
         const v = core.linvel();
-        const ay = clamp(
-          g + c.hoverStiffness * (c.hoverHeight - t.y) - c.hoverDamping * v.y,
-          0,
-          2.5 * g,
-        );
+        const ay = clamp(g + c.hoverStiffness * (floatY - t.y) - c.hoverDamping * v.y, 0, 2.5 * g);
         core.applyImpulse({ x: 0, y: ay * core.mass() * dt, z: 0 }, true);
       }
     }
@@ -934,11 +1422,456 @@ export class GameWorld {
   /* Entities                                                                                  */
   /* ---------------------------------------------------------------------------------------- */
 
-  private damageIfGuard(id: EntityId, impulse: number): void {
+  /** Contact consequences: guards wear down, ice plates shatter, boulders fracture. */
+  private onImpact(id: EntityId, impulse: number, striker: EntityId): void {
     const e = this.physics.entities.get(id);
-    if (!e || e.kind !== 'guard') return;
-    e.damage += impulse;
-    if (e.damage >= this.abilities.guard.breakImpulse) this.despawn(id, 'broken');
+    if (!e) return;
+    if (e.kind === 'guard') {
+      e.damage += impulse;
+      if (e.damage >= this.abilities.guard.breakImpulse) this.despawn(id, 'broken');
+    } else if (e.kind === 'ice') {
+      if (impulse >= this.rules.elements.ice.fractureImpulse) {
+        this.shatterIce(id, impulse);
+        this.passThrough(striker);
+      }
+    } else if (e.kind === 'boulder') {
+      const st = this.bodyEl.get(id);
+      const scale = st && st.shocked > 0 ? this.rules.elements.body.shockedFractureScale : 1;
+      if (impulse >= MATERIALS[e.material].fractureImpulse * scale) {
+        this.fractureBoulder(id, impulse);
+        this.passThrough(striker);
+      }
+    }
+  }
+
+  /** The striker of a shattered body keeps most of its pre-impact velocity (no full bounce). */
+  private passThrough(striker: EntityId): void {
+    if (striker < 0) return;
+    const e = this.physics.entities.get(striker);
+    const pre = this.preVel.get(striker);
+    const b = this.physics.body(striker);
+    if (!e || !pre || !b || !MOVABLE.has(e.kind)) return;
+    const v = b.linvel();
+    const k = this.rules.elements.fracture.passThrough;
+    b.setLinvel(
+      { x: v.x + (pre.x - v.x) * k, y: v.y + (pre.y - v.y) * k, z: v.z + (pre.z - v.z) * k },
+      true,
+    );
+  }
+
+  /** A hard hit shatters an ice plate back into (colder, shallower) water. */
+  private shatterIce(id: EntityId, impulse: number): void {
+    const el = this.rules.elements;
+    const pool = this.pools.find((q) => q.ice === id);
+    this.despawn(id, 'broken');
+    if (!pool) return;
+    pool.ice = -1;
+    pool.depth *= el.ice.shatterDepthKeep;
+    pool.temp = el.freezeTemp + 2;
+    pool.ttl = this.ticks(el.pool.lifetimeSeconds);
+    this.react('shatter', pool.x, el.ice.height, pool.z, impulse, id, pool.id);
+  }
+
+  /**
+   * Stone breaks when an impact exceeds its fracture impulse (lower while thermally shocked).
+   * Up to `maxShards` physical fragments spawn if the body budget allows; the boulder itself is
+   * rebuilt at the next kickoff.
+   */
+  private fractureBoulder(id: EntityId, impulse: number): void {
+    const fr = this.rules.elements.fracture;
+    const e = this.physics.entities.get(id);
+    const b = this.physics.body(id);
+    if (!e || !b) return;
+    const t = { ...b.translation() };
+    const v = { ...b.linvel() };
+    const spawn = this.boulders.find((s) => s.id === id);
+    this.despawn(id, 'broken');
+    if (spawn) spawn.id = -1;
+    this.react('fracture', t.x, t.y, t.z, impulse, id, -1);
+    const room = this.rules.limits.maxDynamicBodies - this.physics.entityCount;
+    const n = Math.min(fr.maxShards, Math.max(0, room));
+    const ttl = this.ticks(fr.shardLifetimeSeconds);
+    const off = e.radius * 0.6;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + this.rng.range(-0.4, 0.4);
+      const cx = Math.cos(a);
+      const cz = Math.sin(a);
+      const x = t.x + cx * off;
+      const y = Math.max(fr.shardRadius, t.y);
+      const z = t.z + cz * off;
+      const sid = this.physics.createShard(
+        x,
+        y,
+        z,
+        fr.shardRadius,
+        fr.shardMass,
+        v.x + cx * fr.splitSpeed,
+        v.y + 1.2,
+        v.z + cz * fr.splitSpeed,
+        ttl,
+      );
+      this.emit({ type: 'spawn', entity: sid, kind: 'shard', p: [q3(x), q3(y), q3(z)] });
+    }
+  }
+
+  /* ---------------------------------------------------------------------------------------- */
+  /* Element stage (Phase 04)                                                                  */
+  /* ---------------------------------------------------------------------------------------- */
+
+  /** Crosswind acceleration at a point (sum of active SWEEP fields, no mass scaling). */
+  private windAt(x: number, z: number): { x: number; z: number } {
+    let wx = 0;
+    let wz = 0;
+    const def = this.abilities.sweep;
+    for (const fx of this.effects) {
+      if (fx.kind !== 'sweep') continue;
+      const r = length2(x - fx.x, z - fx.z);
+      if (r >= fx.radius) continue;
+      const life = Math.min(1, fx.ttl / 6, (fx.maxTtl - fx.ttl + 1) / 4);
+      const k = 1 - r / fx.radius;
+      const a = def.windAcceleration * (k * k * (3 - 2 * k)) * life;
+      wx += fx.dx * a;
+      wz += fx.dz * a;
+    }
+    return { x: wx, z: wz };
+  }
+
+  /**
+   * Flames drift with the wind and heat what they overlap; pools exchange heat, relax toward
+   * ambient and change phase with hysteresis (freeze at ≤ freezeTemp, melt at ≥ meltTemp, boil
+   * at ≥ boilTemp); steam spreads and thins; bodies get wet, dry and return to ambient. Each
+   * transition emits exactly one reaction event.
+   */
+  private stepElements(): void {
+    if (
+      this.pools.length === 0 &&
+      this.steams.length === 0 &&
+      this.flames.length === 0 &&
+      this.bodyEl.size === 0
+    )
+      return;
+    const el = this.rules.elements;
+    const dt = this.physics.dt;
+    const L = this.arena.halfLength;
+    const W = this.arena.halfWidth;
+
+    for (const f of this.flames) {
+      const w = this.windAt(f.x, f.z);
+      f.x = clamp(f.x + w.x * el.flame.windDrift * dt, -L, L);
+      f.z = clamp(f.z + w.z * el.flame.windDrift * dt, -W, W);
+      let burn = 1;
+      for (const pool of this.pools) {
+        const k = discWeight(length2(f.x - pool.x, f.z - pool.z), pool.r + f.r * 0.5);
+        if (k <= 0) continue;
+        pool.temp += el.flame.heatPerSecond * k * dt;
+        if (pool.ice < 0) burn = el.flame.douseFactor;
+      }
+      for (const e of this.physics.entities.values()) {
+        if (!ELEMENTAL.has(e.kind)) continue;
+        const b = this.physics.body(e.id);
+        if (!b) continue;
+        const t = b.translation();
+        if (t.y - e.radius > 1.5) continue;
+        const k = discWeight(length2(t.x - f.x, t.z - f.z), f.r + e.radius);
+        if (k > 0) this.bodyState(e.id).temp += el.flame.heatPerSecond * k * dt;
+      }
+      f.ttl -= burn;
+      if (f.ttl <= 0 && burn > 1) this.react('douse', f.x, 0.3, f.z, 1, -1, f.id);
+    }
+    if (this.flames.length > 0) this.flames = this.flames.filter((f) => f.ttl > 0);
+
+    const mix = 1 - Math.exp(-el.poolMixPerSecond * dt);
+    for (let i = 0; i < this.pools.length; i++) {
+      for (let j = i + 1; j < this.pools.length; j++) {
+        const a = this.pools[i]!;
+        const b = this.pools[j]!;
+        if (length2(a.x - b.x, a.z - b.z) > a.r + b.r) continue;
+        const d = (b.temp - a.temp) * mix * 0.5;
+        a.temp += d;
+        b.temp -= d;
+      }
+    }
+    for (const pool of [...this.pools]) {
+      pool.temp = relaxToward(pool.temp, el.ambientTemp, el.ambientRelaxPerSecond, dt);
+      if (pool.electrified > 0 && --pool.electrified === 0) pool.charge = 0;
+      if (pool.ice >= 0) {
+        if (pool.temp >= el.meltTemp) this.meltPool(pool);
+        continue;
+      }
+      if (pool.temp >= el.boilTemp) {
+        this.boilPool(pool);
+        continue;
+      }
+      if (pool.temp <= el.freezeTemp) {
+        this.freezePool(pool);
+        if (pool.ice >= 0) continue;
+      }
+      if (--pool.ttl <= 0) this.pools = this.pools.filter((q) => q !== pool);
+    }
+
+    for (const st of this.steams) {
+      st.ttl--;
+      st.r = Math.min(el.steam.maxRadius, st.r + el.steam.spreadPerSecond * dt);
+    }
+    if (this.steams.length > 0) this.steams = this.steams.filter((st) => st.ttl > 0);
+
+    for (const e of this.physics.entities.values()) {
+      if (!ELEMENTAL.has(e.kind)) continue;
+      const b = this.physics.body(e.id);
+      if (!b) continue;
+      const t = b.translation();
+      let soak = 0;
+      if (t.y - e.radius <= el.pool.contactHeight) {
+        for (const pool of this.pools) {
+          if (pool.ice >= 0 || length2(t.x - pool.x, t.z - pool.z) > pool.r) continue;
+          soak = Math.max(soak, el.pool.wetPerSecond * pool.depth * dt);
+        }
+      }
+      let veiled = false;
+      for (const sc of this.steams) {
+        if (t.y <= el.steam.ceiling && length2(t.x - sc.x, t.z - sc.z) <= sc.r) veiled = true;
+      }
+      let st = this.bodyEl.get(e.id);
+      if (!st) {
+        if (soak === 0 && !veiled) continue;
+        st = this.bodyState(e.id);
+      }
+      const wasWet = st.wet;
+      if (soak > 0) st.wet = Math.min(1, st.wet + soak);
+      else if (st.wet > 0) {
+        const hot = Math.max(0, st.temp - el.body.heatDryingStart) / el.body.heatDryingStart;
+        st.wet = Math.max(0, st.wet - el.body.wetDecayPerSecond * dt * (1 + hot));
+      }
+      if (wasWet < 0.3 && st.wet >= 0.3 && st.temp >= el.infuse.quenchTemp) this.quench(e.id, st);
+      st.temp = relaxToward(st.temp, el.ambientTemp, el.ambientRelaxPerSecond, dt);
+      if (st.chargeTicks > 0 && --st.chargeTicks === 0) st.charge = 0;
+      if (st.energized > 0) st.energized--;
+      if (st.shocked > 0) st.shocked--;
+      st.veiled = veiled;
+      if (
+        st.wet < 0.005 &&
+        Math.abs(st.temp - el.ambientTemp) < 0.5 &&
+        st.charge === 0 &&
+        st.energized === 0 &&
+        st.shocked === 0 &&
+        !veiled
+      )
+        this.bodyEl.delete(e.id);
+    }
+  }
+
+  private freezePool(pool: PoolState): void {
+    const el = this.rules.elements;
+    // A plate never forms around a body (it would be trapped in a fixed collider): wait.
+    for (const e of this.physics.entities.values()) {
+      if (!MOVABLE.has(e.kind)) continue;
+      const b = this.physics.body(e.id);
+      if (!b) continue;
+      const t = b.translation();
+      if (
+        t.y - e.radius < el.ice.height + 0.05 &&
+        length2(t.x - pool.x, t.z - pool.z) < pool.r + e.radius
+      )
+        return;
+    }
+    if (this.physics.entityCount >= this.rules.limits.maxDynamicBodies) return;
+    const id = this.physics.createIcePlate(
+      pool.x,
+      pool.z,
+      pool.r,
+      el.ice.height,
+      el.ice.topScale,
+      el.ice.restitution,
+      el.ice.friction,
+    );
+    if (id < 0) return;
+    pool.ice = id;
+    pool.electrified = 0;
+    pool.charge = 0;
+    this.emit({
+      type: 'spawn',
+      entity: id,
+      kind: 'ice',
+      p: [q3(pool.x), q3(el.ice.height / 2), q3(pool.z)],
+    });
+    this.react('freeze', pool.x, el.ice.height, pool.z, pool.depth, id, pool.id);
+  }
+
+  private meltPool(pool: PoolState): void {
+    const id = pool.ice;
+    pool.ice = -1;
+    pool.ttl = this.ticks(this.rules.elements.pool.lifetimeSeconds);
+    this.despawn(id, 'expired');
+    this.react('melt', pool.x, 0.1, pool.z, pool.depth, id, pool.id);
+  }
+
+  private boilPool(pool: PoolState): void {
+    const el = this.rules.elements;
+    this.pools = this.pools.filter((q) => q !== pool);
+    if (this.steams.length >= el.maxSteams) this.steams.shift();
+    const ttl = this.ticks(el.steam.lifetimeSeconds);
+    const steam: SteamState = {
+      id: this.nextEffectId++,
+      owner: pool.owner,
+      x: pool.x,
+      z: pool.z,
+      r: pool.r + 0.4,
+      density: clamp(pool.depth, 0.4, 1),
+      ttl,
+      maxTtl: ttl,
+    };
+    this.steams.push(steam);
+    this.react('boil', pool.x, 0.5, pool.z, steam.density, -1, steam.id);
+  }
+
+  /** Extra float height for the core from steam it is inside (densest cloud wins). */
+  private steamLift(x: number, y: number, z: number): number {
+    if (this.steams.length === 0) return 0;
+    const el = this.rules.elements;
+    let best = 0;
+    for (const sc of this.steams) {
+      if (y > el.steam.ceiling || length2(x - sc.x, z - sc.z) > sc.r) continue;
+      best = Math.max(best, sc.density * Math.min(1, sc.ttl / 15));
+    }
+    return best * el.steam.coreLift;
+  }
+
+  /** Element fields: magnet holds, energized lodestones, gravity wells, pools and steam. */
+  private applyElementFields(): void {
+    const el = this.rules.elements;
+    const dt = this.physics.dt;
+    const pull = this.pull;
+
+    // MAGNETIZE holds: drain energy, pull every lodestone in range toward the force point.
+    for (const p of this.players) {
+      const h = p.hold;
+      if (!h || h.ability !== 'magnetize') continue;
+      const def = this.abilities.magnetize;
+      const drain = def.costPerSecond * dt;
+      h.ticks++;
+      if (
+        p.energy < drain ||
+        h.ticks > this.ticks(def.maxHoldSeconds) ||
+        this.match.phase !== 'playing'
+      ) {
+        this.releaseHold(p, true);
+        continue;
+      }
+      this.spend(p, drain);
+      for (const e of this.physics.entities.values()) {
+        if (e.kind !== 'lodestone') continue;
+        const b = this.physics.body(e.id);
+        if (!b) continue;
+        const t = b.translation();
+        const boost = (this.bodyEl.get(e.id)?.energized ?? 0) > 0 ? 1.5 : 1;
+        softenedPull(
+          p.mx - t.x,
+          0,
+          p.mz - t.z,
+          el.magnet.strength * boost,
+          el.magnet.softening,
+          el.magnet.maxAcceleration,
+          el.magnet.range,
+          pull,
+        );
+        this.accumulate(e.id, pull.x, 0, pull.z);
+      }
+    }
+
+    // Energized lodestones attract conductors; they are pulled back in proportion (action =
+    // reaction scaled by mass), so a light core moves more than the heavy steel.
+    for (const lo of this.physics.entities.values()) {
+      if (lo.kind !== 'lodestone' || (this.bodyEl.get(lo.id)?.energized ?? 0) <= 0) continue;
+      const lb = this.physics.body(lo.id);
+      if (!lb) continue;
+      const lt = lb.translation();
+      const lm = lb.mass();
+      for (const e of this.physics.entities.values()) {
+        if (e.id === lo.id || !MOVABLE.has(e.kind)) continue;
+        if (e.kind === 'core' && this.match.kickoffShield > 0) continue;
+        const wet = this.bodyEl.get(e.id)?.wet ?? 0;
+        if (
+          MATERIALS[e.material].conductivity < el.charge.dryConductivity &&
+          wet < el.charge.wetConductive
+        )
+          continue;
+        const b = this.physics.body(e.id);
+        if (!b) continue;
+        const t = b.translation();
+        softenedPull(
+          lt.x - t.x,
+          lt.y - t.y,
+          lt.z - t.z,
+          el.magnet.strength,
+          el.magnet.softening,
+          el.magnet.maxAcceleration,
+          el.magnet.range,
+          pull,
+        );
+        if (pull.x === 0 && pull.z === 0) continue;
+        this.accumulate(e.id, pull.x, pull.y * 0.3, pull.z);
+        const ratio = b.mass() / lm;
+        this.accumulate(lo.id, -pull.x * ratio, 0, -pull.z * ratio);
+      }
+    }
+
+    // GRAVITY wells: every movable body in range, softened and capped, fading in and out.
+    for (const w of this.effects) {
+      if (w.kind !== 'well') continue;
+      const life = Math.min(1, w.ttl / 4, (w.maxTtl - w.ttl + 1) / 3);
+      for (const e of this.physics.entities.values()) {
+        if (!MOVABLE.has(e.kind)) continue;
+        if (e.kind === 'core' && this.match.kickoffShield > 0) continue;
+        const b = this.physics.body(e.id);
+        if (!b) continue;
+        const t = b.translation();
+        softenedPull(
+          w.x - t.x,
+          el.gravity.height - t.y,
+          w.z - t.z,
+          el.gravity.strength * life,
+          el.gravity.softening,
+          el.gravity.maxAcceleration,
+          w.radius,
+          pull,
+        );
+        this.accumulate(e.id, pull.x, pull.y, pull.z);
+      }
+    }
+
+    if (this.pools.length === 0 && this.steams.length === 0) return;
+    for (const e of this.physics.entities.values()) {
+      if (!MOVABLE.has(e.kind)) continue;
+      const b = this.physics.body(e.id);
+      if (!b) continue;
+      const t = b.translation();
+      // Pools: drag on bodies skimming liquid; electrified pools push bodies outward.
+      if (t.y - e.radius <= el.pool.contactHeight) {
+        for (const pool of this.pools) {
+          if (pool.ice >= 0) continue;
+          const dx = t.x - pool.x;
+          const dz = t.z - pool.z;
+          const d = length2(dx, dz);
+          if (d > pool.r) continue;
+          const v = b.linvel();
+          const k = el.pool.drag * pool.depth;
+          this.accumulate(e.id, -v.x * k, 0, -v.z * k);
+          if (pool.electrified > 0 && pool.charge > 0) {
+            const a = el.charge.shockAcceleration * pool.charge;
+            const nx = d > 1e-4 ? dx / d : e.id % 2 === 0 ? 1 : -1;
+            const nz = d > 1e-4 ? dz / d : 0;
+            this.accumulate(e.id, nx * a, 0, nz * a);
+          }
+        }
+      }
+      // Steam: updraft on loose bodies (the core's float height is raised in the hover field).
+      if (e.kind === 'core') continue;
+      for (const sc of this.steams) {
+        if (t.y > el.steam.ceiling || length2(t.x - sc.x, t.z - sc.z) > sc.r) continue;
+        const dens = sc.density * Math.min(1, sc.ttl / 15);
+        this.accumulate(e.id, 0, el.steam.updraft * dens * (1 - t.y / el.steam.ceiling), 0);
+      }
+    }
   }
 
   private despawn(id: EntityId, reason: 'expired' | 'broken' | 'reset'): void {
@@ -951,6 +1884,7 @@ export class GameWorld {
       owner.guards = owner.guards.filter((g) => g !== id);
     }
     this.physics.remove(id);
+    this.bodyEl.delete(id);
     this.emit({ type: 'despawn', entity: id, reason, p: [q3(t.x), q3(t.y), q3(t.z)] });
   }
 
@@ -984,9 +1918,13 @@ export class GameWorld {
   /** Rule-level reset of bodies and players before each kickoff (not an ability effect). */
   private resetField(): void {
     for (const e of [...this.physics.entities.values()]) {
-      if (e.kind === 'guard') this.despawn(e.id, 'reset');
+      if (e.kind === 'guard' || e.kind === 'ice' || e.kind === 'shard') this.despawn(e.id, 'reset');
     }
     this.effects = [];
+    this.pools = [];
+    this.steams = [];
+    this.flames = [];
+    this.bodyEl.clear();
     const c = this.rules.core;
     const core = this.physics.body(this.coreId);
     if (core) {
@@ -997,6 +1935,7 @@ export class GameWorld {
     }
     this.prevCore = { x: 0, y: c.hoverHeight, z: 0 };
     for (const b of this.boulders) {
+      if (b.id < 0 || !this.physics.body(b.id)) this.spawnObstacle(b); // rebuilt after a fracture
       const body = this.physics.body(b.id);
       if (!body) continue;
       body.setTranslation({ x: b.x, y: b.radius, z: b.z }, true);
@@ -1201,6 +2140,7 @@ export class GameWorld {
         q: [q4(r.x), q4(r.y), q4(r.z), q4(r.w)],
         v: [q3(v.x), q3(v.y), q3(v.z)],
         ttl: e.ttl,
+        ...this.elementFields(e.id),
       });
     }
     const effects: EffectSnapshot[] = this.effects.map((f) => ({
@@ -1214,6 +2154,7 @@ export class GameWorld {
       s: f.sign,
       d: [q4(f.dx), q4(f.dz)],
     }));
+    this.elementEffects(effects);
     const m = this.match;
     const match: MatchSnapshot = {
       phase: m.phase,
@@ -1235,6 +2176,85 @@ export class GameWorld {
       ack: [this.players[0].lastSeq, this.players[1].lastSeq],
       eventCursor: this.nextEventId - 1,
     };
+  }
+
+  /** Element state of a body for snapshots (only non-neutral fields are sent). */
+  private elementFields(id: EntityId): Partial<EntitySnapshot> {
+    const st = this.bodyEl.get(id);
+    if (!st) return {};
+    const out: { w?: number; h?: number; c?: number; veil?: 1; sh?: 1; en?: number } = {};
+    if (st.wet >= 0.01) out.w = Math.round(st.wet * 100) / 100;
+    if (Math.abs(st.temp - this.rules.elements.ambientTemp) >= 2) out.h = Math.round(st.temp);
+    if (st.charge > 0) out.c = Math.round(st.charge * 100) / 100;
+    if (st.veiled) out.veil = 1;
+    if (st.shocked > 0) out.sh = 1;
+    if (st.energized > 0) out.en = st.energized;
+    return out;
+  }
+
+  private elementEffects(out: EffectSnapshot[]): void {
+    const el = this.rules.elements;
+    const poolLife = this.ticks(el.pool.lifetimeSeconds);
+    for (const q of this.pools) {
+      out.push({
+        id: q.id,
+        kind: 'pool',
+        owner: q.owner,
+        p: [q3(q.x), 0, q3(q.z)],
+        r: q3(q.r),
+        ttl: q.ice >= 0 ? -1 : q.ttl,
+        maxTtl: poolLife,
+        s: 0,
+        d: [0, 0],
+        m: q3(q.depth),
+        T: Math.round(q.temp),
+        f: (q.ice >= 0 ? EFFECT_FLAG.ICE : 0) | (q.electrified > 0 ? EFFECT_FLAG.ELECTRIFIED : 0),
+      });
+    }
+    for (const sc of this.steams) {
+      out.push({
+        id: sc.id,
+        kind: 'steam',
+        owner: sc.owner,
+        p: [q3(sc.x), 0, q3(sc.z)],
+        r: q3(sc.r),
+        ttl: sc.ttl,
+        maxTtl: sc.maxTtl,
+        s: 0,
+        d: [0, 0],
+        m: q3(sc.density * Math.min(1, sc.ttl / 15)),
+      });
+    }
+    for (const f of this.flames) {
+      out.push({
+        id: f.id,
+        kind: 'flame',
+        owner: f.owner,
+        p: [q3(f.x), 0, q3(f.z)],
+        r: q3(f.r),
+        ttl: f.ttl,
+        maxTtl: f.maxTtl,
+        s: 0,
+        d: [0, 0],
+        m: q3(Math.min(1, f.ttl / 15)),
+      });
+    }
+    const hold = this.ticks(this.abilities.magnetize.maxHoldSeconds);
+    for (const p of this.players) {
+      if (p.hold?.ability !== 'magnetize') continue;
+      out.push({
+        id: 1_000_000 + p.slot,
+        kind: 'magnet',
+        owner: p.slot,
+        p: [q3(p.mx), 0, q3(p.mz)],
+        r: el.magnet.range,
+        ttl: Math.max(0, hold - p.hold.ticks),
+        maxTtl: hold,
+        s: 0,
+        d: [0, 0],
+        m: 1,
+      });
+    }
   }
 
   private playerSnapshot(p: PlayerState): PlayerSnapshot {
@@ -1274,6 +2294,19 @@ export class GameWorld {
         .int(p.hold ? p.hold.target : -1);
     }
     for (const f of this.effects) h.int(f.id).num(f.x).num(f.z).int(f.ttl).num(f.dx).num(f.dz);
+    for (const q of this.pools) {
+      h.int(q.id).num(q.x).num(q.z).num(q.r).num(q.depth).num(q.temp);
+      h.int(q.ice).int(q.electrified).num(q.charge).int(q.ttl);
+    }
+    for (const sc of this.steams)
+      h.int(sc.id).num(sc.x).num(sc.z).num(sc.r).num(sc.density).int(sc.ttl);
+    for (const f of this.flames) h.int(f.id).num(f.x).num(f.z).int(f.ttl);
+    for (const [id, st] of [...this.bodyEl].sort((a, b) => a[0] - b[0])) {
+      h.int(id).num(st.wet).num(st.temp).num(st.charge).int(st.chargeTicks);
+      h.int(st.energized)
+        .int(st.shocked)
+        .int(st.veiled ? 1 : 0);
+    }
     const m = this.match;
     h.str(m.phase)
       .int(m.round)
@@ -1328,6 +2361,10 @@ export class GameWorld {
       coreId: this.coreId,
       boulders: this.boulders.map((b) => ({ ...b })),
       prevCore: { ...this.prevCore },
+      pools: this.pools.map((x) => ({ ...x })),
+      steams: this.steams.map((x) => ({ ...x })),
+      flames: this.flames.map((x) => ({ ...x })),
+      bodyEl: [...this.bodyEl].map(([id, st]) => [id, { ...st }] as const),
     };
     return { version: 1, rapier: this.physics.takeSnapshot(), state: JSON.stringify(state) };
   }
@@ -1386,10 +2423,75 @@ export class GameWorld {
   }
 
   /** Physics budget counters for HUD/diagnostics. */
-  get counters(): { entities: number; effects: number; guards: number } {
+  get counters(): {
+    entities: number;
+    effects: number;
+    guards: number;
+    regions: number;
+    elementBodies: number;
+  } {
     let guards = 0;
     for (const e of this.physics.entities.values()) if (e.kind === 'guard') guards++;
-    return { entities: this.physics.entityCount, effects: this.effects.length, guards };
+    return {
+      entities: this.physics.entityCount,
+      effects: this.effects.length,
+      guards,
+      regions: this.pools.length + this.steams.length + this.flames.length,
+      elementBodies: this.bodyEl.size,
+    };
+  }
+
+  /** Debug/test-only: adds a water patch as fixture setup (D04 "initial material patches"). */
+  debugAddPool(
+    owner: PlayerSlot,
+    x: number,
+    z: number,
+    r: number,
+    depth: number,
+    temp?: number,
+  ): number {
+    const el = this.rules.elements;
+    const id = this.nextEffectId++;
+    this.pools.push({
+      id,
+      owner,
+      x,
+      z,
+      r,
+      depth: clamp(depth, 0.05, 1),
+      temp: temp ?? el.ambientTemp,
+      ice: -1,
+      electrified: 0,
+      charge: 0,
+      ttl: this.ticks(el.pool.lifetimeSeconds),
+    });
+    return id;
+  }
+
+  /** Debug/test-only: read-only copies of the element regions. */
+  debugRegions(): {
+    pools: readonly Readonly<PoolState>[];
+    steams: readonly Readonly<SteamState>[];
+    flames: readonly Readonly<FlameState>[];
+  } {
+    return {
+      pools: this.pools.map((x) => ({ ...x })),
+      steams: this.steams.map((x) => ({ ...x })),
+      flames: this.flames.map((x) => ({ ...x })),
+    };
+  }
+
+  /** Debug/test-only: element state of a body (null = neutral). */
+  debugBodyElement(id: EntityId): Readonly<BodyElementState> | null {
+    const st = this.bodyEl.get(id);
+    return st ? { ...st } : null;
+  }
+
+  /** Debug/test-only: entity ids of a kind, ascending. */
+  debugEntities(kind: string): EntityId[] {
+    const out: EntityId[] = [];
+    for (const e of this.physics.entities.values()) if (e.kind === kind) out.push(e.id);
+    return out.sort((a, b) => a - b);
   }
 
   get collisionGroups(): typeof GROUP {
@@ -1413,6 +2515,11 @@ function finite(n: number): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Zero-padded id so string keys sort numerically (deterministic discharge order). */
+function pad(n: number): string {
+  return String(n).padStart(7, '0');
+}
+
 function reject(seq: number, reason: RejectReason, tick: number): ActionResult {
   return { seq, accepted: false, reason, tick };
 }
@@ -1423,6 +2530,7 @@ function clonePlayer(p: PlayerState): PlayerState {
     cooldowns: { ...p.cooldowns },
     hold: p.hold ? { ...p.hold } : null,
     guards: [...p.guards],
+    loadout: [...(p.loadout ?? DEFAULT_LOADOUT)],
   };
 }
 

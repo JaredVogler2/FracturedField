@@ -1,0 +1,30 @@
+{
+  "id": "R5",
+  "title": "wet chain + charge → the soaked guard overloads and the shot goes through",
+  "seed": 5,
+  "ticks": 220,
+  "script": [
+    { "t": 0, "slot": 1, "act": "guard", "at": [13, 0], "dir": [1, 0] },
+    { "t": 53, "place": "core", "p": [3.5, 1.15, 0] },
+    { "t": 53, "slot": 0, "act": "pulse", "at": [1.5, 0] }
+  ],
+  "variants": {
+    "control": {
+      "pools": [
+        { "owner": 1, "x": 5.2, "z": 3.2, "r": 2.5, "depth": 0.8 },
+        { "owner": 1, "x": 9.2, "z": 2.6, "r": 2.2, "depth": 0.8 },
+        { "owner": 1, "x": 13, "z": 0, "r": 2.2, "depth": 0.6 }
+      ],
+      "expect": { "notGoal": 0, "reactions": { "overload": 0 } }
+    },
+    "reaction": {
+      "pools": [
+        { "owner": 1, "x": 5.2, "z": 3.2, "r": 2.5, "depth": 0.8 },
+        { "owner": 1, "x": 9.2, "z": 2.6, "r": 2.2, "depth": 0.8 },
+        { "owner": 1, "x": 13, "z": 0, "r": 2.2, "depth": 0.6 }
+      ],
+      "script": [{ "t": 11, "slot": 0, "act": "charge", "at": [1.9, 0] }],
+      "expect": { "goal": 0, "reactions": { "overload": 1, "shock": 3 } }
+    }
+  }
+}
