@@ -187,6 +187,70 @@ export function createMembraneMaterial(
   }) as THREE.ShaderMaterial & { uniforms: MembraneUniforms };
 }
 
+interface RiftGlassUniforms {
+  [uniform: string]: THREE.IUniform;
+  uColor: { value: THREE.Color };
+  uTime: { value: number };
+  uGlow: { value: number };
+}
+
+/**
+ * Translucent rift glass (Phase 07A): crystal that lets the world show through, bright facets at
+ * grazing angles (fresnel) and energy rising from the root where it grew out of the crack.
+ * Premultiplied alpha, so it both veils what is behind it and glows. Instancing-aware.
+ */
+export function createRiftGlassMaterial(
+  color: string,
+  glow = 2,
+): THREE.ShaderMaterial & { uniforms: RiftGlassUniforms } {
+  const uniforms: RiftGlassUniforms = {
+    uColor: { value: new THREE.Color(color) },
+    uTime: { value: 0 },
+    uGlow: { value: glow },
+  };
+  return new THREE.ShaderMaterial({
+    uniforms,
+    transparent: true,
+    premultipliedAlpha: true,
+    depthWrite: false,
+    vertexShader: /* glsl */ `
+      varying vec3 vN;
+      varying vec3 vV;
+      varying float vH;
+      void main() {
+        vec4 p = vec4(position, 1.0);
+        vec3 n = normal;
+        #ifdef USE_INSTANCING
+          p = instanceMatrix * p;
+          n = mat3(instanceMatrix) * n;
+        #endif
+        vH = position.y;
+        vec4 mv = modelViewMatrix * p;
+        vV = -mv.xyz;
+        vN = normalize(normalMatrix * n);
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uColor;
+      uniform float uTime;
+      uniform float uGlow;
+      varying vec3 vN;
+      varying vec3 vV;
+      varying float vH;
+      void main() {
+        float ndv = abs(dot(normalize(vN), normalize(vV)));
+        float fres = pow(1.0 - ndv, 3.0);
+        float root = smoothstep(1.2, 0.0, vH);
+        float pulse = 0.85 + 0.15 * sin(uTime * 1.7 + vH * 6.0);
+        vec3 col = uColor * (0.3 + root) * uGlow * pulse + vec3(0.86, 0.8, 1.0) * fres * 0.9;
+        float a = 0.26 + 0.52 * fres + 0.18 * root;
+        gl_FragColor = vec4(col * a, a);
+      }
+    `,
+  }) as THREE.ShaderMaterial & { uniforms: RiftGlassUniforms };
+}
+
 /** Storm sky dome: abyss zenith, storm horizon, warm break glow toward the key light. */
 export function createSkyMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({

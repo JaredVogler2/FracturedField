@@ -78,7 +78,7 @@ export function GameScene({
       />
       <Atmosphere />
       <Lights tier={tier} />
-      <Arena textureSize={tier.textureSize} />
+      <Arena textureSize={tier.textureSize} tier={tier.name} />
       <Entities />
       <Manipulators />
       <WaterAndIce />

@@ -124,9 +124,9 @@ export function generateFloorTextures(
         const v = Math.abs(vein.fbm(x * 0.55 + 7.1, z * 0.55 - 3.3, 4) - 0.5);
         if (v < 0.012 && edgeDist >= GROUT) {
           const k = 1 - v / 0.012;
-          r += (150 - r) * k * 0.35;
-          g += (165 - g) * k * 0.35;
-          b += (178 - b) * k * 0.35;
+          r += (150 - r) * k * 0.22;
+          g += (165 - g) * k * 0.22;
+          b += (178 - b) * k * 0.22;
           rough -= 0.25 * k;
           h -= 0.15 * k;
         }
@@ -178,13 +178,29 @@ export function generateFloorTextures(
           h = 0.9;
         }
       } else {
-        // Beyond the walls: rough, darker undressed stone.
-        const tone = 0.55 + n * 0.35;
-        r = dark[0] * tone;
-        g = dark[1] * tone;
-        b = dark[2] * tone;
-        rough = 0.9;
-        h = 0.6 + n * 0.4;
+        // Beyond the walls the paving runs on under the walls to the platform's slabs: the same
+        // courses, undressed — darker, rougher, wider joints, no veins, tint or inlays.
+        const tone = (rowTones[ti] ?? 1) * (0.6 + n * 0.3) * (0.92 + speck * 0.16);
+        r = base[0] * tone;
+        g = base[1] * tone;
+        b = base[2] * tone;
+        rough = 0.82 + speck * 0.12;
+        h = 1;
+        if (edgeDist < GROUT * 1.6) {
+          r = dark[0] * 0.4;
+          g = dark[1] * 0.4;
+          b = dark[2] * 0.4;
+          rough = 0.95;
+          ao = 0.45;
+          h = 0;
+        } else if (edgeDist < BEVEL) {
+          const k = (edgeDist - GROUT * 1.6) / (BEVEL - GROUT * 1.6);
+          h = 0.3 + 0.7 * Math.sqrt(k);
+          ao = 0.68 + 0.32 * k;
+          r *= 0.8 + 0.2 * k;
+          g *= 0.8 + 0.2 * k;
+          b *= 0.8 + 0.2 * k;
+        }
       }
 
       color[o] = clamp255(r);

@@ -13,7 +13,7 @@ import { roomServiceUrl, roomSocketUrl } from '../net/room-service';
 import { forgetSeat, updateSeatTicket, type StoredSeat } from '../net/seat-store';
 import type { SeatLoadouts, SessionDriver } from '../net/session';
 import { GameClientProvider, useGameClient } from '../render/frame-context';
-import { GameScene } from '../render/Scene';
+import { GameScene, type CameraOverride } from '../render/Scene';
 import { InputManager, isControlActivation, type SeatConfig } from '../input/manager';
 import { P1_BINDINGS, P2_BINDINGS, SOLO_BINDINGS, applyOverride } from '../input/bindings';
 import {
@@ -40,6 +40,8 @@ import { teamOf } from './teams';
 import { DevHud } from '../hud/DevHud';
 import { NetPanel } from '../hud/NetPanel';
 import { view } from '../render/view';
+import { renderStats } from '../render/render-stats';
+import { surfaceStats } from '../render/arena/surfaces';
 
 /**
  * ?test=1 only: what this device sent (source and action, never the aim), numbered so an E2E
@@ -51,6 +53,26 @@ const intentLog:
     ? []
     : null;
 let intentCount = 0;
+
+/** Named camera poses for the visual review loop (Phase 07, D07/D11): ?test=1&shot=NAME. */
+const REVIEW_SHOTS = {
+  /** Along the field from just above the near wall: both gates, the core, the storm beyond. */
+  hero: { position: [-2, 7.5, 27], target: [2, 1.2, -2], fov: 58 },
+  /** Close on the +X rift gate from the field. */
+  gate: { position: [9, 3.2, 8.5], target: [21.5, 4.2, -0.5], fov: 50 },
+  /** Over the broken rim: slabs, fragments, the underside and the distant formations. */
+  rim: { position: [-14, 8, 44], target: [-16, -3, 20], fov: 50 },
+  /** High and far: the whole platform in its storm. */
+  wide: { position: [-48, 46, 62], target: [0, -4, 0], fov: 42 },
+  /** Zoom crops for material review: wall blocks and slabs at a field corner. */
+  stone: { position: [-16.5, 2.4, 18.5], target: [-19.5, 0.3, 14], fov: 38 },
+  /** Brass and steel on a gate pylon. */
+  brass: { position: [16.8, 2.6, 8.2], target: [21.4, 1.4, 4.6], fov: 34 },
+  /** Under the rim: the stepped mass, the steel ribs, hanging fragments. */
+  under: { position: [-34, -5, 44], target: [-8, -4, 8], fov: 48 },
+  /** Behind the +X gate: the carved channel and its inlay, the gyroscope's hanger and axle. */
+  channel: { position: [37, 7.5, 9], target: [25, 2.5, 0], fov: 50 },
+} as const satisfies Record<string, CameraOverride>;
 
 export type MatchMode =
   | { kind: 'attract' }
@@ -207,6 +229,14 @@ export function MatchView({
   const lobby = useHud((s) => s.lobby);
   const netPanel = useMemo(() => new URLSearchParams(window.location.search).has('net'), []);
   const quality = useSettings((s) => s.quality);
+  // ?test=1&shot=NAME: a fixed cinematic camera for golden screenshots (visual review only).
+  const reviewShot = useMemo(() => {
+    const p = new URLSearchParams(window.location.search);
+    const name = p.get('shot');
+    return p.has('test') && name && name in REVIEW_SHOTS
+      ? REVIEW_SHOTS[name as keyof typeof REVIEW_SHOTS]
+      : null;
+  }, []);
   const qualityOverride = useMemo(() => {
     const q = new URLSearchParams(window.location.search).get('quality');
     return q === 'low' || q === 'medium' || q === 'high' ? q : null;
@@ -295,6 +325,8 @@ export function MatchView({
       transport: () => useHud.getState().transport.state,
       lobby: () => useHud.getState().lobby,
       matchEnd: () => useHud.getState().matchEnd,
+      // Renderer counters (all passes of the last frame) and texture-generation cost at load.
+      renderStats: () => ({ ...renderStats, surfaces: { ...surfaceStats } }),
     };
     return () => {
       offAcks();
@@ -523,6 +555,7 @@ export function MatchView({
           side={mySlot === 1 ? -1 : 1}
           portraitSlot={mySlot}
           controlsSide={touchUi ? controls.hand : null}
+          {...(reviewShot ? { camera: reviewShot } : {})}
         >
           {setup.seats.length > 0 ? (
             <InputBridge
