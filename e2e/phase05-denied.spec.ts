@@ -32,7 +32,7 @@ test('no camera permission (headless browser cannot prompt) → message, fallbac
   await expect(page.getByTestId('camera-error')).toBeVisible({ timeout: 20_000 });
   await page.getByTestId('camera-fallback').click();
   await expect(page.getByTestId('camera-setup')).toBeHidden();
-  await expect(page.getByTestId('controls-keyboard')).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByTestId('controls-desktop')).toHaveAttribute('aria-checked', 'true');
   await page.getByTestId('start-match').click();
   await expect
     .poll(async () => (await snap(page))?.match.phase, { timeout: 30_000 })

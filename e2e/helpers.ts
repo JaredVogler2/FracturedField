@@ -1,4 +1,4 @@
-import { expect, type Browser, type Page } from '@playwright/test';
+import { expect, type Browser, type BrowserContextOptions, type Page } from '@playwright/test';
 
 export interface Snap {
   tick: number;
@@ -21,6 +21,11 @@ export interface Snap {
 interface DebugHook {
   snapshot(): Snap | null;
   project(x: number, y: number, z: number): { x: number; y: number } | null;
+  /** The intents this page sent (bounded, numbered log): seat, source and action, no aim. */
+  intents(): { n: number; slot: number; source: string; action: string; phase: string }[];
+  /** Authority verdicts, numbered (see mark()). */
+  acks(): { n: number; slot: number; action?: string; accepted: boolean; reason?: string }[];
+  mark(): number;
   slot(): 0 | 1 | null;
   transport(): string;
   lobby(): { phase: string; seats: { connected: boolean; ready: boolean }[] } | null;
@@ -100,10 +105,14 @@ const VIEW = { width: 960, height: 540 };
 /** Host creates a room, a second browser context (another "device") joins by invite link. */
 export async function openRoom(
   browser: Browser,
-  opts: { beforeNavigate?: (host: Page, guest: Page) => void } = {},
+  opts: {
+    beforeNavigate?: (host: Page, guest: Page) => void;
+    /** Device emulation for the guest (e.g. a phone with touch and no camera permission). */
+    guest?: BrowserContextOptions;
+  } = {},
 ) {
   const ctxA = await browser.newContext({ viewport: VIEW });
-  const ctxB = await browser.newContext({ viewport: VIEW });
+  const ctxB = await browser.newContext(opts.guest ?? { viewport: VIEW });
   const a = await ctxA.newPage();
   const b = await ctxB.newPage();
   const errors: string[] = [];
