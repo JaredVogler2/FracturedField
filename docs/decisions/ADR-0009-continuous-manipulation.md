@@ -37,7 +37,9 @@ It rides on the existing `aim` intents (the stream that already flows at input r
 is no new message type, no new rate limit and nothing camera-specific: the camera, a mouse, a
 touch screen, a gamepad and a tilted phone all produce the same four numbers (§4). The
 authority keeps the latest state per seat and decays it to "open, still" when it goes stale
-(300 ms), so a lost connection or a lost hand can never leave a body gripped.
+(600 ms), so a lost connection or a lost hand can never leave a body gripped. (It was 300 ms
+until CI showed a page drawing a frame every ~0.45 s losing its grip every frame: hands are sent
+at the input rate, so the window has to ride out a render hitch or a burst of network jitter.)
 
 ### 2. The authority turns the hand into forces — continuously, bounded, deterministic
 

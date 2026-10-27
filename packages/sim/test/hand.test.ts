@@ -147,6 +147,20 @@ describe('grip and throw', () => {
     k.dispose();
   });
 
+  it('a hand that arrives late — a stalled frame, a burst of network jitter — keeps its grip', async () => {
+    const b = await bench();
+    b.tick([-6, 0], FIST);
+    expect(b.w.debugPlayer(0).grasp).toBe(b.core);
+    // Updates 0.45 s apart for about 3 s: a page drawing ~2 frames a second, or a jittery link.
+    const gap = Math.round(0.45 * DEFAULT_RULES.match.tickRate) - 1;
+    for (let i = 0; i < 7; i++) {
+      stepN(b.w, gap);
+      b.tick([-6, 0], FIST);
+      expect(b.w.debugPlayer(0).grasp, `update ${i + 1}`).toBe(b.core);
+    }
+    b.w.dispose();
+  });
+
   it('a lost hand (no update for the stale time) lets go; so does a disconnect', async () => {
     const b = await bench();
     b.tick([-6, 0], FIST);

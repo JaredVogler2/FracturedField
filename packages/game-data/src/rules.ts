@@ -225,7 +225,10 @@ export const DEFAULT_RULES: GameRules = {
     dampingRatio: 0.7,
     maxHoldAcceleration: 40,
     regripSeconds: 0.2,
-    staleSeconds: 0.3,
+    // Long enough to ride out a render hitch or a burst of network jitter (at 0.3 s, a page
+    // drawing a frame every ~0.45 s let go every frame — seen in CI), short enough that a hand
+    // that is really gone lets go within a blink.
+    staleSeconds: 0.6,
     sweepRadius: 2.6,
     sweepGain: 6,
     maxSweepAcceleration: 30,

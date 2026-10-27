@@ -143,19 +143,33 @@ test('camera, hands-on by default: grip the core, swing, let go — and score ag
   expect(errors).toEqual([]);
 });
 
-/** Presses the mouse on the core as page `p` shows it and waits until seat `slot` holds it. */
+/**
+ * Grips the core with the mouse the way a person reaches for it: the hand closes first and then
+ * moves onto the core, so it takes hold on arrival (within reach) instead of knocking the core
+ * away — an open hand moving fast is a stroke. If the core slipped away meanwhile (it may still be
+ * rolling) or the hand closed on something else, it opens and reaches again. Then waits until
+ * every device sees seat `slot` holding the core.
+ */
 async function mouseGrip(p: Page, slot: 0 | 1, others: Page[]) {
-  const c = coreOf((await snapshot(p))!);
-  const at = (await project(p, c.p[0], 1.1, c.p[2]))!;
-  await p.mouse.move(at.x, at.y);
-  await p.waitForTimeout(300);
-  await p.mouse.down();
+  const id = coreOf((await snapshot(p))!).id;
+  const grasp = async (q: Page) => (await snapshot(q))!.players[slot]!.grasp;
+  for (let attempt = 0; attempt < 6 && (await grasp(p)) !== id; attempt++) {
+    await p.mouse.down();
+    const c = coreOf((await snapshot(p))!);
+    const at = (await project(p, c.p[0], 1.1, c.p[2]))!;
+    await p.mouse.move(at.x, at.y, { steps: 4 });
+    const held = await expect
+      .poll(() => grasp(p), { timeout: 8_000 })
+      .toBe(id)
+      .then(
+        () => true,
+        () => false,
+      );
+    if (!held) await p.mouse.up();
+  }
   // The room's authority grips it, and every device sees the grip.
-  for (const q of [p, ...others])
-    await expect
-      .poll(async () => (await snapshot(q))!.players[slot]!.grasp, { timeout: 10_000 })
-      .toBe(c.id);
-  return c.id;
+  for (const q of [p, ...others]) await expect.poll(() => grasp(q), { timeout: 10_000 }).toBe(id);
+  return id;
 }
 
 /** Carries what seat `p` holds to (x, z) in `steps`, button held. */

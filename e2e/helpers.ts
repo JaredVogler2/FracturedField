@@ -1,4 +1,5 @@
 import { expect, type Browser, type BrowserContextOptions, type Page } from '@playwright/test';
+import { throttle } from './throttle';
 
 export interface Snap {
   tick: number;
@@ -137,6 +138,8 @@ export async function openRoom(
   const ctxB = await browser.newContext(opts.guest ?? { viewport: VIEW });
   const a = await ctxA.newPage();
   const b = await ctxB.newPage();
+  await throttle(a);
+  await throttle(b);
   const errors: string[] = [];
   a.on('pageerror', (e) => errors.push(`A: ${e.message}`));
   b.on('pageerror', (e) => errors.push(`B: ${e.message}`));
