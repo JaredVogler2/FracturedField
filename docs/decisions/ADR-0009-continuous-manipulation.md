@@ -50,9 +50,14 @@ speed, so its velocity is known to the authority, never reported by the client):
   releases with whatever velocity the body has: **throwing is not an ability, it is letting go
   of something you are swinging.** Engage/release use hysteresis (≥ 0.6 / ≤ 0.35) so a noisy
   half-closed hand does not flicker.
-- **Twist → spin → curve.** Rolling the wrist while gripping spins the body about the vertical;
-  a spinning core moving across the field curves (a bounded Magnus-like side force that decays
-  with spin) — bend-it shots around a pillar come from the wrist, not a menu.
+- **Twist → spin → curve.** Turning the wrist while gripping spins the body about the
+  vertical — a clockwise turn, as the player sees their own hand, spins it clockwise seen from
+  above, and a thrown core then bends to the right of its motion, as a struck ball does. The
+  core keeps that *deliberate* spin (it decays like the core's angular damping, and a hard
+  contact scrubs half of it), and while it moves the spin curves it with a bounded Magnus-like
+  side force — bend-it shots around a pillar come from the wrist, not a menu. Spin from glancing
+  collisions does **not** curve the core: rebounds stay predictable (bank shots are a skill), a
+  curve is always a player's act, and play without a hand channel is bit-identical to before.
 - **Open hand → drag the medium.** An open hand moving through the field drags nearby bodies
   toward its own velocity (falloff with distance, like moving your hand through water): a slow
   pass nudges, a fast swipe sweeps. SWEEP's effect becomes what any quick open-hand stroke does.

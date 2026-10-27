@@ -1,6 +1,7 @@
 import { MERIDIAN_ARENA, type ArenaLayout } from '@ff/game-data';
 import type {
   ActionIntent,
+  HandState,
   InputSource,
   IntentAction,
   IntentPhase,
@@ -25,6 +26,8 @@ export interface IntentOptions {
   readonly intensity?: number;
   readonly modifier?: number;
   readonly source?: InputSource;
+  /** The continuous hand channel (ADR-0009). */
+  readonly hand?: HandState;
 }
 
 /** Builds a canonical intent. `at` is a world (x, z) target converted to normalized aim. */
@@ -45,6 +48,7 @@ export function makeIntent(
     intensity: opts.intensity ?? 1,
     ...(opts.modifier !== undefined ? { modifier: opts.modifier } : {}),
     source: opts.source ?? 'keyboard',
+    ...(opts.hand ? { hand: opts.hand } : {}),
   };
 }
 

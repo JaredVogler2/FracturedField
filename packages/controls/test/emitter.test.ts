@@ -26,6 +26,31 @@ describe('IntentEmitter', () => {
     expect(out.map((i) => `${i.action}:${i.phase}`)).toEqual(['lift:start', 'lift:end']);
   });
 
+  it('carries the hand channel: clamped, sent on change, kept alive while active, rested when open', () => {
+    const out: ActionIntent[] = [];
+    const e = new IntentEmitter(0, 'camera', (_s, i) => out.push(i), 15);
+    const at = (t: number, grip: number, push = 0, twist = 0) =>
+      e.aim([0.2, 0.1], t, false, { grip, push, twist });
+    at(0, Number.NaN, 7, -7); // hostile values clamp; an open hand is still sent once
+    expect(out.at(-1)!.hand).toEqual({ grip: 0, push: 1, twist: -1 });
+    at(100, 0.2); // aim still, but the hand changed
+    expect(out).toHaveLength(2);
+    at(120, 0.21); // within the throttle and below the change threshold: nothing
+    expect(out).toHaveLength(2);
+    // A closed, unmoving hand is re-sent every keep-alive interval (never goes stale).
+    for (let t = 200; t <= 1000; t += 16) at(t, 1);
+    const kept = out.filter((i) => i.clientTime >= 200).map((i) => i.clientTime);
+    for (let k = 1; k < kept.length; k++) expect(kept[k]! - kept[k - 1]!).toBeLessThanOrEqual(120);
+    // Opening the hand is sent once; an open, still hand then rests like a plain aim.
+    const n = out.length;
+    for (let t = 1100; t <= 1400; t += 16) at(t, 0);
+    expect(out.length).toBe(n + 1);
+    expect(out.at(-1)!.hand).toEqual({ grip: 0, push: 0, twist: 0 });
+    // Inputs without a hand send none.
+    e.aim([0.5, 0.5], 2000);
+    expect(out.at(-1)!.hand).toBeUndefined();
+  });
+
   it('maps world metres to normalized aim', () => {
     expect(worldToAim(21, -12.5, { halfLength: 21, halfWidth: 12.5 })).toEqual([1, -1]);
     expect(worldToAim(1e9, Number.NaN, { halfLength: 21, halfWidth: 12.5 })).toEqual([1, 0]);

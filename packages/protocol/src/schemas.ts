@@ -23,6 +23,7 @@ export const ActionIntentSchema = v.strictObject({
   intensity: bounded(0, 1),
   modifier: v.optional(int(-8, 8)),
   source: v.picklist(INPUT_SOURCES),
+  hand: v.optional(v.strictObject({ grip: bounded(0, 1), push: unit, twist: unit })),
 });
 
 const token = v.pipe(v.string(), v.maxLength(600), v.regex(/^[A-Za-z0-9_\-.]+$/));

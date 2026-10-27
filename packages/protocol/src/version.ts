@@ -4,7 +4,7 @@ import { SIM_VERSION } from '@ff/game-data';
  * Wire protocol version. Bump on any breaking message/shape change. A client and server only
  * play together when both PROTOCOL_VERSION and SIM_VERSION match exactly.
  */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 export { SIM_VERSION };
 

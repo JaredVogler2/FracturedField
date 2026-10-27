@@ -1,6 +1,7 @@
 # MILESTONE 06M — Continuous physical manipulation
 
-**Status: IN PROGRESS — design accepted (ADR-0009); implementation starts with M1.**
+**Status: IN PROGRESS — M1 (authority) done; the M2 camera mapper and the M3 task judge are
+built and tested; their client integration (input adapters, the Hands Lab page) is next.**
 
 Inserted by the owner's direction (October 2026) between Phase 06 and the rest of Phase 07:
 *development should demonstrate that real people can intuitively bend physical objects with
@@ -47,4 +48,62 @@ taught, and which mappings they find natural.
 
 ## Evidence so far
 
-- ADR-0009 (design) — this commit. Implementation evidence is added per milestone above.
+### M1 — authority (done)
+
+- **Protocol** (`@ff/protocol`, PROTOCOL 3, SIM 3): `HandState` (`grip` 0–1, `push` and `twist`
+  −1–1) on `aim` intents, validated by the schema and clamped again by the authority; a `grip`
+  event (start / end with the body's velocity); `grasp` in each player snapshot; the core's
+  deliberate spin `s` in its entity snapshot.
+- **Tuning** (`@ff/game-data → DEFAULT_RULES.hand`): engage 0.6 / release 0.35, reach 3.2 m,
+  stiffness 6–40 s⁻² with damping ratio 0.7 and velocity matching, hold height 2.2 m, accelerations
+  capped (hold 40, sweep 30, push 40 m/s², all inside the per-body field cap), 0.3 s stale hand,
+  0.2 s regrip, spin 14 rad/s, Magnus 0.05 capped at 4 m/s², energy 4/s holding plus 0.6 per
+  m/s of Δv given (a full swing-and-throw costs about a PULSE).
+- **Simulation** (`@ff/sim → GameWorld`, tick step 4): grip engages on the nearest movable body
+  in reach (the core favoured; never the core under the kickoff shield; not without energy for a
+  quarter second of holding); the hold is a spring–damper to the force point that matches the
+  hand's velocity, stiffer the more the hand is closed; opening lets go with the body's own
+  velocity; twisting spins the held body and gives the core its curving spin; an open moving
+  hand drags bodies only where it moves faster than they do; push / pull press away from or draw
+  toward the hand. A stale hand, a disconnect, a pause, a goal or a reset lets go. A PULSE or a
+  LIFT by the same player takes over from the grip.
+- **Tests** (`packages/sim/test/hand.test.ts`, 12): grip engages above 0.6 (not at 0.5), carries
+  the core to the hold height on the hand; swinging −8 → −2 m and opening throws the core along
+  +x at > 5 m/s and ≤ 1.35 × the hand's top speed; a light grip (0.5) tracks a swaying hand ≥ 1.8×
+  more loosely than a fist; hysteresis and the regrip delay; no grip out of reach or through the
+  kickoff shield; a stale hand and a disconnect let go; a clockwise twist curves the thrown core
+  to the right of its motion and an anticlockwise one to the left, symmetrically, within the cap,
+  and the spin decays; an open hand sweeping past drags the core along its motion, more the
+  faster it moves, never faster than the hand; push drives the core away, pull draws it in, the
+  dead zone does nothing, both cost energy; holding still costs ≈ 4/s, a full throw 3–25 energy;
+  running out of energy lets go; NaN / ±Infinity / ±1e308 hand values never reach the state;
+  the same hand log gives the same state hash, and a checkpoint taken mid-grip continues
+  identically.
+- **Discrete play unchanged:** the D04 golden fixtures and the 100-tick physics golden hash
+  exactly as before (hand state enters the state hash only when present).
+
+### M2 — inputs (core built; adapters next)
+
+- **Camera mapper** (`@ff/gestures → ContinuousMapper`, pure, clocked by frame timestamps): grip
+  from each finger's bend between the open palm and the fist (median of 3, 45 ms smoothing);
+  push from the least-squares slope of the median-of-3 log palm size over ≥ 0.3 s and ≥ 5
+  frames, less a 0.2 s⁻¹ jitter floor; twist from the knuckle line's image angle, zeroed on how
+  the hand was held when it was first seen (or a calibrated neutral), less 4° of tremor, over
+  50°. The gesture engine now reports the locked hand's features and knuckle angle.
+- **Intent emitter** (`@ff/controls`): the hand rides on aim intents — clamped, sent on change,
+  re-sent every 100 ms while active (the authority's stale time is 300 ms), sent once more when
+  the hand opens.
+- **Tests** (`packages/gestures/test/continuous.test.ts` 12, `packages/controls` +1): open → fist
+  → open ramps grip through the engage and release grips at 30 / 15 / 8 fps; a relaxed,
+  trembling hand stays well below the engage grip; an approach pushes (> 0.5), drawing back
+  pulls, holding still settles inside the dead zone; at typical jitter < 5 % of still frames pass
+  the push dead zone (at double jitter < 15 %, and weakly); a clockwise turn reads positive for
+  either hand anywhere in the frame; a lost hand reads open at once and re-zeroes its twist on
+  return; tremor stays inside the twist dead zone.
+
+### M3 — Hands Lab (judge built; page next)
+
+- **Task judge** (`apps/web/src/lab/hands-tasks.ts`, pure): *place*, *throw*, *curve* and *clear*
+  judged only from authoritative snapshots and events; tests (6) cover a gentle placement versus
+  rolling through, a throw versus a push, a bent free flight (a bounce ends the measurement)
+  versus a straight one, and a boulder swept out versus carried out.

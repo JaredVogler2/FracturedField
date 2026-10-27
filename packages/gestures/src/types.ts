@@ -1,3 +1,4 @@
+import type { HandFeatures } from './features.js';
 /**
  * Canonical, transport-free landmark and gesture types. Everything in this package runs on the
  * player's own device; landmark frames are ephemeral and never serialised to the network — only
@@ -120,5 +121,9 @@ export interface GestureOutput {
     /** Palm normal z (negative = palm facing the camera, given the hand's label). */
     readonly normalZ: number;
     readonly handedness: Handedness;
+    /** The locked hand's features this frame (the continuous channel reads its closure, size). */
+    readonly features: HandFeatures;
+    /** Its knuckle-line angle in the image (radians, clockwise), for the twist. */
+    readonly roll: number;
   } | null;
 }

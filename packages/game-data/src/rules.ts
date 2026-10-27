@@ -78,6 +78,60 @@ export interface ManipulatorRules {
   readonly height: number;
 }
 
+/**
+ * Continuous manipulation (ADR-0009): how the hand channel (grip, push, twist) becomes force.
+ * Accelerations are m/s² on a body of the core's mass (lighter bodies a little more, heavier ones
+ * less, as `massScale`); every hand force goes through the per-body field cap. Energy is spent in
+ * proportion to the work done (acceleration × mass ratio × time), so holding still is cheap and
+ * flinging is not — a full-strength throw costs about what a PULSE does.
+ */
+export interface HandRules {
+  /** The hand closes on a body at or above this grip and lets go at or below the release grip. */
+  readonly engageGrip: number;
+  readonly releaseGrip: number;
+  /** A body is grippable within this horizontal distance of the force point (m). */
+  readonly reach: number;
+  /** The core counts as this much closer when choosing what to grip (m). */
+  readonly coreBias: number;
+  /** A gripped body slips out when it ends up farther than this from the force point (m). */
+  readonly breakDistance: number;
+  /** Height a gripped body is carried at (centre, m). */
+  readonly holdHeight: number;
+  /** Hold spring stiffness at the lightest and the firmest grip (1/s²). */
+  readonly stiffness: readonly [number, number];
+  /** Damping ratio of the hold relative to the hand (the body matches the hand's velocity). */
+  readonly dampingRatio: number;
+  /** Cap on a hold's acceleration (m/s²; gravity support included). */
+  readonly maxHoldAcceleration: number;
+  /** Ticks after letting go before the hand may grip again (s). */
+  readonly regripSeconds: number;
+  /** A hand state older than this counts as an open, still hand (s). */
+  readonly staleSeconds: number;
+  /** Open hand moving: bodies within this radius (m) are dragged along the hand's motion. */
+  readonly sweepRadius: number;
+  /** Drag gain toward the hand's velocity (1/s), its cap (m/s²) and the hand speed it needs (m/s). */
+  readonly sweepGain: number;
+  readonly maxSweepAcceleration: number;
+  readonly minSweepSpeed: number;
+  /** Push / pull: radius (m), acceleration at full push (m/s²), dead zone (|push| below it: none). */
+  readonly pushRadius: number;
+  readonly pushAcceleration: number;
+  readonly pushDeadZone: number;
+  /** Twist spins a gripped body about the vertical: rate at full twist (rad/s), gain (1/s), dead zone. */
+  readonly maxSpin: number;
+  readonly spinGain: number;
+  readonly twistDeadZone: number;
+  /** Curve of a spinning core: a = magnus · ω × v (per rad), capped (m/s²). */
+  readonly magnus: number;
+  readonly maxMagnusAcceleration: number;
+  /** A core contact at least this hard (N·s) keeps only `spinKeptOnImpact` of the spin. */
+  readonly spinScrubImpulse: number;
+  readonly spinKeptOnImpact: number;
+  /** Energy per second while gripping, and per (m/s² · s) of applied acceleration (≈ per m/s of Δv). */
+  readonly holdCostPerSecond: number;
+  readonly workCost: number;
+}
+
 export interface NetworkRules {
   /** Maximum intents accepted per seat per second (burst bucket refills at this rate). */
   readonly maxIntentsPerSecond: number;
@@ -94,6 +148,7 @@ export interface GameRules {
   readonly limits: WorldLimits;
   readonly core: CoreRules;
   readonly manipulator: ManipulatorRules;
+  readonly hand: HandRules;
   readonly network: NetworkRules;
   readonly elements: ElementRules;
   readonly gravity: number;
@@ -150,6 +205,35 @@ export const DEFAULT_RULES: GameRules = {
     midlineReach: 2,
     wallMargin: 0.8,
     height: 1.1,
+  },
+  hand: {
+    engageGrip: 0.6,
+    releaseGrip: 0.35,
+    reach: 3.2,
+    coreBias: 0.75,
+    breakDistance: 6,
+    holdHeight: 2.2,
+    stiffness: [6, 40],
+    dampingRatio: 0.7,
+    maxHoldAcceleration: 40,
+    regripSeconds: 0.2,
+    staleSeconds: 0.3,
+    sweepRadius: 2.6,
+    sweepGain: 6,
+    maxSweepAcceleration: 30,
+    minSweepSpeed: 1.5,
+    pushRadius: 4.5,
+    pushAcceleration: 40,
+    pushDeadZone: 0.15,
+    maxSpin: 14,
+    spinGain: 5,
+    twistDeadZone: 0.12,
+    magnus: 0.05,
+    maxMagnusAcceleration: 4,
+    spinScrubImpulse: 25,
+    spinKeptOnImpact: 0.5,
+    holdCostPerSecond: 4,
+    workCost: 0.6,
   },
   network: {
     maxIntentsPerSecond: 40,
