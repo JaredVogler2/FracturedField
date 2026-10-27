@@ -4,10 +4,17 @@
  * real ability intents processed by the authority.
  */
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_ABILITIES, DEFAULT_RULES, type AbilityId, type GameRules } from '@ff/game-data';
+import {
+  DEFAULT_ABILITIES,
+  DEFAULT_RULES,
+  MERIDIAN_ARENA,
+  type AbilityId,
+  type GameRules,
+} from '@ff/game-data';
 import type { GameEvent, PlayerSlot } from '@ff/protocol';
 import { IntentScript, skipCountdown, stepN } from '@ff/test-utils';
-import { GameWorld } from '../src/index.js';
+import { GameWorld, scoringPlaneX } from '../src/index.js';
+import { REACTION_FIXTURES, ScenarioRun } from '../src/scenario-entry.js';
 import { discharge, relaxToward, softenedPull, type Conductor } from '../src/elements.js';
 
 const H = DEFAULT_RULES.core.hoverHeight;
@@ -332,6 +339,8 @@ describe('Phase 04 mandatory element tests', () => {
     const lim = DEFAULT_RULES.limits;
     let sequences = 0;
     let reactionCount = 0;
+    let goals = 0;
+    const plane = scoringPlaneX(MERIDIAN_ARENA, DEFAULT_RULES.core);
     for (let world = 0; world < 50; world++) {
       const { w, s } = await arena({
         seed: world + 1,
@@ -360,6 +369,15 @@ describe('Phase 04 mandatory element tests', () => {
           }
           const r = w.stepFixed();
           reactionCount += reactions(r.events).length;
+          // Reactions never create scoring triggers: a goal is only ever the core centre past
+          // the scoring plane inside the goal mouth.
+          for (const e of r.events) {
+            if (e.type !== 'goal') continue;
+            goals++;
+            expect(Math.abs(e.p[0])).toBeGreaterThanOrEqual(plane - 1e-3);
+            expect(Math.abs(e.p[2])).toBeLessThan(w.arena.goal.mouthHalfWidth);
+            expect(e.p[1]).toBeLessThan(w.arena.goal.mouthHeight);
+          }
           const snap = w.snapshot();
           expect(snap.entities.length).toBeLessThanOrEqual(lim.maxDynamicBodies);
           expect(w.counters.effects).toBeLessThanOrEqual(lim.maxActiveEffects);
@@ -378,7 +396,38 @@ describe('Phase 04 mandatory element tests', () => {
     }
     expect(sequences).toBe(1000);
     expect(reactionCount).toBeGreaterThan(100);
+    expect(goals).toBeGreaterThanOrEqual(0);
   }, 120_000);
+
+  it('steam veils are bounded and counterable: the core stays replicated and the veil expires', async () => {
+    const fx = REACTION_FIXTURES.find((f) => f.id === 'R3')!;
+    const run = await ScenarioRun.create(fx, 'reaction');
+    const maxVeil = Math.ceil(EL.steam.lifetimeSeconds * DEFAULT_RULES.match.tickRate) + 1;
+    let streak = 0;
+    let longest = 0;
+    let veiledTicks = 0;
+    try {
+      while (!run.done) {
+        const { snapshot } = run.step();
+        const core = snapshot.entities.find((e) => e.kind === 'core');
+        // The core is never removed from what both players receive, only its aim read is withheld.
+        expect(core).toBeDefined();
+        expect(Number.isFinite(core!.p[0] + core!.p[1] + core!.p[2])).toBe(true);
+        expect(snapshot.effects.filter((e) => e.kind === 'steam').length).toBeLessThanOrEqual(
+          EL.maxSteams,
+        );
+        if (core!.veil) {
+          veiledTicks++;
+          streak++;
+          longest = Math.max(longest, streak);
+        } else streak = 0;
+      }
+    } finally {
+      run.dispose();
+    }
+    expect(veiledTicks).toBeGreaterThan(0);
+    expect(longest).toBeLessThanOrEqual(maxVeil);
+  });
 
   it('advanced moves outside a seat’s loadout are refused', async () => {
     const { w, s } = await arena({

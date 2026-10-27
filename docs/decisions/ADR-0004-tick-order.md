@@ -24,6 +24,11 @@ enters integration. Each `GameWorld.stepFixed()` performs, in this order:
 7. **Timers:** effect/guard lifetimes, cooldowns, lockouts, energy regeneration, match clock and
    phase transitions (countdown → kickoff, goal pause, round end, Golden Rift, match end).
 
+Phase 04 inserts the **element stage** (flames, pools, steam, body wet/heat — including ice
+collider creation/removal) between steps 2 and 3, adds element fields to step 3 and ice
+shatter / stone fracture to step 5; the full order is in
+[ADR-0006](ADR-0006-element-model.md#4-element-stage-in-the-fixed-tick-order-extends-adr-0004).
+
 Snapshots are produced after the step (20 Hz remote, every tick locally). Events carry
 monotonically increasing ids so clients can detect gaps.
 

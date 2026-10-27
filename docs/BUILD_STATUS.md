@@ -8,7 +8,7 @@ Nothing here is advertised as deployed or device-tested unless the evidence colu
 | 01 Architecture/feasibility | COMPLETE | `4c8fe27` | [PHASE-01](progress/PHASE-01.md): golden physics identical in Node/Chromium/workerd; 21/21 live two-client DO checks; 60 s in-DO 30 Hz benchmark (local workerd); 56 unit + 3 e2e tests |
 | 02 Local vertical slice | COMPLETE | `60d901f` | [PHASE-02](progress/PHASE-02.md): full local match loop with real input (E2E: score → win → rematch), 2 simultaneous keyboard adapters, bot, 6 D02 shots, 87 unit + 7 e2e tests, desktop + phone captures |
 | 03 Online multiplayer | COMPLETE (local) — remote leg NOT TESTED | `64a684d` | [PHASE-03](progress/PHASE-03.md): two browser contexts play create → invite → join → ready → goals → identical match digest → rematch through local workerd; refresh resume; forfeit on leave; 11 in-process two-client tests (50/100/200 ms RTT + jitter + 2 % TCP loss, reset/silent-link/restart recovery); 99 unit + 10 e2e tests. Cross-network / physical devices need a deployed Worker (Phase 12 credentials) |
-| 04 Matter/energy physics | NOT STARTED | — | — |
+| 04 Matter/energy physics | COMPLETE (local) | `2b9aaee` | [PHASE-04](progress/PHASE-04.md): R1–R10 each change a scoring trajectory vs a control (golden-hashed fixtures); 14 element tests (Δv, conduction, ice hysteresis, fracture budget, finite gravity, exactly-once events, determinism, 1,000 random sequences, steam counterplay); loadouts end to end (local + online E2E); `/lab` Physics Lab (step/rewind/overlays/material toggles); worst-case element benchmark p99 ≤ 0.9 ms (Node) / 2 ms (local workerd) per 33 ms tick; 126 unit + 13 e2e tests. VFX art pass deferred to 7C |
 | 05 Camera gestures | NOT STARTED | — | — |
 | 06 Mobile sensors/control | NOT STARTED | — | — |
 | 07 Visual production | NOT STARTED | — | — |
@@ -43,7 +43,9 @@ screenshot-driven visual review.
 - Run `pnpm install && pnpm check` first; `pnpm test:e2e` and `pnpm test:worker` need no secrets.
 - Local dev: `pnpm dev:worker` (port 8787) and `pnpm dev` (port 5173). `apps/room-worker/.dev.vars`
   is copied from `.dev.vars.example` (development-only secret).
-- Earliest incomplete phase: **04** — see the "Next instruction" in docs/progress/PHASE-03.md.
+- Earliest incomplete phase: **05** — see the "Next instruction" in docs/progress/PHASE-04.md.
+- Physics Lab: `pnpm dev` then open `/lab` (e.g. `/lab?fx=R5&t=13&cam=close`); element benchmarks:
+  `pnpm benchmark:elements` and `BENCH_SCENARIO=elements pnpm benchmark:worker`.
 - Online play locally: `pnpm dev:worker` + `pnpm dev`, then Online duel → Create room; open
   `/?room=CODE` in a second browser profile. `pnpm exec playwright test` starts both servers itself.
 - Remote/device validation of Phase 03 is still owed once a Worker is deployed (PHASE-03 lists the
