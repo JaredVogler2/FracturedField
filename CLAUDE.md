@@ -15,3 +15,10 @@ Rules:
 - Do not claim deployment, testing on physical devices, attractive final production art or benchmarks absent executed evidence.
 - At every phase write docs/progress/PHASE-XX.md and update docs/BUILD_STATUS.md including commit hash/test evidence.
 - If user says continue, resume the earliest incomplete phase instead of starting over or rewriting instructions.
+
+## Expanded build instructions (October 2026)
+
+- Before each phase read **docs/BUILD_ORDER.md**, then implement the phase's *exact* assigned deep-dive companion(s) under **prompts/deep-dives/**. In Phase 07 follow five separately gated art tasks 7A–7E; do not mark visuals complete after a single shader or lighting pass.
+- **docs/CREATIVE_TARGET.md** is the mandatory visual quality benchmark: authored environment, physically based surfaces, original animated wielders, detailed Rift Core, meaningful elemental VFX and smartphone readability. Capture and critique actual rendered screenshots, then revise code; never substitute standalone mockup art.
+- The authoritative phase table is **docs/BUILD_STATUS.md**; keep it aligned with docs/progress/PHASE-XX.md. Do not introduce an independent competing status truth source.
+- Root skill **/goal** should always use the expanded build map and complete one implementable gated unit per run; root skill **/visual-audit** is used for in-game 3D art review.
