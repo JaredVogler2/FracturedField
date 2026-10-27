@@ -1,0 +1,130 @@
+{
+  "kickoff-high": {
+    "drawCalls": 158,
+    "triangles": 174195,
+    "geometries": 79,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 909
+  },
+  "hero": {
+    "drawCalls": 134,
+    "triangles": 171123,
+    "geometries": 79,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 1012
+  },
+  "gate": {
+    "drawCalls": 93,
+    "triangles": 149597,
+    "geometries": 64,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 1073
+  },
+  "rim": {
+    "drawCalls": 121,
+    "triangles": 166339,
+    "geometries": 74,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 960
+  },
+  "wide": {
+    "drawCalls": 123,
+    "triangles": 157971,
+    "geometries": 74,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 840
+  },
+  "stone": {
+    "drawCalls": 84,
+    "triangles": 141573,
+    "geometries": 62,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 968
+  },
+  "brass": {
+    "drawCalls": 82,
+    "triangles": 139589,
+    "geometries": 57,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 962
+  },
+  "under": {
+    "drawCalls": 121,
+    "triangles": 157715,
+    "geometries": 75,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 967
+  },
+  "channel": {
+    "drawCalls": 116,
+    "triangles": 152923,
+    "geometries": 72,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 1012
+  },
+  "light-flat-kickoff": {
+    "drawCalls": 134,
+    "triangles": 171123,
+    "geometries": 78,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 969
+  },
+  "light-dark-kickoff": {
+    "drawCalls": 126,
+    "triangles": 170099,
+    "geometries": 78,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 983
+  },
+  "phone-landscape-low": {
+    "drawCalls": 80,
+    "triangles": 56981,
+    "geometries": 74,
+    "textures": 13,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 278
+  },
+  "phone-landscape-medium": {
+    "drawCalls": 124,
+    "triangles": 169843,
+    "geometries": 79,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 926
+  },
+  "light-flat-phone": {
+    "drawCalls": 130,
+    "triangles": 170365,
+    "geometries": 79,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 966
+  },
+  "light-dark-phone": {
+    "drawCalls": 132,
+    "triangles": 170621,
+    "geometries": 79,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 867
+  },
+  "phone-portrait-low": {
+    "drawCalls": 70,
+    "triangles": 50109,
+    "geometries": 68,
+    "textures": 13,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 287
+  }
+}

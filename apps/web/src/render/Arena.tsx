@@ -6,18 +6,23 @@
  * and materials from art-token recipes (arena/materials); nothing here touches physics — every
  * collider is defined in shared data, and decor stays outside the playable volume (tested).
  */
-import { createContext, useContext, useEffect, useMemo, useRef } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, type RefObject } from 'react';
 import * as THREE from 'three';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { MERIDIAN_ARENA, type ArenaLayout } from '@ff/game-data';
 import { arenaStaticShapes, type StaticShape } from '@ff/sim/arena';
 import { generateFloorTextures } from './floor-texture';
-import { ARENA_ART, LIGHTING, PALETTE, TEAM_COLORS } from './art-tokens';
+import { ARENA_ART, GLOW, LIGHTING, PALETTE, TEAM_COLORS } from './art-tokens';
 import { createMembraneMaterial, createRiftGlassMaterial } from './shaders';
 import { mulberry32 } from './procedural';
 import { renders } from './bisect';
 import { useGameClient } from './frame-context';
+import { SUN_DIR } from './atmosphere';
+import { bakeKeyShadowMask, patchKeyLight, setKeyMask, type MaskBounds } from './key-light';
+import { runeStripTexture } from './rune-texture';
+import { Braziers } from './braziers';
+import { FarWorld } from './far-world';
 import {
   capRail,
   crystalCluster,
@@ -91,12 +96,19 @@ function useDisposeAll(geometries: readonly THREE.BufferGeometry[]): void {
   useEffect(() => () => geometries.forEach((g) => g.dispose()), [geometries]);
 }
 
+/**
+ * The ground the baked key shadows cover: the platform (radius 32 m) and the long shadows the rim
+ * columns throw across it, away from the key.
+ */
+const KEY_MASK_BOUNDS: MaskBounds = { minX: -38, minZ: -36, sizeX: 76, sizeZ: 72 };
+
 export function Arena({
   textureSize,
   arena = MERIDIAN_ARENA,
   tier = 'high',
   gateLights = true,
   lowSurfaces = false,
+  bakedShadows = false,
 }: {
   textureSize: number;
   arena?: ArenaLayout;
@@ -105,49 +117,80 @@ export function Arena({
   gateLights?: boolean;
   /** The low-tier surface shader (dominant-axis sampling, no normal maps). */
   lowSurfaces?: boolean;
+  /** No shadow maps on this tier: bake the static structures' key shadows onto the ground once. */
+  bakedShadows?: boolean;
 }) {
   const shapes = useMemo(() => arenaStaticShapes(arena), [arena]);
   const surfaceSize = ARENA_ART.surfaceTextureSize[tier];
   const lod: Lod = tier === 'low' ? 'low' : 'high';
+  const root = useRef<THREE.Group>(null);
   return (
     <LowSurfaces.Provider value={lowSurfaces}>
-      {renders('floor') && <Floor arena={arena} textureSize={textureSize} />}
-      {renders('platform') && <PlatformRing arena={arena} size={surfaceSize} lod={lod} />}
-      {renders('walls') && <WallRuns shapes={shapes} size={surfaceSize} lod={lod} />}
-      {renders('pillars') && <Pillars shapes={shapes} size={surfaceSize} lod={lod} />}
-      {renders('gates') && (
-        <>
-          <Gate end={-1} arena={arena} size={surfaceSize} lod={lod} light={gateLights} />
-          <Gate end={1} arena={arena} size={surfaceSize} lod={lod} light={gateLights} />
-        </>
-      )}
-      {renders('plinths') && <Plinths arena={arena} size={surfaceSize} />}
-      {renders('monoliths') && <Monoliths size={surfaceSize} lod={lod} />}
-      {renders('underside') && <Underside size={surfaceSize} lod={lod} />}
-      {renders('formations') && <DistantFormations size={surfaceSize} lod={lod} />}
+      <group ref={root}>
+        {renders('floor') && <Floor arena={arena} textureSize={textureSize} />}
+        {renders('platform') && <PlatformRing arena={arena} size={surfaceSize} lod={lod} />}
+        {renders('walls') && <WallRuns shapes={shapes} size={surfaceSize} lod={lod} />}
+        {renders('pillars') && <Pillars shapes={shapes} size={surfaceSize} lod={lod} />}
+        {renders('gates') && (
+          <>
+            <Gate end={-1} arena={arena} size={surfaceSize} lod={lod} light={gateLights} />
+            <Gate end={1} arena={arena} size={surfaceSize} lod={lod} light={gateLights} />
+          </>
+        )}
+        {renders('plinths') && <Plinths arena={arena} size={surfaceSize} />}
+        {renders('braziers') && (
+          <Braziers lod={lod} size={surfaceSize} embers={lod === 'low' ? 6 : 14} />
+        )}
+        {renders('monoliths') && <Monoliths size={surfaceSize} lod={lod} />}
+        {renders('underside') && <Underside size={surfaceSize} lod={lod} />}
+        {renders('formations') && <DistantFormations size={surfaceSize} lod={lod} />}
+        {renders('farworld') && <FarWorld lod={lod} />}
+      </group>
+      {bakedShadows && renders('bakedshadows') && <BakedKeyShadows root={root} lod={lod} />}
     </LowSurfaces.Provider>
   );
+}
+
+/**
+ * Bakes the key shadows of everything under `root` that casts one (walls, pillars, gates,
+ * plinths, rim columns) into the shared ground mask, once per arena build. The arena's objects
+ * are attached during the commit, before any effect runs.
+ */
+function BakedKeyShadows({ root, lod }: { root: RefObject<THREE.Group | null>; lod: Lod }) {
+  const gl = useThree((s) => s.gl);
+  useEffect(() => {
+    const r = root.current;
+    if (!r) return;
+    const mask = bakeKeyShadowMask(gl, r, SUN_DIR, KEY_MASK_BOUNDS, 768);
+    setKeyMask(mask, KEY_MASK_BOUNDS);
+    return () => {
+      setKeyMask(null);
+      mask.dispose();
+    };
+  }, [gl, root, lod]);
+  return null;
 }
 
 function Floor({ arena, textureSize }: { arena: ArenaLayout; textureSize: number }) {
   const low = useContext(LowSurfaces);
   const tex = useMemo(() => generateFloorTextures(arena, textureSize), [arena, textureSize]);
-  const material = useMemo(
-    () =>
-      new THREE.MeshStandardMaterial({
-        map: tex.map,
-        // Low tier: the tile bevels are a pixel wide there; skip the normal-map pass.
-        normalMap: low ? null : tex.normalMap,
-        normalScale: new THREE.Vector2(1.2, 1.2),
-        roughnessMap: tex.ormMap,
-        metalnessMap: tex.ormMap,
-        aoMap: tex.ormMap,
-        aoMapIntensity: 0.9,
-        roughness: 1,
-        metalness: 1,
-      }),
-    [tex, low],
-  );
+  const material = useMemo(() => {
+    const m = new THREE.MeshStandardMaterial({
+      map: tex.map,
+      // Low tier: the tile bevels are a pixel wide there; skip the normal-map pass.
+      normalMap: low ? null : tex.normalMap,
+      normalScale: new THREE.Vector2(1.2, 1.2),
+      roughnessMap: tex.ormMap,
+      metalnessMap: tex.ormMap,
+      aoMap: tex.ormMap,
+      aoMapIntensity: 0.9,
+      roughness: 1,
+      metalness: 1,
+    });
+    // Cloud shadows and (low tier) baked static shadows on the key.
+    m.onBeforeCompile = patchKeyLight;
+    return m;
+  }, [tex, low]);
   useEffect(
     () => () => {
       material.dispose();
@@ -403,12 +446,25 @@ function Pillars({
   useDisposeAll(useMemo(() => [merged.stone, merged.brass, merged.rune], [merged]));
   const stone = useSurface('basaltFractured', size);
   const brass = useSurface('brassAged', size);
-  const rune = useStandard({
-    color: '#1b1630',
-    emissive: PALETTE.riftViolet,
-    emissiveIntensity: 2.2,
-    roughness: 0.4,
-  });
+  // Carved inscription lit from within: glyph strokes glow, the stone between them stays dark.
+  const rune = useMemo(() => {
+    const glyphs = runeStripTexture();
+    glyphs.repeat.set(2, 1);
+    return new THREE.MeshStandardMaterial({
+      color: '#15121f',
+      roughness: 0.55,
+      emissive: PALETTE.riftViolet,
+      emissiveMap: glyphs,
+      emissiveIntensity: GLOW.pillarRunes,
+    });
+  }, []);
+  useEffect(
+    () => () => {
+      rune.emissiveMap?.dispose();
+      rune.dispose();
+    },
+    [rune],
+  );
   return (
     <group>
       <mesh geometry={merged.stone} material={stone} castShadow receiveShadow />
@@ -469,7 +525,7 @@ function Gate({
   const glyph = useStandard({
     color: '#111',
     emissive: team,
-    emissiveIntensity: 2.4,
+    emissiveIntensity: GLOW.gateMotif,
     roughness: 0.5,
     side: THREE.DoubleSide,
   });
@@ -537,13 +593,13 @@ function Plinths({ arena, size }: { arena: ArenaLayout; size: number }) {
     useStandard({
       color: '#140a02',
       emissive: TEAM_COLORS[0],
-      emissiveIntensity: 2.4,
+      emissiveIntensity: GLOW.plinthInlay,
       roughness: 0.4,
     }),
     useStandard({
       color: '#02100f',
       emissive: TEAM_COLORS[1],
-      emissiveIntensity: 2.4,
+      emissiveIntensity: GLOW.plinthInlay,
       roughness: 0.4,
     }),
   ] as const;
@@ -655,18 +711,27 @@ function DistantFormations({ size, lod }: { size: number; lod: Lod }) {
     const q = new THREE.Quaternion();
     const s = new THREE.Vector3();
     const pos = new THREE.Vector3();
+    let n = 0;
     for (let i = 0; i < count; i++) {
       const a = (i / count) * Math.PI * 2 + rand() * 0.25;
       const r = near + rand() * (far - near);
       const w = 8 + rand() * 30 * (r / far + 0.4);
       // Spires and mesas more than boulders: they read as rock formations, not balloons.
       const h = w * (1.1 + rand() * 1.6);
-      pos.set(Math.cos(a) * r, -30 + rand() * 60 - h * 0.2, Math.sin(a) * r);
-      q.setFromEuler(new THREE.Euler((rand() - 0.5) * 0.4, rand() * Math.PI, (rand() - 0.5) * 0.4));
-      s.set(w, h, w * (0.6 + rand() * 0.6));
+      const y = -30 + rand() * 60 - h * 0.2;
+      const e = new THREE.Euler((rand() - 0.5) * 0.4, rand() * Math.PI, (rand() - 0.5) * 0.4);
+      const depth = 0.6 + rand() * 0.6;
+      // The sky toward the storm break (west to north-west) stays open: that is where the menu's
+      // camera looks, and where the sky islands stand against the bright break.
+      const az = Math.atan2(Math.sin(a), Math.cos(a));
+      if (az > ARENA_ART.formations.openSky[0] || az < ARENA_ART.formations.openSky[1]) continue;
+      pos.set(Math.cos(a) * r, y, Math.sin(a) * r);
+      q.setFromEuler(e);
+      s.set(w, h, w * depth);
       m.compose(pos, q, s);
-      mesh.setMatrixAt(i, m);
+      mesh.setMatrixAt(n++, m);
     }
+    mesh.count = n;
     mesh.instanceMatrix.needsUpdate = true;
   }, [count, seed, near, far]);
   return (

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { ArenaLayout } from '@ff/game-data';
 import { ValueNoise2D, heightToNormal, hexToRgb, mulberry32 } from './procedural';
-import { PALETTE, TEAM_COLORS } from './art-tokens';
+import { FLOOR_WET, PALETTE, TEAM_COLORS } from './art-tokens';
 
 export interface FloorTextures {
   readonly map: THREE.DataTexture;
@@ -36,6 +36,7 @@ export function generateFloorTextures(
   const rand = mulberry32(seed);
   const noise = new ValueNoise2D(seed ^ 0x9e37, 256);
   const vein = new ValueNoise2D(seed ^ 0x51ed, 256);
+  const rain = new ValueNoise2D(seed ^ 0x2c1b, 256);
 
   // Row layout: fixed row height, random tile lengths per row (running bond).
   const ROW = 1.5;
@@ -147,6 +148,21 @@ export function generateFloorTextures(
           b += (178 - b) * k * 0.22;
           rough -= 0.25 * k;
           h -= 0.15 * k;
+        }
+        // Storm-wet stone (7B): rain lies in broad shallow patches and runs along the joints —
+        // darker, nearly mirror-smooth and flat, so the patches catch the sky and the warm key.
+        const puddle = rain.fbm(x * 0.15 + 3.1, z * 0.15 - 7.3, 3);
+        const wet = Math.max(
+          smoothstep01(FLOOR_WET.patch[0], FLOOR_WET.patch[1], puddle),
+          edgeDist < GROUT * 2.5 ? smoothstep01(0.48, 0.6, puddle) * 0.8 : 0,
+        );
+        if (wet > 0) {
+          const k = 1 - FLOOR_WET.darken * wet;
+          r *= k;
+          g *= k;
+          b *= k * 1.03;
+          rough += (FLOOR_WET.roughness - rough) * wet;
+          h += (0.97 - h) * wet * 0.8;
         }
         // Team tint inside each goal area (redundant with arc shape for colour-blind readability).
         const goalEnd = x < 0 ? 0 : 1;

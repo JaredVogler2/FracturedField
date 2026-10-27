@@ -21,6 +21,8 @@ import {
 import { ChargeBolts, ElementRegions, MagnetFields, WaterAndIce } from './vfx/ElementEffects';
 import type { PlayerSlot } from '@ff/protocol';
 import {
+  CLOUD_SHADOWS,
+  ENVIRONMENT,
   LIGHT_VARIANTS,
   POST,
   QUALITY,
@@ -29,7 +31,8 @@ import {
   type LightVariantName,
   type QualityTier,
 } from './art-tokens';
-import { fitBroadcastCamera } from './camera';
+import { cloudShadowTexture, keyLightUniforms } from './key-light';
+import { attractPose, fitBroadcastCamera } from './camera';
 import { createSkyMaterial } from './shaders';
 import { renderStats } from './render-stats';
 import { installAtmosphericFog, SUN_DIR } from './atmosphere';
@@ -60,6 +63,8 @@ export interface SceneProps {
   readonly textureTier?: QualityTier['name'];
   /** Adapt the tier to the measured frame rate, starting at (and never above) `quality`. */
   readonly onAdapt?: (tier: TierName) => void;
+  /** The menu's slow cinematic camera instead of the fitted gameplay framing. */
+  readonly cinematic?: boolean;
   readonly children?: ReactNode;
 }
 
@@ -80,6 +85,7 @@ export function GameScene({
   light = 'final',
   textureTier,
   onAdapt,
+  cinematic = false,
   children,
 }: SceneProps) {
   const tier = QUALITY[quality];
@@ -108,15 +114,18 @@ export function GameScene({
         portraitSlot={portraitSlot}
         override={camera}
         controlsSide={controlsSide}
+        cinematic={cinematic && !camera}
       />
       <Atmosphere variant={variant} sky={tier.sky} />
       <Lights tier={tier} variant={variant} />
+      <CloudShadows on={tier.cloudShadows} />
       {renders('arena') && (
         <Arena
           textureSize={textures.textureSize}
           tier={textures.name}
           gateLights={tier.pointLights >= 3}
           lowSurfaces={tier.name === 'low'}
+          bakedShadows={!tier.shadows}
         />
       )}
       {renders('clouds') && <CloudSheets count={tier.cloudLayers} />}
@@ -172,11 +181,13 @@ function CameraRig({
   portraitSlot,
   override,
   controlsSide,
+  cinematic,
 }: {
   side: 1 | -1;
   portraitSlot: 0 | 1;
   override?: CameraOverride | undefined;
   controlsSide: 'left' | 'right' | null;
+  cinematic: boolean;
 }) {
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
   const size = useThree((s) => s.size);
@@ -184,6 +195,36 @@ function CameraRig({
   const reducedMotion = useSettings((s) => s.reducedMotion);
   const base = useRef(new THREE.Vector3());
   const shake = useRef(0);
+  // The cinematic camera's clock, its smoothed focus (the core, eased so it never jerks) and the
+  // pose it writes each frame.
+  const film = useRef({
+    t: 0,
+    focus: { x: 0, z: 0 },
+    pose: { position: new THREE.Vector3(), target: new THREE.Vector3(), fov: 0 },
+  });
+  useFrame((_, dt) => {
+    if (!cinematic) return;
+    const f = film.current;
+    // Under reduced motion it holds still: no drift, and no panning after the core.
+    if (!reducedMotion) f.t += dt;
+    const entities = reducedMotion ? undefined : client.buffer.latest?.entities;
+    if (entities) {
+      for (const e of entities) {
+        if (e.kind !== 'core') continue;
+        const k = 1 - Math.exp(-dt / 2.5);
+        f.focus.x += (e.p[0] - f.focus.x) * k;
+        f.focus.z += (e.p[2] - f.focus.z) * k;
+        break;
+      }
+    }
+    const pose = attractPose(f.t, size.width / Math.max(1, size.height), f.focus, f.pose);
+    camera.position.copy(pose.position);
+    camera.lookAt(pose.target);
+    if (camera.fov !== pose.fov) {
+      camera.fov = pose.fov;
+      camera.updateProjectionMatrix();
+    }
+  });
   useEffect(() => {
     const w = Math.max(1, size.width);
     const h = Math.max(1, size.height);
@@ -253,7 +294,8 @@ function CameraRig({
     [client],
   );
   useFrame(({ clock }, dt) => {
-    if (shake.current <= 0) return;
+    // The cinematic camera never shakes (it is not the player's view of the play).
+    if (cinematic || shake.current <= 0) return;
     shake.current = Math.max(0, shake.current - dt * 0.9);
     const amp = reducedMotion ? 0 : shake.current * shake.current;
     const t = clock.elapsedTime * 38;
@@ -357,6 +399,35 @@ function Lights({ tier, variant }: { tier: QualityTier; variant: LightingVariant
   );
 }
 
+/**
+ * The storm overhead: cloud shadows drift across the platform on the key light (medium and high —
+ * one texture read per lit pixel). Reduced motion freezes them where they are.
+ */
+function CloudShadows({ on }: { on: boolean }) {
+  const reducedMotion = useSettings((s) => s.reducedMotion);
+  useEffect(() => {
+    if (!on) return;
+    const u = keyLightUniforms;
+    const tex = cloudShadowTexture();
+    u.ffCloudMap.value = tex;
+    u.ffCloud.value.w = CLOUD_SHADOWS.strength;
+    return () => {
+      u.ffCloudMap.value = null;
+      u.ffCloud.value.w = 0;
+      tex.dispose();
+    };
+  }, [on]);
+  useFrame((_, dt) => {
+    if (reducedMotion || !on) return;
+    const c = keyLightUniforms.ffCloud.value;
+    // The noise tiles every `tileMetres`: wrap the offset so it never grows past float precision.
+    const tile = CLOUD_SHADOWS.tileMetres;
+    c.y = (c.y + CLOUD_SHADOWS.drift[0] * dt) % tile;
+    c.z = (c.z + CLOUD_SHADOWS.drift[1] * dt) % tile;
+  });
+  return null;
+}
+
 /** Cube face size of the baked sky (half float: ~3 MB for all six faces). */
 const SKY_BAKE_SIZE = 256;
 
@@ -405,9 +476,10 @@ function buildStormEnvironment(gl: THREE.WebGLRenderer): THREE.Texture {
     envScene.add(m);
     panels.push(m);
   };
-  addPanel(SKY.glow, 6, SUN_DIR.clone().multiplyScalar(32), [18, 9]); // storm break (key)
-  addPanel('#7fb0d8', 1.4, new THREE.Vector3(0, 40, 0), [60, 60]); // overcast zenith
-  addPanel('#3b6f93', 1.2, new THREE.Vector3(30, 6, 22), [34, 10]); // cool horizon (fill side)
+  const E = ENVIRONMENT;
+  addPanel(E.breakColor, E.breakRadiance, SUN_DIR.clone().multiplyScalar(32), [18, 9]); // break
+  addPanel(E.zenithColor, E.zenithRadiance, new THREE.Vector3(0, 40, 0), [60, 60]); // storm zenith
+  addPanel(E.horizonColor, E.horizonRadiance, new THREE.Vector3(30, 6, 22), [34, 10]); // fill side
   const pmrem = new THREE.PMREMGenerator(gl);
   const rt = pmrem.fromScene(envScene, 0.02);
   pmrem.dispose();

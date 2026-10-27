@@ -651,6 +651,7 @@ export function MatchView({
           side={mySlot === 1 ? -1 : 1}
           portraitSlot={mySlot}
           controlsSide={touchUi ? controls.hand : null}
+          cinematic={mode.kind === 'attract'}
           {...(reviewShot ? { camera: reviewShot } : {})}
         >
           {setup.seats.length > 0 ? (

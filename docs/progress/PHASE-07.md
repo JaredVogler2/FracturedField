@@ -1,6 +1,6 @@
 # PHASE 07 — Visual production (art gates 7A–7E)
 
-**Status: IN PROGRESS — 7A COMPLETE (local); 7B, 7C, 7D, 7E NOT STARTED.**
+**Status: IN PROGRESS — 7A and 7B COMPLETE (local; phone frame rate not measured); 7C, 7D, 7E NOT STARTED.**
 Phase 07 is five separately gated art stages (docs/BUILD_ORDER.md). Each is judged on frames
 captured from the running game (production build, headless Chromium with SwiftShader software
 WebGL), critiqued against docs/CREATIVE_TARGET.md and revised, never on standalone mock-ups.
@@ -164,12 +164,20 @@ they say nothing about a GPU.
   tests, evidence).
 - This report and the build status: the commit that follows `99fad61`.
 
-## 7B — Lighting and atmosphere (D08) — IN PROGRESS (paused for milestone 06M)
+## 7B — Lighting and atmosphere (D08) — COMPLETE (local)
 
-The owner redirected development (ADR-0009): continuous physical manipulation — milestone **06M**
-— comes before further art. 7B's code below is committed and tested; its gate (final-settings
-captures, the D08 comparison set, a critique and two revisions) is **not** passed and resumes
-after 06M.
+The storm breaks over the Shattered Meridian. A warm key rakes long shadows across cool stone,
+cloud shadows drift over the field, bronze braziers burn on the rim, rain lies in the stone, and
+across the storm sky islands carry lit towers with waterfalls pouring into the cloud sea. The
+menu opens on a slow cinematic view down the field into the storm break, instead of the gameplay
+camera. The work was paused for milestone 06M and resumed on 27 October 2026, together with the
+owner's brief for a world-class 3D experience (docs/3D_VISUAL_STANDARD.md, whose art direction
+comes from the owner's two mood references).
+
+Gate: final-settings captures, the D08 comparison set, a written critique, and at least two
+revisions. Six capture rounds were made (b1–b6, below), with the tier table re-checked against
+the code. The phone frame-rate target (D08: 30+ fps on a tested phone) cannot be measured here:
+there is no phone and no GPU.
 
 ### What was built
 
@@ -182,6 +190,16 @@ after 06M.
 | Storm layers | `render/storm.tsx`: cloud sheets drifting below the platform (two heights and speeds; medium/high), storm-break light shafts (instanced billboards), dust motes rising in the updraft (capped point size). |
 | Grounding | `render/contact-shadows.tsx`: a soft disc under every dynamic body that fades and widens with height (all tiers; the only grounding on low); contact occlusion baked into the floor at walls, pillars and posts. |
 | Quality tiers | `art-tokens → QUALITY` (DPR, shadows, bloom, floor texture, cloud sheets, shafts, dust, sky, particles, point lights; table in docs/ART_DIRECTION.md); `render/adaptive-quality.ts` (auto: steps down after ≥ 5 s below 40 fps smoothed, up after 12 s above 57 fps, 8 s cooldown, hitches ignored, never above the device-class tier); the dev HUD shows tier, draw calls, triangles, shader programs, geometries, textures and texture-generation cost. |
+| Key light, revised (rounds b2–b6) | A pale-gold key (`#ffe0bd`, about 3800 K: an orange key turned the blue-grey basalt brown) carrying about four times the floor's ambient (b1: about twice, which read flat); a cooler, weaker fill, hemisphere and IBL; the environment's zenith matched to the storm sky (a bright zenith had mirrored as a white bar on upward metal); lights raised ~35 % in b5 so sunlit black basalt is no longer ~50/255. Tokens: `LIGHTING`, `ENVIRONMENT`. |
+| Highlight control | The surface material caps outgoing radiance by its brightest channel, so a glint keeps its hue: 1.5 for stone, 1.1 for metal. Brass got a tighter roughness range (a glint line, not a neon tube); steel is brushed (0.36–0.62). The gate's steel mouth beam got a rounded top, because from the gameplay camera a flat top mirrors the storm break whole. |
+| Cloud shadows | `render/key-light.ts`: a tileable noise texture drifting with the wind darkens the key in broad patches on every arena surface and the floor (one texture read; medium and high — the low tier leaves them out to hold its frame cost; frozen under reduced motion). The patch mixes into three's directional-light loop for light 0 only. |
+| Baked static shadows (low tier) | `bakeKeyShadowMask()`: the walls, pillars, gates, plinths, braziers and rim columns are rendered once, flattened onto the ground along the key, into a 768-px mask that dims the key on ground-facing surfaces near the floor. The low tier, which has no shadow maps, keeps the light story at no per-frame cost. |
+| Practical lights | `render/braziers.tsx`: eight bronze braziers outside the walls (four behind the far wall, two flanking each gate, none on the camera's side). Each has a bronze lathe body, breathing coals, a camera-facing flame sheet of rising noise (deep orange to gold), rising embers, and a flickering warm light pool on the stone (an additive decal, not a point light). All eight together are five draw calls. |
+| Rune inscriptions | The pillar bands are an original procedural glyph strip (`render/rune-texture.ts`: a stem plus 1–2 strokes per glyph, seeded) glowing in the rift violet. They used to be a flat saturated ring. The gate motifs and plinth inlays were dimmed (`GLOW`). |
+| Storm-wet floor | `render/floor-texture.ts`: rain lies in broad shallow patches and along the joints. Those areas are darker, nearly mirror-smooth and flat, so they catch the sky and the key; about 12 % of the floor is near-mirror (`FLOOR_WET`). |
+| Far world | `render/far-world.tsx`: four sky islands at 100–160 m toward the storm break and the north. Six towers carry lit windows, about a third of them lit, some slowly dimming and brightening. The windows fog at half rate, so they read as lights through the haze. Three waterfalls pour into the cloud sea. Three draw calls on every tier. Rock formations no longer stand in the west to north-west sky (`ARENA_ART.formations.openSky`), which is left to the islands and the break. |
+| First impression | `render/camera.ts → attractPose()`: the menu's cinematic camera drifts slowly beyond the TIDE end, looking down the field into the storm break. The arena is backlit, the far gate and towers stand dark against the bright sky, and long shadows reach toward the viewer; the break sits in the right half, clear of the menu. Portrait gets its own composition (higher, down the axis, the far gate above the menu). The camera follows the core loosely, never shakes, holds still under reduced motion, and allocates nothing per frame. The menu docks to the bottom on portrait; on short landscape phones it is compact and no longer loses its title above the fold (`.menu`); difficulty buttons are now 44 px. |
+| Review tooling | `scripts/capture-arena.mjs` gained the menu views (desktop, portrait low, landscape medium), Physics Lab element close-ups (fire beside ice, the ice ramp, steam, charge on wet stone) and `ONLY=` sections. `scripts/frame-metrics.mjs` reports luma percentiles, clipped pixels and warm-cool separation per frame. |
 
 ### Low-tier frame cost: a regression 7A introduced, found by CI
 
@@ -242,7 +260,7 @@ most 1 s). The unit test that had modelled twenty consecutive 2 s frames as hitc
 bug; it now models isolated hitches between normal frames, and a new case checks that a 3 fps
 renderer steps down to medium, then low.
 
-### Tests so far
+### Tests (light rig, atmosphere, tiers)
 
 - `atmosphere.test.ts` (5): the field, walls, gates and platform are never fogged; distant
   formations fade progressively; the underside hazes lightly and the depths heavily; the fog
@@ -257,11 +275,117 @@ renderer steps down to medium, then low.
   and the lit stone has no upward-facing surface left.
 - `e2e/phase07.spec.ts`: adaptive quality steps down under load and never on a fixed tier.
 
-### Remaining for the 7B gate
+### Capture → critique → revision (rounds b1–b6; frames in `docs/visual-evidence/phase-07/7b/`)
 
-Final-settings captures (all review shots, phone tiers, the D08 flat/dark comparison set) with
-the firefly clamp, fog start and baked low sky; a written critique against CREATIVE_TARGET with
-two revision rounds; the ART_DIRECTION tier table re-checked against the code.
+Every round comes from the production build: the menu (desktop, phone portrait low, phone
+landscape medium), kickoff (1920 × 1080 high), eight review cameras, the D08 flat/dark comparison
+(desktop and phone), phones (landscape low/medium, portrait low) and four element close-ups.
+Metrics are from `scripts/frame-metrics.mjs`; scores and the full critique are in
+docs/3D_QUALITY_REPORT.md.
+
+1. **b1 (baseline, the 7B code as left before 06M).** The final lighting barely differs from the
+   "flat" comparison variant (luma range 0.49 vs 0.33; warm-cool 0.09 vs 0.08). Other findings:
+   - a white bar on the EMBER gate;
+   - pillar runes as flat lilac strips;
+   - no light direction at all on the low tier;
+   - the menu showed the top-down gameplay camera under a panel.
+2. **b2.** Changes: warm key at about 4:1 over the ambient, a dark environment zenith, glyph runes
+   and dimmer glows, baked shadows on low, cloud shadows. Low phones now carry long pillar and
+   wall shadows. But the orange key turned the basalt brown, metal rails and beams read as neon
+   tubes, and the frame got darker (median 0.14).
+3. **b3.** Changes: a pale-gold key, stronger cool ambient, a metal cap scaled by the brightest
+   channel. The stone reads neutral-warm against blue shadow. Two open problems: the cloud shadows
+   were invisible (verified working at strength 0.95, then set to 0.6), and the frame was still
+   dark (median 0.13).
+4. **b4.** Changes: the first cinematic menu camera, a compact landscape menu, and the clipped title
+   fixed. The menu frame was dominated by a dark near slab, and the break was hidden behind the
+   menu.
+5. **b5.** Changes:
+   - lights up ~35 %: kickoff median 0.17, range 0.60;
+   - braziers;
+   - the far world;
+   - the backlit menu camera toward the break: menu range 0.27 → 0.70, warm-cool 0.09 → 0.19.
+
+   Found: the white gate bar was the steel mouth beam (identified by colour-tagging materials);
+   tower windows banded into rings (measured around the world origin, not the tower); white flame
+   tips; big formations filling the break.
+6. **b6.** Changes: rounded steel beam top, per-tower window grids, warm flames, the stone cap at
+   1.5, an open sky toward the break, and wet floor patches. Inspected: the towers read as a lit
+   city across the storm, the floor carries damp sheen, and the kickoff keeps clear shadows with
+   brazier accents.
+
+Selected metrics (b1 → b6):
+
+| Frame | median luma | range (p95 − p5) | clipped % | warm-cool |
+|---|---|---|---|---|
+| kickoff, high | 0.185 → 0.162 | 0.49 → 0.58 | 0.000 → 0.000 | 0.09 → 0.11 |
+| menu, desktop | 0.130 → 0.175 | 0.26 → 0.70 | 0.000 → 0.008 | 0.09 → 0.20 |
+| hero | 0.185 → 0.188 | 0.48 → 0.58 | 0.001 → 0.002 | 0.20 → 0.21 |
+| phone landscape, low | 0.194 → 0.136 | 0.41 → 0.47 | 0.002 → 0.007 | 0.15 → 0.15 |
+| fire + ice (R6) | 0.217 → 0.238 | 0.63 → 0.75 | 0.086 → 0.141 | 0.12 → 0.12 |
+
+The D08 comparison set is kept as rejected variants: `flat` (range 0.35) and `dark` (median
+0.04). The final sits between them, with the light story `flat` lacks and the shadow detail
+`dark` crushes.
+
+Render counts in b6 (all passes; counts, not benchmarks):
+
+| View | Draw calls | Triangles |
+|---|---|---|
+| Gameplay, high | 163 | 194 k |
+| Phone landscape, low | 86 | 64 k |
+| Phone portrait, low | 82 | 57 k |
+| Menu, desktop | 159 | 177 k |
+
+These are within docs/3D_VISUAL_STANDARD.md's budgets.
+
+### D08 checklist
+
+- **Lighting direction:** a storm-break key from one high side; a golden rim on brass (capped
+  glints); a cool fill; the core as a local glow; a shadow story on every tier (low: baked);
+  distant props lighter and bluer (aerial perspective).
+- **Render:** sRGB output, ACES filmic with tunable exposure, a constrained shadow area, 1–3 point
+  lights by tier, a procedural sky with drifting layers, fog layered behind the playfield, shafts
+  and dust in the key (medium/high).
+- **Post:** selective thresholded bloom, a low vignette, no full-screen distortion; reduced motion
+  freezes cloud drift and steadies flame flicker.
+- **Tiers:** the parameter table is in docs/ART_DIRECTION.md (re-checked against `QUALITY`, with
+  the 7B additions); adaptive quality with more than 5 s of hysteresis; the dev HUD shows counters.
+- **Comparison captures:** flat / dark / final at 1920 × 1080 and 844 × 390; fire, ice and wet
+  surfaces under the final light: no clipping above 0.15 % of pixels, and the materials stay
+  distinguishable.
+- **Gate:**
+  - The idle arena now reads with scale and depth (inspected).
+  - "30+ fps on a tested phone" is **not measured**: SwiftShader only.
+
+### Tests (7B revisions)
+
+Unit tests:
+- `key-light.test.ts`: the patch touches only directional light 0, after its shadow; the mask
+  orientation; the cloud texture tiles seamlessly.
+- `rune-texture.test.ts`: glyph coverage and dark margins; deterministic per seed.
+- `camera.test.ts`:
+  - the menu camera stays outside the field and above its walls;
+  - the centre and the far gate are framed;
+  - the break is in the right half at four aspect ratios;
+  - portrait has the far gate above the docked menu;
+  - the motion is continuous;
+  - no allocation per frame.
+
+312 unit tests pass in total (typecheck, lint and format clean). The browser suites run in CI.
+
+### Honest limits
+
+- **Not real performance or real devices.** Every frame is a headless SwiftShader render. There is
+  no GPU, phone or Safari evidence, and frame-rate targets are unmeasured.
+- **Scores are self-assessed.** The rubric scores in docs/3D_QUALITY_REPORT.md are the developer's
+  own inspection, not a panel's.
+- **The floor is still a regular flagstone grid.** Wet patches and shadows break it up; a slab
+  layout revision remains open (WP7).
+- **Distant formations are faceted rock shapes.** The towers are simple lathes: silhouettes read,
+  detail does not.
+- **The Rift Core and element VFX (7C) and the wielders and hands (7D) are not started.** The fire
+  is still cones and the water a flat decal.
 
 ## 7C — Rift Core and elemental VFX (D09) — NOT STARTED
 ## 7D — Wielder characters and IK (D10) — NOT STARTED
@@ -269,9 +393,8 @@ two revision rounds; the ART_DIRECTION tier table re-checked against the code.
 
 ## Next instruction
 
-First milestone **06M — continuous physical manipulation** (ADR-0009,
-docs/progress/PHASE-06M.md): the owner wants real people to show they can intuitively bend
-physical objects with their hands before the arena's visual transformation continues. Then resume
-**7B** (prompts/deep-dives/D08-LIGHTING-ATMOSPHERE.md) at "Remaining for the 7B gate" above:
-capture with `node scripts/capture-arena.mjs <url> <dir> <round>` and critique against the
-round-5 frames.
+**7C** (prompts/deep-dives/D09-CORE-ELEMENTAL-VFX.md): the Rift Core hero asset and the element
+systems, rooted in authoritative state. The plan (docs/3D_IMPLEMENTATION_PLAN.md, WP8) adds rune
+circles where casts land and luminous hands (WP9, 7D) bound to the hand channel. Capture with
+`node scripts/capture-arena.mjs <url> <dir> <round>` (add element moments with `ELEMENT_TICKS`)
+and compare against the b6 frames.

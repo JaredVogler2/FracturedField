@@ -45,21 +45,29 @@ export const SKY = {
 export const FOG = { start: 36, hazeTop: -6, hazeBottom: -42, hazeMax: 0.85 } as const;
 
 /**
- * Selected lighting (D08 "final"): a storm-break key raking from the far left at ~31° — it rims
- * the brass and the columns and throws long shadows toward the camera — a cool fill from the
- * camera side, a dim cool hemisphere, image-based light from the procedural storm environment.
+ * Selected lighting (D08 "final"): a warm storm-break key raking from the far left at ~31° — it
+ * rims the brass and the columns and throws long shadows toward the camera — against cool, weak
+ * sky light: a camera-side fill, a hemisphere and image-based light from the procedural storm
+ * environment. Lit stone reads warm, shadow reads blue (round b2: the key carries about four
+ * times the ambient on the floor; in b1 it was about twice, and the frame read flat). Round b5
+ * raised every light ~35 % (not the exposure, which would also brighten the sky): sunlit black
+ * basalt had sat at ~50/255 and the frames' median luma at 0.13.
  */
 export const LIGHTING = {
   exposure: 1.1,
-  hemiSky: '#86a9c9',
-  hemiGround: '#20242c',
-  hemiIntensity: 1.0,
-  keyColor: '#ffdfbd',
-  keyIntensity: 3.9,
+  hemiSky: '#6c9ad0',
+  hemiGround: '#1a1f27',
+  hemiIntensity: 1.05,
+  /**
+   * Pale gold (~3800 K), not orange: an orange key turns the blue-grey basalt brown (b2); this
+   * one leaves lit stone a warm neutral against blue shadow.
+   */
+  keyColor: '#ffe0bd',
+  keyIntensity: 8.9,
   /** Storm-break key direction (from the arena centre toward the light). */
   keyPosition: [-30, 24, -26] as const,
-  fillColor: '#84bde8',
-  fillIntensity: 0.75,
+  fillColor: '#5f9de0',
+  fillIntensity: 0.68,
   fillPosition: [24, 12, 30] as const,
   coreLightIntensity: 14,
   coreLightDistance: 16,
@@ -67,7 +75,137 @@ export const LIGHTING = {
   /** Exp² density of the fog beyond FOG.start. */
   fogDensity: 0.0095,
   /** Image-based lighting strength from the procedural storm environment. */
-  environmentIntensity: 0.8,
+  environmentIntensity: 0.85,
+} as const;
+
+/**
+ * The storm environment the image-based light is filtered from (radiance of each emissive panel,
+ * linear multiples of its colour). Its zenith must match the storm sky — dark — or every
+ * upward-facing metal face mirrors a bright sky the frame does not show (b1's white bar on a
+ * gate); the warm break where the key sits is what brass should catch.
+ */
+export const ENVIRONMENT = {
+  breakColor: SKY.glow,
+  breakRadiance: 7,
+  zenithColor: '#47729a',
+  zenithRadiance: 0.55,
+  horizonColor: '#3b6f93',
+  horizonRadiance: 1.0,
+} as const;
+
+/**
+ * Drifting cloud shadows on the key (render/key-light.ts): world size of one noise tile (m),
+ * drift (m/s, x and z) and how much of the key a dense patch takes away. Verified in round b3 at
+ * strength 0.95 (broad shade patches across the field); 0.4 was too faint to see in a still.
+ */
+export const CLOUD_SHADOWS = {
+  tileMetres: 48,
+  drift: [0.9, 0.35] as const,
+  strength: 0.6,
+} as const;
+
+/**
+ * Fire braziers (render/braziers.tsx): the arena's practical lights. Spots (x, z) stand on the
+ * flush first ring of slabs, outside the walls — four behind the far wall (flanking the centre
+ * line and the corners), two flanking each gate — never on the camera's side. `flame` is the HDR
+ * strength of the flame sheet (blooms), `pool` that of the warm light on the stone (radius m).
+ */
+export const BRAZIERS = {
+  spots: [
+    [-4.6, -16.6],
+    [4.6, -16.6],
+    [-18.5, -16.2],
+    [18.5, -16.2],
+    [-26.4, -8.6],
+    [-26.4, 8.6],
+    [26.4, -8.6],
+    [26.4, 8.6],
+  ] as readonly (readonly [number, number])[],
+  flame: 2.1,
+  lightColor: '#ff9a4a',
+  pool: 0.16,
+  poolRadius: 4.2,
+} as const;
+
+/**
+ * Sky islands with towers and waterfalls (render/far-world.tsx): the far world's storytelling,
+ * set toward the storm break (north-west) and the north, 100–160 m out. Island: centre (top
+ * surface), seed, top half-width and root depth (m); towers: [dx, dz, radius, height]; fall:
+ * [lip dx, lip dz, width, drop] on the side facing the arena.
+ */
+export interface SkyIsland {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly seed: number;
+  readonly width: number;
+  readonly depth: number;
+  readonly towers: readonly (readonly [number, number, number, number])[];
+  readonly fall?: readonly [number, number, number, number];
+}
+
+export const FAR_WORLD = {
+  stone: '#3a4450',
+  windowColor: '#ffb066',
+  /** Share of windows lit. */
+  litShare: 0.34,
+  islands: [
+    {
+      x: -102,
+      y: 6,
+      z: -42,
+      seed: 401,
+      width: 24,
+      depth: 34,
+      towers: [
+        [0, 0, 5.2, 46],
+        [9, 6, 3.2, 28],
+        [-8, 6, 2.6, 22],
+      ],
+      fall: [19, 8, 7, 95],
+    },
+    {
+      x: -92,
+      y: -4,
+      z: -112,
+      seed: 402,
+      width: 20,
+      depth: 30,
+      towers: [
+        [0, 0, 4.2, 38],
+        [7, -6, 2.6, 24],
+      ],
+      fall: [10, 13, 5, 85],
+    },
+    { x: -148, y: 16, z: 30, seed: 403, width: 18, depth: 26, towers: [[0, 0, 3.6, 34]] },
+    {
+      x: 46,
+      y: 10,
+      z: -146,
+      seed: 404,
+      width: 22,
+      depth: 30,
+      towers: [
+        [0, 0, 4.8, 42],
+        [-8, 5, 2.8, 26],
+      ],
+      fall: [-6, 18, 6, 90],
+    },
+  ] as readonly SkyIsland[],
+} as const;
+
+/**
+ * Emissive accents on the architecture: kept below the bloom threshold's reach so the core,
+ * scoring and casts stay the brightest things on screen (CREATIVE_TARGET: "never saturate every
+ * emissive object").
+ */
+export const GLOW = {
+  /** Rune inscriptions around the field pillars (a glyph texture, not a solid band). */
+  pillarRunes: 1.8,
+  /** The team motif on each gate's keystone. */
+  gateMotif: 1.5,
+  /** The engraved team inlays on the wielders' plinths. */
+  plinthInlay: 1.4,
 } as const;
 
 export type LightingVariant = {
@@ -88,24 +226,31 @@ export const LIGHT_VARIANTS = {
   flat: {
     ...LIGHTING,
     exposure: 1.05,
-    keyIntensity: 1.6,
-    hemiIntensity: 1.6,
-    fillIntensity: 1.4,
+    keyIntensity: 2.4,
+    hemiIntensity: 1.4,
+    fillIntensity: 1.2,
     environmentIntensity: 1.1,
     fogDensity: 0.006,
   },
   dark: {
     ...LIGHTING,
     exposure: 0.62,
-    keyIntensity: 3.2,
-    hemiIntensity: 0.18,
+    keyIntensity: 5.5,
+    hemiIntensity: 0.15,
     fillIntensity: 0,
-    environmentIntensity: 0.25,
+    environmentIntensity: 0.2,
     fogDensity: 0.014,
   },
 } as const satisfies Record<string, LightingVariant>;
 
 export type LightVariantName = keyof typeof LIGHT_VARIANTS;
+
+/**
+ * Storm-wet field floor (render/floor-texture.ts): rain lies in broad patches (noise between
+ * `patch` → fully wet) and along the joints; wet stone is darker by `darken` and its roughness
+ * falls to `roughness` (a near-mirror that catches the sky and the key).
+ */
+export const FLOOR_WET = { patch: [0.6, 0.68] as const, darken: 0.38, roughness: 0.08 } as const;
 
 export const MATERIALS = {
   floorRoughness: 0.72,
@@ -246,7 +391,9 @@ export const SURFACES = {
     family: 'brass',
     colorLo: '#4a2f17',
     colorHi: '#e6ad6c',
-    roughness: [0.3, 0.75],
+    // Worked metal: a tight glint line along a lit edge, not a broad lobe lighting a whole rail
+    // (b2: rails and tie beams read as neon tubes).
+    roughness: [0.2, 0.55],
     metalness: 1,
     normalStrength: 0.4,
     cavity: 0.55,
@@ -260,7 +407,9 @@ export const SURFACES = {
     family: 'steel',
     colorLo: '#3c454e',
     colorHi: '#a2b0bb',
-    roughness: [0.24, 0.58],
+    // Brushed and hazed: a flat steel top in the sun's mirror direction lights up all at once,
+    // so its lobe is kept broad and low (b4: a white bar along a gate beam at 0.16-0.48).
+    roughness: [0.36, 0.62],
     metalness: 0.95,
     normalStrength: 0.35,
     cavity: 0.6,
@@ -293,8 +442,13 @@ export const ARENA_ART = {
   ],
   /** Floating fragments around the rim (decor only: no collision). */
   shards: { count: 42, seed: 51 },
-  /** Distant suspended formations (70–320 m) behind the fog. */
-  formations: { count: 34, seed: 61, near: 70, far: 320 },
+  /**
+   * Distant suspended formations (70–320 m) behind the fog. `openSky`: none stand at azimuths
+   * (atan2(z, x), radians) above the first or below the second value — the west to north-west
+   * sky, toward the storm break, is left to the sky islands (7B round b5: two formations filled
+   * the menu's view of the break).
+   */
+  formations: { count: 34, seed: 61, near: 70, far: 320, openSky: [2.6, -2.0] as const },
   /** The underside tiers' hidden tops: the deep shadow under the slabs and overhangs. */
   undersideCap: '#06080b',
   /** Surface texture resolution per quality tier (px per tile). */
@@ -339,6 +493,12 @@ export interface QualityTier {
   readonly particles: number;
   /** Dynamic point lights: the core's, plus the two gate lights when ≥ 3. */
   readonly pointLights: number;
+  /**
+   * Drifting cloud shadows on the key (one texture read per lit pixel). Off on low, to spare the
+   * weakest GPUs that read. Not separately measurable here: all of 7B's additions together cost
+   * the low tier ~8 % on the software-rendered phone view (≈125 vs ≈115 ms a frame).
+   */
+  readonly cloudShadows: boolean;
 }
 
 export const QUALITY: Record<QualityTier['name'], QualityTier> = {
@@ -355,6 +515,7 @@ export const QUALITY: Record<QualityTier['name'], QualityTier> = {
     sky: 'baked',
     particles: 0.5,
     pointLights: 1,
+    cloudShadows: false,
   },
   medium: {
     name: 'medium',
@@ -369,6 +530,7 @@ export const QUALITY: Record<QualityTier['name'], QualityTier> = {
     sky: 'low',
     particles: 0.75,
     pointLights: 3,
+    cloudShadows: true,
   },
   high: {
     name: 'high',
@@ -383,5 +545,6 @@ export const QUALITY: Record<QualityTier['name'], QualityTier> = {
     sky: 'high',
     particles: 1,
     pointLights: 3,
+    cloudShadows: true,
   },
 };

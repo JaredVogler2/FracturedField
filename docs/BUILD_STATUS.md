@@ -12,7 +12,7 @@ Nothing here is advertised as deployed or device-tested unless the evidence colu
 | 05 Camera gestures | COMPLETE (local) — physical devices / live people NOT TESTED | `24fbd69` | [PHASE-05](progress/PHASE-05.md): on-device MediaPipe hand (+ stand-mode pose) landmarks in a module worker → pure gesture engine → the same `ActionIntent`s as keyboard/touch; real model on real hand photos (fake camera) → authoritative casts; gesture suite at 30 → 4 fps (PULSE 80/80 per rate, 0 false casts in 10 min of doubled-noise idle at 30/15/8 fps); a camera-only stand-in scores and rematches; dropout releases holds on the server; online with both seats on camera and no media uplink; denied/blocked → one-tap fallback; 180 unit + 20 e2e tests. Device/lighting/bystander tests and the animated gesture-tutorial silhouettes are owed (Phase 11/D15, Phase 09) |
 | 06 Mobile sensors/control | COMPLETE (local) — physical phones / controllers NOT TESTED | `0f87754` | [PHASE-06](progress/PHASE-06.md): five control modes from a capability matrix (keyboard/controller, touch, handheld motion, camera, simplified), switchable mid-match without losing a hold or the intent stream; D06 gate passed (a phone with no camera and no sensors completes three online rounds with touch alone); motion from synthetic orientation readings through the authority (rotation, background → recenter, stall → touch; measured filter: 2° correction 63 % in 100 ms, 15° turn 63 % in 33 ms); iOS permission inside the tap; standard-mapping controller; multi-touch; rebinding; six screen sizes and safe-area insets; an independent review's 7 findings fixed; 217 unit + 38 e2e tests. Device checklist owed (Phase 11/D15) |
 | 06M Continuous manipulation (owner directive, Oct 2026) | IN PROGRESS — M1 authority, M2 inputs (camera, mouse, touch, gamepad), M3 Hands Lab and M4 match integration built and tested (local, synthetic hands); the people study is the open gate | `41e3e92` (M4), `ed7a71c` (M2/M3) | [PHASE-06M](progress/PHASE-06M.md), [ADR-0009](decisions/ADR-0009-continuous-manipulation.md): grip / swing / throw / spin / sweep / push as continuous, authoritative physics from every input, a Hands Lab and a people-study protocol — before the rest of Phase 07. Milestones M1–M4 and the study are listed there |
-| 07 Visual production | IN PROGRESS — 7A COMPLETE (local); 7B IN PROGRESS (paused for 06M) | `99fad61` (7A) | [PHASE-07](progress/PHASE-07.md): five art gates; 7A done in five capture/critique rounds of the running game (headless SwiftShader frames only — no GPU, no phone); 7B lighting/atmosphere/quality-tier code built and tested, its capture/critique gate still open |
+| 07 Visual production | IN PROGRESS — 7A and 7B COMPLETE (local); 7C next | `99fad61` (7A), 7B: the commit that adds this row | [PHASE-07](progress/PHASE-07.md): five art gates, each judged on captures of the running game (headless SwiftShader frames only — no GPU, no phone). 7A in five rounds; 7B in six (b1–b6). The visual program follows the owner's Oct 2026 brief: [3D_VISUAL_STANDARD](3D_VISUAL_STANDARD.md), [3D_IMPLEMENTATION_PLAN](3D_IMPLEMENTATION_PLAN.md), [3D_QUALITY_REPORT](3D_QUALITY_REPORT.md) |
 | 08 Game depth/balance | NOT STARTED | — | — |
 | 09 UX/audio | NOT STARTED | — | — |
 | 10 Solo bot | NOT STARTED | — | snapshot-only bot (easy/normal/hard) used by vs-bot mode and attract demo |
@@ -34,7 +34,7 @@ screenshot-driven visual review.
 | Visual gate | State | Evidence |
 |---|---|---|
 | 7A Environment art | COMPLETE (local) | `99fad61` — [PHASE-07 §7A](progress/PHASE-07.md): seeded generators (19 large slabs, rift-cracked slabs with crystals, carved scoring-axis channels, gates with mounted gyroscopes, columns, underside, props on their colliders), five periodic procedural PBR surface families in one triplanar program with runtime recipe swaps, translucent rift glass; round 1 → 5 frames and comparisons in docs/visual-evidence/phase-07; render counters (low tier 68–78 draws / 74–80k triangles); 243 unit + 13 e2e tests; deviations (gate 12.4 m vs D07 5–8 m) recorded |
-| 7B Lighting and atmosphere | IN PROGRESS (paused for 06M) | [PHASE-07 §7B](progress/PHASE-07.md): light rig with D08 comparison variants, aerial-perspective fog sharing the sky gradient, storm sky and layers, contact shadows, quality tiers with adaptive stepping; the low tier's frame cost restored to its pre-7A level (SwiftShader comparison 250 → 114–125 ms; pre-7A 114–120 ms). Final-settings captures, critique and two revisions owed |
+| 7B Lighting and atmosphere | COMPLETE (local) — phone frame rate NOT MEASURED | [PHASE-07 §7B](progress/PHASE-07.md), [3D_QUALITY_REPORT](3D_QUALITY_REPORT.md): six capture rounds (b1–b6; frames and metrics in docs/visual-evidence/phase-07/7b); a pale-gold key at ~4:1 over a cool ambient, highlight caps by channel; drifting cloud shadows (medium/high) and baked static shadows (low tier); bronze braziers (5 draws), rune inscriptions, storm-wet floor patches; sky islands with lit towers and waterfalls; a cinematic menu camera into the storm break, per aspect. Kickoff luma range 0.49 → 0.58, menu 0.26 → 0.70, clipping ≤ 0.15 %; low tier 86 draws / 64 k triangles. D08's 30 fps phone target needs a real phone |
 | 7C Rift Core and elemental VFX | NOT STARTED | — |
 | 7D Wielder characters and IK | NOT STARTED | — |
 | 7E Golden screenshots and art critique | NOT STARTED | — |
@@ -44,11 +44,13 @@ screenshot-driven visual review.
 - Run `pnpm install && pnpm check` first; `pnpm test:e2e` and `pnpm test:worker` need no secrets.
 - Local dev: `pnpm dev:worker` (port 8787) and `pnpm dev` (port 5173). `apps/room-worker/.dev.vars`
   is copied from `.dev.vars.example` (development-only secret).
-- Next work: the **06M people study** needs the owner or testers on their own devices
-  (`/lab/hands` on a reachable HTTPS build — none is deployed; see PHASE-06M's protocol). The
-  code side of 06M (M1–M4) is built; remaining gaps there are listed in PHASE-06M ("Not yet").
-  Then Phase **07** art stage **7B** resumes at "Remaining for the 7B gate" in
-  docs/progress/PHASE-07.md.
+- Next work:
+  - The **06M people study** still needs the owner or testers on their own devices
+    (`/lab/hands` on a reachable HTTPS build — none is deployed; see PHASE-06M's protocol).
+  - Phase **07** continues with **7C** (D09: the Rift Core and elemental VFX, rooted in
+    authoritative state), then 7D and 7E. The work packages are in docs/3D_IMPLEMENTATION_PLAN.md.
+  - Capture any visual change with `node scripts/capture-arena.mjs` and score it with
+    `node scripts/frame-metrics.mjs`.
 - Hands Lab: `/lab/hands` (or `?mode=lab`) on any build; `?hands=1` turns hands-on control on for
   a normal match. Test runs: `?test=1&timescale=0.5` slows the local authority (rules unchanged),
   and a scripted player may re-pace it through the test hook.

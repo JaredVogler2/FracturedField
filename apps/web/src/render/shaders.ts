@@ -7,7 +7,7 @@ import { SKY } from './art-tokens';
  * `uTime` (and state uniforms) per frame and dispose on unmount.
  */
 
-const NOISE_GLSL = /* glsl */ `
+export const NOISE_GLSL = /* glsl */ `
   vec3 hash33(vec3 p) {
     p = fract(p * vec3(443.897, 441.423, 437.195));
     p += dot(p, p.yxz + 19.19);
