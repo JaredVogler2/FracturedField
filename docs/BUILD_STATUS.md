@@ -5,7 +5,7 @@ Nothing here is advertised as deployed or device-tested unless the evidence colu
 
 | Phase | State | Commit | Evidence |
 |---|---|---|---|
-| 01 Architecture/feasibility | COMPLETE | see git log `Phase 01:` (branch claude/practical-cannon-43r4af) | [PHASE-01](progress/PHASE-01.md): golden physics identical in Node/Chromium/workerd; 21/21 live two-client DO checks; 60 s in-DO 30 Hz benchmark (local workerd); 56 unit + 3 e2e tests |
+| 01 Architecture/feasibility | COMPLETE | `4c8fe27` | [PHASE-01](progress/PHASE-01.md): golden physics identical in Node/Chromium/workerd; 21/21 live two-client DO checks; 60 s in-DO 30 Hz benchmark (local workerd); 56 unit + 3 e2e tests |
 | 02 Local vertical slice | IN PROGRESS | — | match FSM + abilities already in `GameWorld`; input adapters, HUD, onboarding, shots and tuning pending |
 | 03 Online multiplayer | NOT STARTED | — | room authority + live WS proven in Phase 01; client RemoteSession, lag/loss suite, browser E2E pending |
 | 04 Matter/energy physics | NOT STARTED | — | — |

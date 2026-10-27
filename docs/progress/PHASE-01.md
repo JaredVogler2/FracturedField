@@ -125,7 +125,7 @@ pnpm dev:worker & pnpm dev       # http://127.0.0.1:5173 (/, /sim-debug, /spike)
 
 ## Commit
 
-Implementation commit: recorded in docs/BUILD_STATUS.md after push.
+Implementation commit: `4c8fe27` (branch `claude/practical-cannon-43r4af`).
 
 ## Next instruction
 
