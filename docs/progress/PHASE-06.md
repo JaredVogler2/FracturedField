@@ -1,7 +1,7 @@
 # PHASE 06 — Phone input: touch, handheld motion, controllers, accessibility (with D06)
 
-**Status: IN PROGRESS — implemented and tested in browser emulation; physical iOS / Android phones
-and real controllers NOT TESTED.**
+**Status: COMPLETE (local) — tested in browser emulation; physical iOS / Android phones and real
+controllers NOT TESTED.**
 Every player chooses how to control their seat — keyboard & mouse (or a game controller), touch,
 handheld motion, camera (Phase 05) or a simplified one-hand mode — from a capability matrix that
 never offers a dead end; all of them produce the same `ActionIntent`s and can be switched mid-match
@@ -55,28 +55,35 @@ real controllers (see "Honest limits" and the manual device checklist).
 
 ## Browser evidence (Playwright, production build, headless Chromium + SwiftShader)
 
-In progress — results so far on the production build (`vite preview`) and local workerd:
+Full regression on the final Phase 06 code (production build via `vite preview`, local workerd):
+`pnpm exec playwright test` — **38/38 passed in 21.3 min, 0 flaky** (phase01 ×3, phase02 ×4,
+phase03 ×3, phase04 ×3, phase05 ×7, phase06 ×12, phase06-devices ×6). CI on GitHub ran the same
+suite green on `ec23bad` (run #13, 31.5 min including install).
 
-- `e2e/phase06.spec.ts`: **D06 gate passed** (2.3 min: a touch-only phone — iPhone 13 profile,
-  no camera permission, no sensors — joins a room by invite link, readies with a tap and completes
-  three rounds online with taps alone; every intent it sent was `source: touch`); hot-swap during a
-  LIFT releases the server hold and shows the handover; two thumbs at once (CDP multi-touch: one
-  finger keeps aiming while another taps PULSE, exactly one PULSE, all touch) plus keyboard /
-  assistive activation of a thumb button; six layouts (320×568, 375×667, 430×932, 568×320,
-  844×390, 1024×768: targets ≥ 44 px, on screen, clear of the scoreboard / pause / mode chip, and
-  neither a control nor a HUD panel covers the core or a goal mouth); safe-area insets in landscape
-  (47 px notches, 21 px home indicator) and portrait (47 px island, 34 px indicator) — nothing sits
-  under an inset.
-- `e2e/phase06-devices.spec.ts`: motion end to end (turn right / left moves the authoritative force
-  point; gyro aim intents; background → "tap Recenter", nothing aims until recentred; sensor
-  silence → "stopped sending" → Use touch); rotation landscape → portrait re-zeroes for the new
-  orientation (and turning right then moves the force point right on the portrait screen); iOS
-  permission requested inside the tap (user activation and the click event recorded), granted →
-  motion, denied → touch stays playable; no readings / browser refusal → touch stays; controller
-  connect / steer / A pulses / LT lifts / unplug mid-LIFT releases on the server / Start pauses;
-  PULSE rebound to Z in Controls is used in the match (HUD shows Z, Space no longer pulses).
-- Remaining: the simplified-mode test (one tap holds LIFT, another lets go; then taps alone score
-  against the bot) after the toggle fix, the full regression suite, and the visual evidence.
+- `e2e/phase06.spec.ts` (12):
+  - **D06 gate passed:** a touch-only phone (iPhone 13 profile, no camera permission, no sensors)
+    joins a room by invite link, readies with a tap and completes three rounds online with taps
+    alone — in the final run 3 rounds over 2 matches (one rematch), 171 intents sent (3 PULSE),
+    every one `source: touch`.
+  - Hot-swap during a LIFT releases the server hold and shows the handover.
+  - Two thumbs at once (CDP multi-touch: one finger keeps aiming while another taps PULSE —
+    exactly one PULSE, all touch), plus keyboard activation of a thumb button reached with Tab.
+  - Simplified mode: one tap holds LIFT on the server, another releases it; then taps alone score
+    against the easy bot (final run: in its second match).
+  - Six layouts (320×568, 375×667, 430×932, 568×320, 844×390, 1024×768): targets ≥ 44 px, on
+    screen, clear of the scoreboard / pause / mode chip; neither a control nor a HUD panel covers
+    the core or a goal mouth.
+  - Safe-area insets in landscape (47 px notches, 21 px home indicator) and portrait (47 px
+    island, 34 px indicator): nothing sits under an inset.
+- `e2e/phase06-devices.spec.ts` (6): motion end to end (turn right / left moves the authoritative
+  force point; gyro aim intents, the thumb-button PULSE tagged touch; background → "tap
+  Recenter", nothing aims until recentred; sensor silence → "stopped sending" → Use touch);
+  rotation landscape → portrait re-zeroes for the new orientation (turning right then moves the
+  force point right on the portrait screen); iOS permission requested inside the tap (user
+  activation and the click event recorded), granted → motion, denied → touch stays playable; no
+  readings / the browser's own refusal → touch stays; controller connect / steer / A pulses / LT
+  lifts / unplug mid-LIFT releases on the server / Start pauses; PULSE rebound to Z is used in
+  the match (HUD shows Z, Space no longer pulses).
 
 ## Visual evidence and critique (actual renders, `docs/visual-evidence/phase-06/`)
 
@@ -167,6 +174,14 @@ Record device model, OS and browser version, result and notes for each line.
 
 ## Commits
 
-- Phase 06 (1/3): control modes, motion, touch, controller, rebinding (code + unit tests)
-- Phase 06 (2/3): browser E2E for phones, sensors, controllers and layouts
-- Phase 06 (3/3): ADR-0008, this report (in progress), build status
+- `c5e50e8` Phase 06 (1/3): control modes, handheld motion, touch, controller, rebinding
+- `5a893de` Phase 06 (2/3): browser E2E for phones, sensors, controllers and layouts
+- `ec23bad` Phase 06 (3/3, in progress): ADR-0008, phase report, build status
+- `0f87754` Phase 06: review fixes, portrait framing, thumb-button state, visual evidence
+- Phase 06 complete: final evidence and build status (this commit)
+
+## Next instruction
+
+Phase 07 — visual production in five gated art milestones (prompts/07 with D07–D11), starting
+with **7A** (D07): authored Shattered Meridian architecture from seeded generators, PBR stone and
+metal materials, golden frames, zoom crops and at least two critique-and-revise rounds.
