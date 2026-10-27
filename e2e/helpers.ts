@@ -3,12 +3,22 @@ import { expect, type Browser, type BrowserContextOptions, type Page } from '@pl
 export interface Snap {
   tick: number;
   entities: {
+    id: number;
     kind: string;
     owner: number;
     p: [number, number, number];
     v: [number, number, number];
+    /** The core's deliberate spin (rad/s about +y), when it has one (ADR-0009). */
+    s?: number;
   }[];
-  players: { m: [number, number]; energy: number; connected: boolean; hold: string | null }[];
+  players: {
+    m: [number, number];
+    energy: number;
+    connected: boolean;
+    hold: string | null;
+    /** The body this seat's hand holds (-1: none). */
+    grasp: number;
+  }[];
   match: {
     phase: string;
     score: [number, number];
@@ -118,8 +128,11 @@ export async function openRoom(
     beforeNavigate?: (host: Page, guest: Page) => void;
     /** Device emulation for the guest (e.g. a phone with touch and no camera permission). */
     guest?: BrowserContextOptions;
+    /** Extra query for both pages (e.g. `&hands=0` for the camera's sign scheme). */
+    query?: string;
   } = {},
 ) {
+  const q = opts.query ?? '';
   const ctxA = await browser.newContext({ viewport: VIEW });
   const ctxB = await browser.newContext(opts.guest ?? { viewport: VIEW });
   const a = await ctxA.newPage();
@@ -130,7 +143,7 @@ export async function openRoom(
   opts.beforeNavigate?.(a, b);
 
   // Host creates a room (fast test rules are honoured by development room services only).
-  await a.goto('/?fast=1&test=1&quality=low');
+  await a.goto(`/?fast=1&test=1&quality=low${q}`);
   await a.getByTestId('play-online').click();
   await expect(a.getByTestId('room-service-health')).toHaveClass(/ok/);
   await a.getByTestId('create-room').click();
@@ -140,7 +153,7 @@ export async function openRoom(
   await expect(a).toHaveURL(new RegExp(`room=${code}`));
 
   // Guest opens the invite link on another "device" and joins with one click.
-  await b.goto(`/?room=${code}&test=1&quality=low`);
+  await b.goto(`/?room=${code}&test=1&quality=low${q}`);
   await expect(b.getByTestId('room-code-input')).toHaveValue(code);
   await b.getByTestId('join-room').click();
   await expect(b.getByTestId('online-lobby')).toBeVisible();

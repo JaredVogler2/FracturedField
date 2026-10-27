@@ -102,4 +102,16 @@ test('Settings → Camera control: hand, sensitivity, sign hold time, self-view,
     preview: true,
     calibration: null,
   });
+  // Hands (ADR-0009): the camera grips and throws by default; signs stay selectable, and the
+  // mouse, touch and a controller can play hands-on too.
+  const hands = page.getByTestId('hands-settings');
+  await expect(hands.getByTestId('camera-scheme')).toHaveValue('hands');
+  await hands.getByTestId('camera-scheme').selectOption('signs');
+  await hands.getByTestId('hands-on').selectOption('hands');
+  const controls = await page.evaluate(
+    () =>
+      (JSON.parse(localStorage.getItem('ff.settings.v1') ?? '{}') as { controls: unknown })
+        .controls,
+  );
+  expect(controls).toMatchObject({ cameraScheme: 'signs', handsOn: true });
 });

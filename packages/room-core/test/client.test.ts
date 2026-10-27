@@ -402,6 +402,24 @@ describe('two remote clients, one authoritative room', () => {
     expect(net.checkpoint).toBeNull();
   });
 
+  it('the hand channel crosses the network: a closed hand grips the core, and both clients see it (ADR-0009)', async () => {
+    const net = new VirtualNetwork('fast');
+    const { a, b } = await connectBoth(net);
+    await readyBoth(net, a, b);
+    const w = net.room.gameWorld!;
+    w.debugClearKickoffShield();
+    w.debugPlaceBody(w.coreEntityId, -5, H, 0);
+    w.debugPlaceManipulator(0, -5, 0);
+    // The hand is re-sent every 60 ms, as a client keeps it alive (silent for 300 ms, it is gone).
+    for (let i = 0; i < 12; i++) {
+      a.intent('aim', 'hold', [-5, 0], { hand: { grip: 1, push: 0, twist: 0 } });
+      await net.run(60);
+    }
+    expect(w.debugPlayer(0).grasp).toBe(w.coreEntityId);
+    expect(a.latest?.players[0].grasp).toBe(w.coreEntityId);
+    expect(b.latest?.players[0].grasp).toBe(w.coreEntityId);
+  });
+
   it('duplicate and out-of-order intents from a client are ignored by the authority', async () => {
     const net = new VirtualNetwork('fast');
     const { a, b } = await connectBoth(net);

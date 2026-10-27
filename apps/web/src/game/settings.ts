@@ -46,10 +46,16 @@ export interface ControlPrefs {
   /** Hold moves (LIFT, MAGNET) toggle on tap instead of needing a held finger. */
   sticky: boolean;
   /**
-   * Hands-on control (ADR-0009): the input describes a hand — grip to hold, swing and let go to
-   * throw, twist to curve, an open hand sweeps and pushes — instead of firing discrete moves.
+   * Hands-on control (ADR-0009) for the mouse, touch and a controller: the input describes a hand
+   * — grip to hold, swing and let go to throw, twist to curve, an open hand sweeps and pushes —
+   * instead of firing discrete moves.
    */
   handsOn: boolean;
+  /**
+   * Camera control: `hands` (the default) — the tracked hand grips, swings, throws and sweeps;
+   * `signs` — hand signs cast PULSE, LIFT, SWEEP and the rest.
+   */
+  cameraScheme: 'hands' | 'signs';
 }
 
 export const DEFAULT_CONTROLS: ControlPrefs = {
@@ -59,6 +65,7 @@ export const DEFAULT_CONTROLS: ControlPrefs = {
   motionSensitivity: 1,
   sticky: false,
   handsOn: false,
+  cameraScheme: 'hands',
 };
 
 const CONTROL_MODES: readonly ControlMode[] = [
@@ -81,6 +88,7 @@ function validControls(v: unknown): ControlPrefs {
       typeof sens === 'number' && Number.isFinite(sens) ? Math.min(2, Math.max(0.5, sens)) : 1,
     sticky: c.sticky === true,
     handsOn: c.handsOn === true,
+    cameraScheme: c.cameraScheme === 'signs' ? 'signs' : 'hands',
   };
 }
 

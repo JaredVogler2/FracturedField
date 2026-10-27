@@ -6,7 +6,7 @@ import type { PlayerSlot } from '@ff/protocol';
 import { useRenderFrame } from '../frame-context';
 import { TEAM_COLORS } from '../art-tokens';
 import { mulberry32 } from '../procedural';
-import { localAim } from './local-aim';
+import { localAim, localHand } from './local-aim';
 
 const MAX_SWEEPS = 6;
 const STREAKS = 36;
@@ -186,6 +186,156 @@ export function LiftTethers() {
           <cylinderGeometry args={[0.07, 0.12, 1, 10, 1, true]} />
         </mesh>
       ))}
+    </group>
+  );
+}
+
+/** Radius (m) of a body a hand can hold, for the clasp drawn around it. */
+function heldRadius(kind: string): number {
+  switch (kind) {
+    case 'core':
+      return DEFAULT_RULES.core.radius;
+    case 'shard':
+      return DEFAULT_RULES.elements.fracture.shardRadius;
+    case 'lodestone':
+      return 0.55;
+    default:
+      return 0.75;
+  }
+}
+
+/** A clasp ring (unit radius) lying flat, and one arc of the spin swirl. */
+function flatTorus(): THREE.BufferGeometry {
+  return new THREE.TorusGeometry(1, 0.05, 6, 40).rotateX(Math.PI / 2);
+}
+function swirlArc(): THREE.BufferGeometry {
+  return new THREE.RingGeometry(1, 1.1, 20, 1, 0, Math.PI / 2.6).rotateX(-Math.PI / 2);
+}
+
+/**
+ * Continuous manipulation (ADR-0009), drawn from the authoritative snapshot only: a taut tether
+ * from a player's force point to the body their hand holds, a clasp around that body, and a
+ * swirl around the core while it carries a deliberate spin — it will curve. Cosmetic; it decides
+ * nothing.
+ */
+export function GripFeedback() {
+  const frame = useRenderFrame();
+  const tethers = [useRef<THREE.Mesh>(null), useRef<THREE.Mesh>(null)] as const;
+  const clasps = [useRef<THREE.Mesh>(null), useRef<THREE.Mesh>(null)] as const;
+  const swirl = useRef<THREE.Group>(null);
+  const mats = useMemo(
+    () =>
+      TEAM_COLORS.map(
+        (c) =>
+          new THREE.MeshBasicMaterial({
+            color: c,
+            transparent: true,
+            opacity: 0.85,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+          }),
+      ),
+    [],
+  );
+  const swirlMat = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        color: '#d9ccff',
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    [],
+  );
+  const torus = useMemo(flatTorus, []);
+  const arc = useMemo(swirlArc, []);
+  useEffect(
+    () => () => {
+      mats.forEach((m) => m.dispose());
+      swirlMat.dispose();
+      torus.dispose();
+      arc.dispose();
+    },
+    [mats, swirlMat, torus, arc],
+  );
+  const a = useMemo(() => new THREE.Vector3(), []);
+  const b = useMemo(() => new THREE.Vector3(), []);
+  const dir = useMemo(() => new THREE.Vector3(), []);
+  const up = useMemo(() => new THREE.Vector3(0, 1, 0), []);
+  const spinAngle = useRef(0);
+  useFrame(({ clock }, delta) => {
+    const f = frame.current;
+    const latest = f?.latest ?? null;
+    for (const slot of [0, 1] as const) {
+      const t = tethers[slot].current;
+      const c = clasps[slot].current;
+      if (!t || !c) continue;
+      const id = latest?.players[slot].grasp ?? -1;
+      const body = f && id >= 0 ? f.entities.get(id) : undefined;
+      if (!f || !body) {
+        t.visible = c.visible = false;
+        continue;
+      }
+      const m = f.manipulators[slot];
+      a.set(m.x, DEFAULT_RULES.manipulator.height, m.z);
+      b.set(body.px, body.py, body.pz);
+      const len = a.distanceTo(b);
+      t.visible = len > 0.05;
+      t.position.copy(a).add(b).multiplyScalar(0.5);
+      t.quaternion.setFromUnitVectors(up, dir.copy(b).sub(a).normalize());
+      t.scale.set(1, len, 1);
+      c.visible = true;
+      c.position.copy(b);
+      c.scale.setScalar(
+        (heldRadius(body.kind) + 0.22) * (1 + 0.04 * Math.sin(clock.elapsedTime * 6)),
+      );
+    }
+    const g = swirl.current;
+    if (!g) return;
+    const snap = latest?.entities.find((e) => e.kind === 'core');
+    const core = f && snap ? f.entities.get(snap.id) : undefined;
+    const spin = snap?.s ?? 0;
+    if (!core || core.veiled || Math.abs(spin) < 0.6) {
+      g.visible = false;
+      return;
+    }
+    // The swirl turns as the core does (rad/s about +y), so its direction says which way it bends.
+    spinAngle.current += spin * delta;
+    g.visible = true;
+    g.position.set(core.px, core.py, core.pz);
+    g.rotation.y = spinAngle.current;
+    g.scale.setScalar(DEFAULT_RULES.core.radius + 0.38);
+    swirlMat.opacity = Math.min(0.8, Math.abs(spin) / 10);
+  });
+  return (
+    <group>
+      {([0, 1] as const).map((slot) => (
+        <group key={slot}>
+          <mesh ref={tethers[slot]} material={mats[slot]} visible={false} renderOrder={4}>
+            <cylinderGeometry args={[0.06, 0.09, 1, 10, 1, true]} />
+          </mesh>
+          <mesh
+            ref={clasps[slot]}
+            geometry={torus}
+            material={mats[slot]}
+            visible={false}
+            renderOrder={4}
+          />
+        </group>
+      ))}
+      <group ref={swirl} visible={false}>
+        {[0, 1, 2].map((i) => (
+          <mesh
+            key={i}
+            geometry={arc}
+            material={swirlMat}
+            rotation-y={(i * 2 * Math.PI) / 3}
+            renderOrder={4}
+          />
+        ))}
+      </group>
     </group>
   );
 }
@@ -407,6 +557,15 @@ export function Reticles({ slots }: { slots: readonly PlayerSlot[] }) {
       if (!aim) continue;
       mesh.position.set(aim.x, 0.07, aim.z);
       mesh.rotation.set(-Math.PI / 2, 0, clock.elapsedTime * 1.5);
+      // Hands-on: the reticle is the hand — closing it tightens and brightens the ring, a push
+      // widens it, a pull draws it in.
+      const h = localHand.get(slot);
+      const grip = h?.grip ?? 0;
+      const push = h?.push ?? 0;
+      mesh.scale.setScalar(
+        (1 - 0.4 * grip) * (1 + 0.6 * Math.max(0, push) - 0.3 * Math.max(0, -push)),
+      );
+      (mesh.material as THREE.MeshBasicMaterial).opacity = 0.55 + 0.35 * grip;
     }
   });
   return (

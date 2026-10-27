@@ -106,6 +106,45 @@ export function RebindTable() {
   );
 }
 
+/**
+ * Hands-on control (ADR-0009): the camera grips, swings and throws by default (its sign scheme
+ * stays selectable); the mouse, touch and a controller can play hands-on too.
+ */
+export function HandsSettings() {
+  const c = useSettings((s) => s.controls);
+  const patch = (p: Partial<typeof c>) => {
+    const st = useSettings.getState();
+    st.set('controls', { ...st.controls, ...p });
+  };
+  return (
+    <fieldset className="settings-group" data-testid="hands-settings">
+      <legend>Hands</legend>
+      <label className="setting">
+        <span>Camera control</span>
+        <select
+          value={c.cameraScheme}
+          data-testid="camera-scheme"
+          onChange={(e) => patch({ cameraScheme: e.target.value === 'signs' ? 'signs' : 'hands' })}
+        >
+          <option value="hands">Hands — grip, swing and throw</option>
+          <option value="signs">Signs — hand signs cast moves</option>
+        </select>
+      </label>
+      <label className="setting">
+        <span>Mouse, touch and controller</span>
+        <select
+          value={c.handsOn ? 'hands' : 'moves'}
+          data-testid="hands-on"
+          onChange={(e) => patch({ handsOn: e.target.value === 'hands' })}
+        >
+          <option value="moves">Moves — click or tap to PULSE and LIFT</option>
+          <option value="hands">Hands-on — hold to grip, let go to throw</option>
+        </select>
+      </label>
+    </fieldset>
+  );
+}
+
 /** Touch and motion preferences: thumb side, motion style and sensitivity, tap-to-toggle holds. */
 export function TouchMotionSettings() {
   const c = useSettings((s) => s.controls);

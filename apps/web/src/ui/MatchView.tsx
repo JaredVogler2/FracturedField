@@ -272,15 +272,16 @@ export function MatchView({
   // What the Hands Lab's "what the game sees" meters read (stable, so its loop is not restarted).
   const labHand = useCallback(() => manager?.seats.get(0)?.hand ?? null, [manager]);
   const labSource = useCallback(() => manager?.seats.get(0)?.source ?? 'keyboard', [manager]);
-  // Hands-on control (ADR-0009): the solo player's input describes a hand. `?hands=1` (any
-  // build) turns it on for this page without changing the saved setting.
-  const handsOn = useMemo(
-    () =>
-      mode.kind === 'lab' ||
-      controls.handsOn ||
-      new URLSearchParams(window.location.search).get('hands') === '1',
-    [mode.kind, controls.handsOn],
-  );
+  // Hands-on control (ADR-0009): the solo player's input describes a hand — the camera's by
+  // default (its sign scheme stays selectable), the mouse, touch and a controller when chosen.
+  // `?hands=1` / `?hands=0` (any build) turns it on / off for this page without changing the
+  // saved settings; the Hands Lab is always hands-on.
+  const handsParam = useMemo(() => new URLSearchParams(window.location.search).get('hands'), []);
+  const handsOn =
+    mode.kind === 'lab' ||
+    handsParam === '1' ||
+    (handsParam !== '0' &&
+      (controlMode === 'camera' ? controls.cameraScheme === 'hands' : controls.handsOn));
   useEffect(() => {
     if (manager && soloSlot !== null) manager.setHandsOn(soloSlot, handsOn);
   }, [manager, soloSlot, handsOn]);
@@ -738,6 +739,7 @@ export function MatchView({
             manager={manager}
             loadout={seatLoadouts[soloSlot] ?? DEFAULT_LOADOUT}
             paused={paused || matchEnd !== null || (online ? inLobby : !started)}
+            hands={handsOn}
             onFallback={() => {
               setCameraReady(false);
               setControlMode(fallbackMode);

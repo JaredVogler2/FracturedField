@@ -71,7 +71,8 @@ test('real camera path: real hand photos through the hand model become authorita
     (s) => localStorage.setItem('ff.settings.v1', JSON.stringify(s)),
     PHOTO_CALIBRATION,
   );
-  await page.goto('/?mode=bot&difficulty=easy&test=1&quality=low&seed=31');
+  // The sign scheme (hands-on is the camera's default): signs cast moves.
+  await page.goto('/?mode=bot&difficulty=easy&test=1&quality=low&seed=31&hands=0');
   await page.getByTestId('controls-camera').click();
   await expect(page.getByTestId('camera-setup')).toContainText('stays on this device');
   await page.getByTestId('camera-start').click();
@@ -120,7 +121,8 @@ test('synthetic gestures drive the match; a long dropout releases a held LIFT on
 }) => {
   test.setTimeout(300_000);
   await page.setViewportSize({ width: 640, height: 360 });
-  await page.goto('/?mode=bot&difficulty=easy&test=1&quality=low&seed=7');
+  // The sign scheme (hands-on is the camera's default): a held fist is LIFT.
+  await page.goto('/?mode=bot&difficulty=easy&test=1&quality=low&seed=7&hands=0');
   await page.getByTestId('controls-camera').click();
   // No real camera needed: the synthetic frames enter the same controller the camera feeds.
   await cameraActive(page);
@@ -275,6 +277,7 @@ test('online: each player on their own camera; both see both camera casts; no me
       ),
     );
   const { ctxA, ctxB, a, b, errors } = await openRoom(browser, {
+    query: '&hands=0', // the sign scheme: a palm push is PULSE
     beforeNavigate: (host, guest) => {
       record('host')(host);
       record('guest')(guest);

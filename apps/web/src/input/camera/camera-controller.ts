@@ -1,5 +1,6 @@
 import { DEFAULT_ABILITIES } from '@ff/game-data';
 import {
+  AUTHORITY_THRESHOLDS,
   Calibrator,
   ContinuousMapper,
   GestureEngine,
@@ -49,6 +50,8 @@ export class CameraController {
   /** Swap every hand label (learned at calibration: this camera's labels are inverted). */
   private flip = false;
   private dominant: Handedness | 'any';
+  /** Hands-on practice: the hand closed past the holding grip and has not opened since. */
+  private practiceClosed = false;
 
   constructor(
     cfg: Partial<GestureConfig>,
@@ -159,6 +162,11 @@ export class CameraController {
       for (const e of out.events) if (e.phase !== 'end') practiced[e.action] = now;
       useCamera.setState({ lastGesture: { action: last.action, at: now }, practiced });
     }
+    // Hands-on: the tracked hand's grip, push and twist, every frame — practised before play.
+    const channel = this.seat?.handsOn
+      ? this.continuous.update(out.hand?.features ?? null, out.hand?.roll ?? null, frame.t)
+      : null;
+    if (channel && this.mode === 'practice') this.notePractice(channel.grip, now);
     // Paused (menu open, lobby, match over): tracking status keeps updating, nothing is sent.
     if (this.mode !== 'play' || !this.seat || this.paused) return out;
     if (out.aim) {
@@ -166,14 +174,23 @@ export class CameraController {
       this.seat.setReticle(p.x, p.z);
       this.seat.claim('camera', now);
     }
-    if (this.seat.handsOn) {
-      const h = out.hand;
-      const channel = this.continuous.update(h?.features ?? null, h?.roll ?? null, frame.t);
+    if (channel) {
       const signing = SIGN_SHAPES.has(out.status.shape);
       this.seat.setHand(signing ? { ...channel, grip: 0 } : channel, 'camera');
     }
     this.apply(out.events, now);
     return out;
+  }
+
+  /** Hands-on practice: a hand that closes past the holding grip, then opens past letting go. */
+  private notePractice(grip: number, now: number): void {
+    if (!this.practiceClosed && grip >= AUTHORITY_THRESHOLDS.engageGrip) {
+      this.practiceClosed = true;
+      useCamera.setState((s) => ({ handsPracticed: { ...s.handsPracticed, hold: now } }));
+    } else if (this.practiceClosed && grip <= AUTHORITY_THRESHOLDS.releaseGrip) {
+      this.practiceClosed = false;
+      useCamera.setState((s) => ({ handsPracticed: { ...s.handsPracticed, release: now } }));
+    }
   }
 
   private apply(events: readonly GestureEvent[], now: number): void {

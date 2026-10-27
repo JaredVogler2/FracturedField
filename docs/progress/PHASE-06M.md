@@ -1,7 +1,9 @@
 # MILESTONE 06M — Continuous physical manipulation
 
-**Status: IN PROGRESS — M1 (authority) done; the M2 camera mapper and the M3 task judge are
-built and tested; their client integration (input adapters, the Hands Lab page) is next.**
+**Status: IN PROGRESS — M1 (authority), M2 (inputs: camera, mouse, touch, gamepad), M3 (the Hands
+Lab) and M4 (match integration) are built and tested in this container (synthetic hands and
+scripted players, software rendering); the people study — the milestone's real gate — has not
+been run.**
 
 Inserted by the owner's direction (October 2026) between Phase 06 and the rest of Phase 07:
 *development should demonstrate that real people can intuitively bend physical objects with
@@ -167,3 +169,32 @@ taught, and which mappings they find natural.
   try judged from frames before its setup.
 - **Not covered:** a touch or gamepad player completing the tasks in the browser (their adapters
   have unit tests only), and the people study.
+
+### M4 — match integration (built; local evidence)
+
+- **Camera control is hands-on by default** (setting `controls.cameraScheme`, default `hands`;
+  `signs` keeps the sign vocabulary). The mouse, touch and a controller play hands-on when chosen
+  (`controls.handsOn`); Settings → *Hands* sets both, and `?hands=1` / `?hands=0` overrides them
+  for one page. In the hands scheme the camera's practice step asks for a closed and then an
+  opened hand — measured against the authority's own grip thresholds — instead of PULSE, and
+  the gesture reference lists what the hand does (hold, throw, spin, sweep, press) before the
+  signs that remain (GUARD, WET, HEAT, the picks).
+- **On-field feedback**, drawn from authoritative snapshots only: a team-coloured tether from a
+  player's force point to the body their hand holds and a clasp around it; a swirl around the
+  core while it carries a deliberate spin (it turns the way the core does, so it says which way
+  the shot will bend); the local reticle tightens and brightens as the hand closes and widens
+  with a push.
+- **Online:** the room client copied only the intent fields it knew and dropped the hand — the
+  channel never reached the room. Fixed; a network test (two clients through the real room
+  authority over simulated links) grips the core with a hand kept alive at 60 ms and both
+  clients see the grip; it fails without the fix.
+- **Browser tests** (`e2e/phase06m-match.spec.ts`, local SwiftShader): a camera player, hands-on
+  by default, scores against the bot by gripping, swinging and letting go — no sign or move
+  sent, only aims carrying the hand (3 throws, 1.1 min, local authority at half speed); online,
+  both seats hands-on with the mouse grip the core in turn through the room, both devices see
+  each grip, and the room refuses no intent (1.4 min). The camera tests of the sign scheme now
+  select it explicitly (`hands=0`); the settings test covers the *Hands* group.
+- **Not yet:** the bot still plays with discrete moves (Phase 10); the handheld-motion mapping;
+  a touch or gamepad player in a match in the browser; anything on a physical device; the
+  people study.
+

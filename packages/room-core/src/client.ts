@@ -369,6 +369,10 @@ export class RoomClient {
       source: intent.source,
       ...(intent.dir ? { dir: [intent.dir[0], intent.dir[1]] as [number, number] } : {}),
       ...(intent.modifier !== undefined ? { modifier: intent.modifier } : {}),
+      // The continuous hand (ADR-0009) rides on aim intents; the room validates and clamps it.
+      ...(intent.hand
+        ? { hand: { grip: intent.hand.grip, push: intent.hand.push, twist: intent.hand.twist } }
+        : {}),
     };
     const ok = this.raw({ t: 'intent', i });
     if (ok) this.stats.intentsSent++;

@@ -8,7 +8,7 @@ import {
 import { IntentEmitter, worldToAim, type ActionEdge, type IntentSink } from '@ff/controls';
 import type { HandState, InputSource, PlayerSlot, Vec2, WorldSnapshot } from '@ff/protocol';
 import { view } from '../render/view';
-import { localAim } from '../render/vfx/local-aim';
+import { localAim, localHand } from '../render/vfx/local-aim';
 import type { KeyBindings, BindingAction } from './bindings';
 import { MODE_SOURCE, type ControlMode } from './capabilities';
 import type { MotionConfig } from './motion';
@@ -737,7 +737,12 @@ export class InputManager {
     for (const { adapters } of this.modal.values()) for (const a of adapters) a.tick?.(now);
     if (this.paused) return;
     for (const kb of this.keyboards) kb.update(dt, now);
-    for (const seat of this.seats.values()) seat.emitter.aim(seat.aim(), now, false, seat.hand);
+    for (const seat of this.seats.values()) {
+      const hand = seat.hand;
+      seat.emitter.aim(seat.aim(), now, false, hand);
+      if (hand) localHand.set(seat.slot, hand);
+      else localHand.delete(seat.slot);
+    }
   }
 
   /**

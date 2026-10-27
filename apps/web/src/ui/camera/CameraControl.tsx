@@ -16,6 +16,21 @@ import { ABILITY_INFO } from '../Loadout';
 
 type Step = 'choose' | 'frame' | 'calibrate' | 'practice' | 'active';
 
+/** Hands-on play (ADR-0009): what the hand does — then the signs that remain. */
+const HANDS: readonly { sign: string; what: string }[] = [
+  { sign: 'Move an open hand', what: 'Move your force point' },
+  { sign: 'Close your hand near the core or a stone', what: 'Hold it (a fist holds firmly)' },
+  { sign: 'Swing, then open your hand', what: 'Throw it' },
+  { sign: 'Turn your wrist while holding', what: 'Spin it — a spinning core curves' },
+  { sign: 'Sweep an open hand fast', what: 'Push things along' },
+  { sign: 'Move your palm toward the camera (or back)', what: 'Press away (or draw in)' },
+  { sign: 'Turn your palm up and hold — or bring both palms together', what: 'GUARD' },
+  { sign: 'Two fingers (V)', what: 'WET' },
+  { sign: 'Thumbs up', what: 'HEAT' },
+  { sign: 'Point with one finger', what: 'Pick 1' },
+  { sign: 'OK sign (thumb meets index)', what: 'Pick 2' },
+];
+
 const GESTURES: readonly { sign: string; what: string }[] = [
   { sign: 'Move an open hand', what: 'Aim your force point' },
   { sign: 'Push your palm toward the camera', what: 'PULSE' },
@@ -28,15 +43,17 @@ const GESTURES: readonly { sign: string; what: string }[] = [
   { sign: 'OK sign (thumb meets index)', what: 'Pick 2' },
 ];
 
-/** Gesture reference with the seat's actual picks filled in. */
+/** Gesture reference with the seat's actual picks filled in (hands-on or sign play). */
 export function GestureHelp({
   loadout,
+  hands = false,
 }: {
   loadout: readonly [AdvancedAbilityId, AdvancedAbilityId];
+  hands?: boolean;
 }) {
   return (
-    <ul className="gesture-help">
-      {GESTURES.map((g) => (
+    <ul className="gesture-help" data-testid="gesture-help">
+      {(hands ? HANDS : GESTURES).map((g) => (
         <li key={g.what}>
           <span className="g-sign">{g.sign}</span>
           <span className="g-what">
@@ -75,6 +92,7 @@ export function CameraControl({
   manager,
   loadout,
   paused,
+  hands = false,
   onFallback,
   onReady,
 }: {
@@ -83,6 +101,8 @@ export function CameraControl({
   loadout: readonly [AdvancedAbilityId, AdvancedAbilityId];
   /** Pause menu open / match not running: no gestures reach the game. */
   paused: boolean;
+  /** Hands-on play (ADR-0009): practise holding and letting go instead of PULSE. */
+  hands?: boolean;
   /** Player chose (or was forced) to play without the camera. */
   onFallback: () => void;
   /** Camera setup finished: the player can start / ready up. */
@@ -102,6 +122,7 @@ export function CameraControl({
       fps: st.stats?.fps ?? null,
       calibration: st.calibration,
       practiced: st.practiced,
+      handsPracticed: st.handsPracticed,
       trackState: st.track?.state,
       handsVisible: st.track?.handsVisible ?? 0,
       stable: st.track?.stable ?? false,
@@ -320,7 +341,7 @@ export function CameraControl({
         {showHelp ? (
           <div className="cam-help panel" role="dialog" aria-label="Camera gestures">
             <div className="me-eyebrow">CAMERA GESTURES</div>
-            <GestureHelp loadout={loadout} />
+            <GestureHelp loadout={loadout} hands={hands} />
             <button className="btn" onClick={() => setShowHelp(false)}>
               Close
             </button>
@@ -511,19 +532,36 @@ export function CameraControl({
           <>
             <div className="me-title">Practice</div>
             <div className={`cam-preview small${mirrored ? ' mirrored' : ''}`} ref={previewRef} />
-            <ul className="cam-practice">
-              <li className={cam.practiced.pulse ? 'done' : ''}>
-                PULSE — push your open palm toward the camera
-              </li>
+            <ul className="cam-practice" data-testid="cam-practice">
+              {hands ? (
+                <>
+                  <li className={cam.handsPracticed.hold ? 'done' : ''}>
+                    HOLD — close your hand into a fist
+                  </li>
+                  <li className={cam.handsPracticed.release ? 'done' : ''}>
+                    LET GO — open it again
+                  </li>
+                </>
+              ) : (
+                <li className={cam.practiced.pulse ? 'done' : ''}>
+                  PULSE — push your open palm toward the camera
+                </li>
+              )}
               <li className={cam.practiced.guard ? 'done' : ''}>
                 GUARD — turn your palm up and hold it
               </li>
             </ul>
-            <GestureHelp loadout={loadout} />
+            <GestureHelp loadout={loadout} hands={hands} />
             <div className="row">
               <button
                 className="btn primary big"
-                disabled={!(cam.practiced.pulse && cam.practiced.guard)}
+                disabled={
+                  !(
+                    (hands
+                      ? cam.handsPracticed.hold && cam.handsPracticed.release
+                      : cam.practiced.pulse) && cam.practiced.guard
+                  )
+                }
                 onClick={() => setStep('active')}
                 data-testid="camera-play"
               >

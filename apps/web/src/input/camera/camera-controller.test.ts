@@ -243,6 +243,34 @@ describe('CameraController — hands-on (ADR-0009)', () => {
     expect(sent.filter((i) => i.action !== 'aim').map((i) => i.action)).toEqual([]);
   });
 
+  it('hands-on practice: closing then opening the hand ticks HOLD and LET GO; nothing is sent', async () => {
+    const { useCamera, resetCameraUi } = await import('./camera-store');
+    resetCameraUi();
+    const { sent, ctl, seat } = rig();
+    seat.handsOn = true;
+    ctl.setMode('practice');
+    const frames = clip(
+      [
+        { t: 0, hand: { ...HOME, shape: 'open' } },
+        { t: 0.8, hand: { shape: 'fist' } },
+        { t: 1.6, hand: { shape: 'fist' } },
+        { t: 2.2, hand: { shape: 'open' } },
+      ],
+      { seconds: 3 },
+    );
+    const seen: string[] = [];
+    for (const f of frames) {
+      ctl.feed(f);
+      const p = useCamera.getState().handsPracticed;
+      seen.push(`${p.hold ? 'hold' : ''}${p.release ? '+release' : ''}`);
+    }
+    // HOLD is ticked first (the hand closed past the holding grip), LET GO only after it.
+    expect(seen.indexOf('hold')).toBeGreaterThan(-1);
+    expect(seen.at(-1)).toBe('hold+release');
+    expect(sent).toEqual([]); // practice reaches no game
+    resetCameraUi();
+  });
+
   it('an element sign never grips (thumbs-up is HEAT, not a fist) and still casts', () => {
     const { sent, ctl, seat } = rig();
     seat.handsOn = true;

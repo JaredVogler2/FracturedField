@@ -9,7 +9,7 @@ import { useSettings } from '../game/settings';
 import { sfx } from '../audio/sfx';
 import { keyLabel, P1_BINDINGS, P2_BINDINGS, type KeyBindings } from '../input/bindings';
 import { Glyph } from './Glyph';
-import { RebindTable, TouchMotionSettings } from './controls/Rebind';
+import { HandsSettings, RebindTable, TouchMotionSettings } from './controls/Rebind';
 
 type Panel = null | 'controls' | 'settings' | 'online';
 
@@ -400,6 +400,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
             onChange={(e) => s.set('devHud', e.target.checked)}
           />
         </label>
+        <HandsSettings />
         <TouchMotionSettings />
         <CameraSettings />
         <button className="btn primary" onClick={onClose} ref={doneRef}>

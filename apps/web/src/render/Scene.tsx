@@ -10,7 +10,14 @@ import { FrameDriver, useGameClient } from './frame-context';
 import { view } from './view';
 import { useSettings } from '../game/settings';
 import { EventEffects } from './vfx/EventEffects';
-import { AimPreview, CoreTrail, LiftTethers, Reticles, SweepFields } from './vfx/FieldEffects';
+import {
+  AimPreview,
+  CoreTrail,
+  GripFeedback,
+  LiftTethers,
+  Reticles,
+  SweepFields,
+} from './vfx/FieldEffects';
 import { ChargeBolts, ElementRegions, MagnetFields, WaterAndIce } from './vfx/ElementEffects';
 import type { PlayerSlot } from '@ff/protocol';
 import {
@@ -127,6 +134,7 @@ export function GameScene({
           <MagnetFields />
           <ChargeBolts />
           <LiftTethers />
+          <GripFeedback />
         </>
       )}
       <AimPreview slots={localSlots} />
