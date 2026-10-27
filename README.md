@@ -10,7 +10,7 @@
 
 ## First action in Claude Code
 
-Open this repository in Claude Code and simply invoke the built-in project skill **/goal** (installed in .claude/skills/goal/SKILL.md). Alternatively, paste this expanded instruction if skills are unavailable:
+Open this repository in Claude Code and simply invoke the repository-provided Claude Code skill **/goal** (installed in .claude/skills/goal/SKILL.md). Alternatively, paste this expanded instruction if skills are unavailable:
 
 ```text
 /goal Read README.md, docs/GAME_DESIGN.md, docs/ARCHITECTURE.md, docs/ACCEPTANCE.md and docs/BUILD_ORDER.md; follow the deep-dive prompts assigned to each phase. Follow prompts/00-ORCHESTRATOR.md as the standing execution contract. Execute phases sequentially starting with 01, implementing actual runnable code and tests; do not merely summarize the prompts or create a mockup. Commit after each passing phase. Do not advance a phase until its acceptance gates pass or you have documented a concrete blocker. Prioritize playable end-to-end local multiplayer as quickly as possible, then excellent graphics, physics, camera/sensor controls, and competitive depth. Never claim any test or deployment succeeded unless executed and evidenced.
@@ -20,7 +20,7 @@ Open this repository in Claude Code and simply invoke the built-in project skill
 
 **[Open the step-by-step BUILD ORDER](docs/BUILD_ORDER.md)** to run the 13 implementation phases plus **16 specialist deep-dives**. Phase 07 now has five gated visual production passes: environment modeling, lighting/atmosphere, the core and elemental VFX, articulated characters, then screenshot-led art redesign. **[Creative target & objective art criteria](docs/CREATIVE_TARGET.md)** define the expected cinematic experience; the game must be playable, not just attractive in screenshots.
 
-The root project [CLAUDE.md](CLAUDE.md) and built-in Claude Code skills [ /goal ](.claude/skills/goal/SKILL.md) and [ /visual-audit ](.claude/skills/visual-audit/SKILL.md) ensure the expansion is executed rather than ignored. Resume state lives in [docs/BUILD_STATUS.md](docs/BUILD_STATUS.md).
+The root project [CLAUDE.md](CLAUDE.md) and repository-provided Claude Code skills [ /goal ](.claude/skills/goal/SKILL.md) and [ /visual-audit ](.claude/skills/visual-audit/SKILL.md) ensure the expansion is executed rather than ignored. Resume state lives in [docs/BUILD_STATUS.md](docs/BUILD_STATUS.md).
 
 ## Prompt sequence
 
