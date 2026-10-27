@@ -16,6 +16,7 @@
     "@ff/room-core": "workspace:*",
     "@ff/sim": "workspace:*",
     "@ff/ui": "workspace:*",
+    "@mediapipe/tasks-vision": "1.0.1",
     "@react-three/fiber": "9.8.2",
     "@react-three/postprocessing": "3.2.2",
     "postprocessing": "6.39.5",
