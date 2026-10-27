@@ -114,6 +114,10 @@ pnpm install && pnpm dev     # http://127.0.0.1:5173
 #   /?mode=bot&difficulty=hard   /?mode=duel   /?mode=duel&fast=1&seed=4
 ```
 
+## Commit
+
+Implementation commit: `60d901f`.
+
 ## Next instruction
 
 Phase 03 (prompts/03-REALTIME-MULTIPLAYER.md + D03): client `RemoteSession` over WebSocket to the
