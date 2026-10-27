@@ -14,7 +14,7 @@ import { forgetSeat, updateSeatTicket, type StoredSeat } from '../net/seat-store
 import type { SeatLoadouts, SessionDriver } from '../net/session';
 import { GameClientProvider, useGameClient } from '../render/frame-context';
 import { GameScene } from '../render/Scene';
-import { InputManager, type SeatConfig } from '../input/manager';
+import { InputManager, isControlActivation, type SeatConfig } from '../input/manager';
 import { P1_BINDINGS, P2_BINDINGS, SOLO_BINDINGS, applyOverride } from '../input/bindings';
 import {
   MODE_SOURCE,
@@ -438,7 +438,9 @@ export function MatchView({
         !started &&
         !online &&
         mode.kind !== 'attract' &&
-        (e.code === 'Space' || e.code === 'Enter')
+        (e.code === 'Space' || e.code === 'Enter') &&
+        // A control reached with the keyboard (a mode, a pick) handles its own Enter / Space.
+        !isControlActivation(e)
       ) {
         e.preventDefault();
         start();
@@ -550,6 +552,7 @@ export function MatchView({
                 hand={controls.hand}
                 sticky={controlMode === 'accessible' || controls.sticky}
                 simplified={controlMode === 'accessible'}
+                denied={denied}
               />
             ) : null}
             {soloSlot !== null && controlMode === 'motion' ? (

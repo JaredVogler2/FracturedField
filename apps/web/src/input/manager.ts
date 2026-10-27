@@ -156,14 +156,19 @@ function isTypingTarget(t: EventTarget | null): boolean {
   );
 }
 
-/** Enter on a focused control (button, link, select) activates that control, not a game key. */
-function isControlActivation(e: KeyboardEvent): boolean {
-  if (e.code !== 'Enter' && e.code !== 'NumpadEnter') return false;
+/**
+ * Enter or Space on a control the player reached with the keyboard (Tab: `:focus-visible`)
+ * activates that control, not a game key. A HUD button a mouse player just clicked keeps focus
+ * without focus-visible, so Space still pulses for them.
+ */
+export function isControlActivation(e: KeyboardEvent): boolean {
+  if (e.code !== 'Enter' && e.code !== 'NumpadEnter' && e.code !== 'Space') return false;
   const t = e.target;
   return (
-    t instanceof HTMLButtonElement ||
-    t instanceof HTMLSelectElement ||
-    t instanceof HTMLAnchorElement
+    (t instanceof HTMLButtonElement ||
+      t instanceof HTMLSelectElement ||
+      t instanceof HTMLAnchorElement) &&
+    t.matches(':focus-visible')
   );
 }
 

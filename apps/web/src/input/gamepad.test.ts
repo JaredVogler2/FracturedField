@@ -77,4 +77,13 @@ describe('GamepadMapper (standard layout)', () => {
     ]);
     expect(m.release()).toEqual([]);
   });
+
+  it('a button still held across a pause does not fire again; a new pad starts fresh', () => {
+    const m = new GamepadMapper(['freeze', 'magnetize']);
+    expect(actions(m, pad([0]))).toEqual(['pulse:tap']);
+    m.release(); // pause
+    expect(actions(m, pad([0]))).toEqual([]); // A never let go: no second PULSE
+    m.reset(); // a different controller
+    expect(actions(m, pad([0]))).toEqual(['pulse:tap']);
+  });
 });

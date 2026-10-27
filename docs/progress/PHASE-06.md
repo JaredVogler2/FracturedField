@@ -28,21 +28,23 @@ real controllers (see "Honest limits" and the manual device checklist).
 
 ## Unit tests (`pnpm test`)
 
-215 unit tests in 20 files pass (Phase 05 ended at 180). New for Phase 06 (43 in `apps/web`):
+217 unit tests in 20 files pass (Phase 05 ended at 180). New for Phase 06 (45 in `apps/web`):
 
 - `capabilities.test.ts` (6): iPhone Safari (touch first, motion behind a prompt), Android Chrome
   (motion without a prompt), desktop (no motion although the API exists), insecure origin (reasons
   shown), a touch laptop (keyboard & mouse by default), nothing detectable (simplified remains).
-- `motion.test.ts` (14): the W3C angle formula round-trips; turning right aims right and tipping
+- `motion.test.ts` (15): the W3C angle formula round-trips; turning right aims right and tipping
   away aims down; the singular upright hold; landscape screen correction; rotation re-zero; still
   hand with noise does not move the aim; a deliberate turn reaches 90 % within 150 ms; one-reading
-  glitch ignored vs a persistent flick; null/NaN ignored, gap → stalled → resumes; nothing aims
-  after the background until recenter; sensitivity and clamping; tilt style; and two measurements:
+  glitch ignored vs a persistent flick; null/NaN ignored, gap → stalled → resumes; no reading at
+  all while waiting or after the background → stalled; nothing aims after the background until
+  recenter; sensitivity and clamping; tilt style; and two measurements:
   **2° correction → 63 % in 100 ms; 15° turn → 63 % in 33 ms, 90 % in 67 ms** (synthetic 60 Hz
   readings — the filter's behaviour, not device latency) and **1 % null/NaN readings during a turn
   change the aim by < 0.05**.
-- `gamepad.test.ts` (6): one fire per press, LIFT trigger hysteresis, picks by loadout, D-pad
-  sweeps and Start, stick dead zone / quadratic response / NaN safety, release ends every hold once.
+- `gamepad.test.ts` (7): one fire per press, LIFT trigger hysteresis, picks by loadout, D-pad
+  sweeps and Start, stick dead zone / quadratic response / NaN safety, release ends every hold once,
+  a button held across a pause does not fire again (a new pad starts fresh).
 - `bindings.test.ts` (4): free key replaces, a taken key swaps, every action keeps a key after any
   sequence of rebinds (property test), reserved/malformed keys refused and stored data sanitised.
 - `manager.test.ts` (5): a manager created in a mode aims under that mode's source from its first
@@ -75,6 +77,53 @@ In progress — results so far on the production build (`vite preview`) and loca
   PULSE rebound to Z in Controls is used in the match (HUD shows Z, Space no longer pulses).
 - Remaining: the simplified-mode test (one tap holds LIFT, another lets go; then taps alone score
   against the bot) after the toggle fix, the full regression suite, and the visual evidence.
+
+## Visual evidence and critique (actual renders, `docs/visual-evidence/phase-06/`)
+
+Captured from the production build with `node scripts/capture-controls-ui.mjs <baseUrl> <outDir>`
+(headless Chromium + SwiftShader, device emulation; quality `low`). Views: the phone ready gate
+with the control picker (`controls-1`), touch play in landscape (`controls-2`), a GUARD cooldown
+on its thumb button (`controls-2b`), the in-match mode switcher (`controls-3`), motion with the
+gauge, RECENTER and the rotation notice (`controls-4`), the back-from-background prompt
+(`controls-5`), portrait touch (`controls-6`), simplified (`controls-7`), left-handed (`controls-8`),
+a 4:3 tablet (`controls-9`), the rebinding panel (`controls-10`) and the controller notice on a
+desktop (`controls-11`).
+
+- **Iteration 1 critique** (`*-iteration1.jpg` kept for comparison):
+  1. Portrait: the arena was a small rectangle in the middle of the screen. The camera fit had
+     only raised its bottom margin for the controls band, so it backed away ~4×.
+  2. The thumb buttons showed no cooldown or affordability while the player panel repeated all
+     eight ability chips in a bottom corner of the player's own half.
+  3. The motion "Recentered" notice sat on top of the WET/HEAT buttons.
+  4. The 4-row thumb column reaches high on a landscape phone (WET/HEAT ~270 px from the
+     corner); the core four moves are within ~150 px.
+- **Fixed in iteration 2:** the portrait camera fits the free area and shifts the image there
+  with a view offset (the arena now fills the space above the controls, framed from behind the
+  player's goal); every thumb button shows its cooldown (lit band, label dimmed), dims when
+  unaffordable and shakes when refused, and the touch-layout player panel keeps only the energy
+  meter; the motion notice moved beside the gauge on the aiming side. Point 4 stays as a
+  documented trade-off (ADR-0008 §5) for the Phase 09 UX pass with real hands.
+- The Controls panel was also fixed after its first capture: the rebind rows overflowed under the
+  duel tables and the panel opened scrolled to the bottom.
+
+## Independent review
+
+A separate reviewer (fresh context, no edits) read the Phase 06 diff for correctness bugs and
+reported seven; all were confirmed and fixed:
+
+1. Portrait camera shrank the arena (above).
+2. Any game controller was adopted and its raw axes trusted — a non-standard device resting off
+   centre (pedal, trigger at −1) would steer forever. Now only `mapping: "standard"` pads are used.
+3. Motion could wait forever with no prompt: the probe accepted readings without α; "waiting" and
+   "needs recenter" never escalated when no reading came; a false "sensor stopped" alert fired
+   under the pause menu. All three fixed (unit-tested).
+4. Space on a keyboard-focused thumb button cast PULSE; on the ready screen Enter / Space on any
+   focused control started the match. Now a control reached with the keyboard owns those keys.
+5. Start could pause but not resume a controller-only player; a button held across a pause fired
+   again on resume. Both fixed (unit-tested).
+6. A slow motion check from a closed picker could switch the mode later. Now cancelled.
+7. A refused tap-to-toggle START left the button "on" for 0.9 s, so the retry sent END. Now a
+   refusal ends the optimistic window at once.
 
 ## Honest limits
 

@@ -121,7 +121,10 @@ export class GamepadMapper {
     return { move: [lx + rx * 0.4, ly + ry * 0.4], edges, menu };
   }
 
-  /** Ends whatever the pad was holding (disconnect, pause, mode change). */
+  /**
+   * Ends whatever the pad was holding (pause, mode change). Button states are kept, so a button
+   * still held when play resumes does not fire again.
+   */
   release(): PadEdge[] {
     const out: PadEdge[] = [];
     if (this.liftHeld) out.push({ action: 'lift', phase: 'end' });
@@ -130,10 +133,20 @@ export class GamepadMapper {
     });
     this.liftHeld = false;
     this.picksHeld[0] = this.picksHeld[1] = false;
+    return out;
+  }
+
+  /** A different pad (or none): forget the old one's button states too. */
+  reset(): PadEdge[] {
+    const out = this.release();
     this.prev = [];
     return out;
   }
 }
+
+/** Only the W3C "standard" layout is mapped: other devices' axes and buttons mean anything. */
+const usable = (p: Gamepad | null | undefined): p is Gamepad =>
+  !!p && p.connected && p.mapping === 'standard';
 
 /** What the UI shows: the active controller and the last connect / disconnect notice. */
 export const useGamepad = create<{
@@ -160,6 +173,16 @@ export class GamepadController {
   }
 
   private onConnect = (e: GamepadEvent): void => {
+    if (!usable(e.gamepad)) {
+      // A pedal, a flight stick or an unmapped pad: its resting axes could steer by themselves.
+      useGamepad.setState({
+        notice: {
+          text: 'This controller’s layout isn’t supported — other controls still work',
+          at: Date.now(),
+        },
+      });
+      return;
+    }
     this.index ??= e.gamepad.index;
     useGamepad.setState({
       connected: e.gamepad.id,
@@ -170,7 +193,7 @@ export class GamepadController {
   private onDisconnect = (e: GamepadEvent): void => {
     if (e.gamepad.index !== this.index) return;
     this.index = null;
-    this.apply(this.mapper.release(), performance.now());
+    this.apply(this.mapper.reset(), performance.now());
     useGamepad.setState({
       connected: null,
       notice: { text: 'Controller disconnected — other controls still work', at: Date.now() },
@@ -200,15 +223,20 @@ export class GamepadController {
     this.lastTick = now;
     const list = this.pads();
     let pad = this.index !== null ? (list[this.index] ?? null) : null;
-    if (!pad) {
-      // Chrome reveals pads only after a button press; adopt the first one that shows up.
-      pad = list.find((p): p is Gamepad => p !== null && p.connected) ?? null;
-      this.index = pad?.index ?? null;
+    if (!usable(pad)) {
+      // Chrome reveals pads only after a button press; adopt the first usable one that shows up.
+      const found = list.find(usable) ?? null;
+      if ((found?.index ?? null) !== this.index) this.mapper.reset();
+      pad = found;
+      this.index = found?.index ?? null;
     }
-    if (!pad || this.paused) return;
+    if (!pad) return;
     this.mapper.setLoadout(this.seat.loadout);
     const frame = this.mapper.update(pad);
+    // Start opens and closes the menu even while paused (a controller-only player must be able
+    // to resume); nothing else acts until play resumes.
     if (frame.menu) window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape' }));
+    if (this.paused) return;
     if (frame.move[0] !== 0 || frame.move[1] !== 0) {
       const { right, up } = view.groundAxes();
       const step = DEFAULT_RULES.manipulator.maxSpeed * dt;
@@ -233,7 +261,7 @@ export class GamepadController {
   }
 
   dispose(): void {
-    this.apply(this.mapper.release(), performance.now());
+    this.apply(this.mapper.reset(), performance.now());
     window.removeEventListener('gamepadconnected', this.onConnect);
     window.removeEventListener('gamepaddisconnected', this.onDisconnect);
   }

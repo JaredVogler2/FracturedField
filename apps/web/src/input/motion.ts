@@ -97,7 +97,10 @@ const RANGE: Record<MotionStyle, readonly [number, number]> = {
 const DEAD_ZONE_DEG = 0.8;
 /** Faster than any hand can turn a phone: a reading implying this is a sensor glitch. */
 const GLITCH_DEG_PER_S = 1500;
+/** Readings stopped while aiming. */
 const STALL_MS = 800;
+/** No usable reading at all since motion started or since the app came back (sensor gone). */
+const QUIET_MS = 2000;
 
 export class MotionAim {
   private cfg: MotionConfig;
@@ -106,6 +109,10 @@ export class MotionAim {
   private pendingRecenter: 'player' | 'auto' | null = 'auto';
   private needsRecenter = false;
   private lastValid = -Infinity;
+  /** Last reading with usable angles, in any state (also while waiting for a recenter). */
+  private lastReading = -Infinity;
+  /** When the current wait began (first tick, or the first tick after a pause). */
+  private waitFrom: number | null = null;
   private prev: { t: number; h: number; v: number } | null = null;
   private suspect: { h: number; v: number } | null = null;
   private fx = new OneEuro(1.0, 0.04, 1.0);
@@ -130,16 +137,28 @@ export class MotionAim {
   pause(): void {
     this.needsRecenter = true;
     this.state = 'needs-recenter';
+    this.last = { aim: null, state: 'needs-recenter', angles: [0, 0] };
     this.prev = null;
+    this.waitFrom = null;
   }
 
   get current(): MotionOutput {
     return this.last;
   }
 
-  /** Call regularly (each frame): flags a stall when readings stop arriving. */
+  /**
+   * Call regularly (each frame): flags a stall when readings stop while aiming, or when none
+   * arrive at all while waiting for the first one or for a recenter (the sensor is gone, so the
+   * player must be offered another control instead of a prompt that can never be satisfied).
+   */
   tick(now: number): MotionState {
-    if (this.state === 'tracking' && now - this.lastValid > STALL_MS) {
+    this.waitFrom ??= now;
+    const waiting = this.state === 'waiting' || this.state === 'needs-recenter';
+    const silentFor = now - Math.max(this.lastReading, this.waitFrom);
+    if (
+      (this.state === 'tracking' && now - this.lastValid > STALL_MS) ||
+      (waiting && silentFor > QUIET_MS)
+    ) {
       this.state = 'stalled';
       this.last = { ...this.last, aim: null, state: 'stalled' };
     }
@@ -149,6 +168,7 @@ export class MotionAim {
   push(s: OrientationSample): MotionOutput {
     const q = screenQuat(s);
     if (!q) return this.last; // null / NaN reading: ignored, the stall timer decides
+    this.lastReading = s.t;
     let recentered: MotionOutput['recentered'];
     const rotated = this.neutral !== null && s.screenAngle !== this.neutralAngle;
     if (this.pendingRecenter || rotated) {

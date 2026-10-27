@@ -191,6 +191,22 @@ describe('MotionAim (pointer style)', () => {
     expect(hold(m, portrait(), 2100, 5).state).toBe('tracking');
   });
 
+  it('no reading at all while waiting, or after the background, ends in stalled (touch offered)', () => {
+    const m = new MotionAim();
+    expect(m.tick(0)).toBe('waiting');
+    expect(m.tick(1500)).toBe('waiting');
+    expect(m.tick(2100)).toBe('stalled');
+    expect(hold(m, portrait(), 2200, 5).state).toBe('tracking');
+    // Back from the background, and the sensor never resumes.
+    m.pause();
+    expect(m.tick(3000)).toBe('needs-recenter');
+    expect(m.tick(4500)).toBe('needs-recenter');
+    expect(m.tick(5100)).toBe('stalled');
+    // It resumes after all: the recenter prompt returns.
+    m.push(sample(portrait(), 5200));
+    expect(m.current.state).toBe('needs-recenter');
+  });
+
   it('after the background, nothing aims until the player recenters', () => {
     const m = new MotionAim();
     hold(m, portrait(), 0);

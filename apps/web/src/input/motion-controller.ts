@@ -48,7 +48,10 @@ export async function requestMotionPermission(): Promise<MotionPermission> {
   }
 }
 
-/** Resolves true once a reading with real angles arrives (desktops expose the API but never fire). */
+/**
+ * Resolves true once a reading with all three angles arrives — what aiming needs (desktops
+ * expose the API but send nothing or nulls; a phone without a gyroscope may report no alpha).
+ */
 export function probeOrientation(timeoutMs = 1500): Promise<boolean> {
   return new Promise((resolve) => {
     const done = (ok: boolean) => {
@@ -57,7 +60,7 @@ export function probeOrientation(timeoutMs = 1500): Promise<boolean> {
       resolve(ok);
     };
     const onEvent = (e: DeviceOrientationEvent) => {
-      if (e.beta !== null && e.gamma !== null) done(true);
+      if (e.alpha !== null && e.beta !== null && e.gamma !== null) done(true);
     };
     const timer = setTimeout(() => done(false), timeoutMs);
     window.addEventListener('deviceorientation', onEvent);
@@ -121,8 +124,9 @@ export class MotionController {
     this.recenter();
   }
 
-  /** Per frame: stall detection and the UI status. */
+  /** Per frame: stall detection and the UI status (frozen while the game is paused). */
   tick(now: number): void {
+    if (this.paused) return;
     const state = this.motion.tick(now);
     const ui = useMotion.getState();
     const aim = this.motion.current.aim ?? ui.aim;

@@ -148,30 +148,46 @@ function CameraRig({
     // We size the frustum ourselves (the view offset below needs the full virtual width), so
     // R3F must not reset the aspect on resize.
     (camera as THREE.PerspectiveCamera & { manual?: boolean }).manual = true;
+    // Fit the arena into the free part of the screen, then shift the image so it is centred
+    // there: setViewOffset moves the projection without changing perspective, and raycasts
+    // (aiming) use the same projection, so pointer → arena stays exact. The virtual image is
+    // the screen grown by the reserved strip (landscape: width; portrait: height) so that its
+    // centre falls in the middle of the free part.
+    const shiftX = (strip * w) / 2;
+    const shiftY = (band * h) / 2;
+    const freeW = w - 2 * shiftX;
+    const freeH = h - 2 * shiftY;
     if (override) {
       camera.fov = override.fov;
       camera.position.set(...override.position);
       camera.lookAt(...override.target);
     } else {
-      // Fit the arena into the free part of the screen, then shift the image so it is centred
-      // there: setViewOffset moves the projection without changing perspective, and raycasts
-      // (aiming) use the same projection, so pointer → arena stays exact.
       const pose = fitBroadcastCamera(
         MERIDIAN_ARENA,
-        aspect * (1 - strip),
+        freeW / freeH,
         side,
         portraitSlot,
         hudBottom,
-        band,
+        landscape ? 'landscape' : 'portrait',
       );
-      camera.fov = pose.fov;
+      // The fitted (vertical) field of view spans the free height; the virtual image is taller.
+      const tanHalf = Math.tan(THREE.MathUtils.degToRad(pose.fov / 2)) * ((h + 2 * shiftY) / freeH);
+      camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(tanHalf));
       camera.position.copy(pose.position);
       camera.lookAt(pose.target);
     }
-    const shift = (strip * w) / 2;
-    camera.aspect = (w + 2 * shift) / h;
-    if (shift > 0)
-      camera.setViewOffset(w + 2 * shift, h, controlsSide === 'right' ? 2 * shift : 0, 0, w, h);
+    const fullW = w + 2 * shiftX;
+    const fullH = h + 2 * shiftY;
+    camera.aspect = fullW / fullH;
+    if (shiftX > 0 || shiftY > 0)
+      camera.setViewOffset(
+        fullW,
+        fullH,
+        controlsSide === 'right' ? 2 * shiftX : 0,
+        2 * shiftY,
+        w,
+        h,
+      );
     else camera.clearViewOffset();
     camera.updateProjectionMatrix();
     base.current.copy(camera.position);

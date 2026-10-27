@@ -750,11 +750,50 @@ kbd {
   min-width: 44px;
   min-height: 44px;
 }
+.tc-btn {
+  position: relative;
+  overflow: hidden;
+}
+.tc-btn > span,
+.tc-btn > small {
+  position: relative;
+}
 .tc-btn:active,
 .tc-btn.on {
   border-color: #ffd2a6;
   background: rgba(255, 156, 70, 0.42);
   box-shadow: 0 0 0 2px rgba(255, 156, 70, 0.35) inset;
+}
+/* Cooldown: a lit band that drains to the bottom edge (readable on the dark buttons); not enough
+   energy dims the button. */
+.tc-cd {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 226, 196, 0.2);
+  border-top: 2px solid rgba(255, 214, 172, 0.85);
+  pointer-events: none;
+}
+.tc-btn.cooling > span {
+  opacity: 0.62;
+}
+.tc-btn.poor {
+  opacity: 0.48;
+  filter: saturate(0.35);
+}
+.tc-btn.denied {
+  border-color: #ff6b6b;
+  animation: shake 0.25s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tc-btn.denied {
+    animation: none;
+  }
+}
+/* Touch layouts: the thumb buttons carry cooldown and energy, so the panel keeps only the meter. */
+.stage.touch-ui .player-panel.local .abilities {
+  display: none;
 }
 .tc-pulse {
   grid-area: pulse;
@@ -923,6 +962,10 @@ kbd {
 .stage.touch-ui.hand-left .motion-gauge {
   left: auto;
   right: calc(14px + var(--safe-right));
+}
+.stage.touch-ui.hand-left .motion-toast {
+  left: auto;
+  right: calc(84px + var(--safe-right));
 }
 @media (orientation: portrait) and (max-width: 600px) {
   .stage.touch-ui .tc-elements,
@@ -1134,10 +1177,11 @@ kbd {
   z-index: 30;
   width: min(420px, calc(100vw - 32px));
 }
+/* Beside the gauge, on the aiming side: never over the thumb buttons. */
 .motion-toast {
   position: fixed;
-  top: calc(116px + var(--safe-top));
-  right: calc(14px + var(--safe-right));
+  left: calc(84px + var(--safe-left));
+  bottom: calc(226px + var(--safe-bottom));
   z-index: 14;
   padding: 5px 10px;
   border-radius: 8px;

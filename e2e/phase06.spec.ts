@@ -189,9 +189,15 @@ test('two thumbs at once: one keeps aiming on the arena while the other taps PUL
   expect(sent.every((i) => i.source === 'touch')).toBe(true);
 
   // Keyboard / assistive-technology activation of a thumb button (a click with no pointer
-  // press) sends that button's action — and only it (Enter is also a PULSE key).
+  // press) sends that button's action — and only it (Enter is also a PULSE key). A keyboard
+  // player reaches the button with Tab (the game no longer swallows it).
   const k0 = ((await debug(page, 'intents')) ?? []).at(-1)?.n ?? 0;
-  await page.getByTestId('tc-guard').focus();
+  for (let i = 0; i < 40; i++) {
+    await page.keyboard.press('Tab');
+    const id = await page.evaluate(() => document.activeElement?.getAttribute('data-testid'));
+    if (id === 'tc-guard') break;
+  }
+  await expect(page.getByTestId('tc-guard')).toBeFocused();
   await page.keyboard.press('Enter');
   await expect
     .poll(async () =>

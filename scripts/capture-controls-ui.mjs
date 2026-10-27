@@ -67,6 +67,22 @@ const sensor = () => {
   await shot(page, 'controls-1-ready-gate-phone');
   await startMatch(page);
   await shot(page, 'controls-2-touch-landscape');
+  // Cast GUARD in live play: its button shows the cooldown draining (a lit band, label dimmed).
+  const energy = () => page.evaluate(() => window.__ffDebug?.snapshot()?.players[0]?.energy ?? 0);
+  for (let attempt = 0; attempt < 10; attempt++) {
+    await playing(page);
+    const before = await energy();
+    await page.getByTestId('tc-guard').tap();
+    // Only the thumb cluster: a full software-rendered frame takes longer than the cooldown.
+    await page.screenshot({
+      path: `${outDir}/controls-2b-cooldown-guard.jpg`,
+      type: 'jpeg',
+      quality: 88,
+      clip: { x: 640, y: 180, width: 204, height: 210 },
+    });
+    if ((await energy()) < before - 20) break;
+    await page.waitForTimeout(1500);
+  }
   await page.getByTestId('mode-chip').tap();
   await page.waitForTimeout(300);
   await shot(page, 'controls-3-mode-menu');

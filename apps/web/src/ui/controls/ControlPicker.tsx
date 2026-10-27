@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   controlModes,
   type Capabilities,
@@ -48,11 +48,21 @@ export function ControlPicker({
 }) {
   const [note, setNote] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  // The motion check is asynchronous: a later choice, or closing the picker, cancels it.
+  const request = useRef(0);
+  useEffect(
+    () => () => {
+      request.current++;
+    },
+    [],
+  );
 
   const choose = (o: ModeOption) => {
     if (!o.available || disabled) return;
+    const id = ++request.current;
     if (o.mode !== 'motion') {
       setNote(null);
+      setChecking(false);
       onChange(o.mode);
       return;
     }
@@ -61,6 +71,7 @@ export function ControlPicker({
     setChecking(true);
     setNote('Checking the motion sensor…');
     void asked.then(async (perm) => {
+      if (id !== request.current) return;
       if (perm !== 'granted') {
         setChecking(false);
         setNote(
@@ -73,6 +84,7 @@ export function ControlPicker({
         return;
       }
       const live = await probeOrientation(1500);
+      if (id !== request.current) return;
       setChecking(false);
       if (!live) {
         setNote('No motion readings from this device — staying on your current controls.');

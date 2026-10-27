@@ -74,9 +74,14 @@ in one tap; a short "Controls: …" notice confirms every change.
   63 % in **33 ms** and 90 % in **67 ms** — inside D06's 80–150 ms / 30–60 ms bands (filter
   behaviour, not device latency).
 - Faults: a reading implying > 1,500°/s is held back until a second reading agrees (sensor
-  glitch vs real flick); null/NaN readings are ignored; no reading for 800 ms → *stalled* (prompt:
-  Recenter or Use touch); the tab hidden or the OS pausing sensors → *needs recenter* (nothing aims
-  until the player confirms); a screen rotation re-zeroes on the new orientation automatically.
+  glitch vs real flick); null/NaN readings are ignored; no reading for 800 ms while aiming →
+  *stalled* (prompt: Recenter or Use touch); the tab hidden or the OS pausing sensors → *needs
+  recenter* (nothing aims until the player confirms); no usable reading at all for 2 s while
+  waiting for the first one or for that recenter → *stalled* too, so a sensor that never comes
+  back always ends in the "Use touch" offer, never in a prompt that cannot be satisfied; a screen
+  rotation re-zeroes on the new orientation automatically. The availability probe requires all
+  three angles (a phone without a gyroscope can report no α), and stall detection is frozen while
+  the game is paused.
 - Motion only aims. Abilities stay on the thumb buttons, so a shake, a bump or a sensor spike can
   never cast; the authority caps everything anyway. **No accelerometer flick modifier**: D06 makes
   it optional "when safe and reliable" — that cannot be shown without real devices, so it is not
@@ -92,26 +97,47 @@ in one tap; a short "Controls: …" notice confirms every change.
   never disturbs the aim). SWEEP is a pad: swipe in the wind's direction (≥ 22 px) or tap to blow
   forward. Holds use pointer capture (a sliding thumb keeps LIFT) or, optionally and always in
   Simplified, tap-to-toggle synced to the authoritative hold.
+- Prompt 06's "radial ability selection + primary action" is built as a corner cluster around
+  PULSE: the four core moves sit within ~150 px of the thumb's corner, the element and pick
+  buttons one row further out. A true quarter-circle arc keeps every button within reach but is
+  ~270 px wide, which on a 390 px-tall landscape phone costs a third more arena width than the
+  current 196 px strip; that trade-off needs real hands on real phones (Phase 09 / D15).
 - **No two-finger or long-press gestures.** Prompt 06 lists "two-finger guard, long press lift";
   D06 (more specific, later) says to avoid two-finger gestures that conflict with iOS Safari and to
   give GUARD a dedicated thumb button. Dedicated buttons won.
 - `touch-action: none` only on the arena canvas (menus and panels scroll normally); safe-area
-  insets on every fixed control; the 3-D camera frames the arena clear of the controls (a side
-  strip in landscape via `setViewOffset`, a bottom band in portrait), so the controls never cover
-  the core or a goal mouth (tested from 320 px phones to a 4:3 tablet).
+  insets on every fixed control; the 3-D camera fits the arena into the free part of the screen
+  — beside the controls in landscape, above them in portrait — and `setViewOffset` shifts the
+  image there (a virtual image grown by the reserved strip, the vertical field of view widened to
+  match in portrait), so the controls never cover the core or a goal mouth and the arena keeps
+  its size (tested from 320 px phones to a 4:3 tablet). A first version only raised the bottom
+  margin in portrait, which made the camera back away ~4× and shrank the arena to a fraction of
+  the screen; the screenshot review and an independent code review both caught it.
+- Each thumb button carries its own cooldown (a lit band draining to the bottom edge, label
+  dimmed) and dims when the move is unaffordable; a refused move shakes its button. The local
+  player panel therefore shows only the energy meter in the touch layouts.
 - Landscape is recommended (rotate hint); portrait is fully playable.
 - Haptics: an 8 ms vibration where supported; most iOS browsers have none, the sound cue covers it.
 - Keyboard / switch / screen-reader activation of a thumb button (a click with no pointer press)
-  sends the same action (holds toggle); Enter on a focused control belongs to that control, and Tab
-  is no longer swallowed by the game, so keyboard focus can move during a match.
+  sends the same action (holds toggle). Enter or Space on a control reached with the keyboard
+  (`:focus-visible`) belongs to that control — also on the ready screen, where Enter / Space
+  otherwise start the match — while a HUD button a mouse player just clicked keeps Space as
+  PULSE. Tab is no longer swallowed by the game, so keyboard focus can move during a match.
+- Tap-to-toggle holds show the authoritative hold, except for 0.9 s after a tap; a refusal from
+  the authority ends that window at once, so the next tap asks again instead of "releasing" a
+  hold that never began.
 
 ### 6. Game controller and rebinding
 
 - W3C *standard* mapping (`gamepad.ts`): left stick aims at the capped speed (right stick 40 % for
   fine aim), radial dead zone 0.18 with a quadratic response; A/RT PULSE, B GUARD, X WET, Y HEAT,
   LB/RB the picks (held for hold moves), LT LIFT with 0.5/0.35 hysteresis, D-pad SWEEP in that
-  screen direction, Start pauses. Pads connect and disconnect at any time; a disconnect or a pause
-  releases whatever the pad held. The pure `GamepadMapper` is unit-tested.
+  screen direction, Start opens and closes the pause menu (it is still read while paused, so a
+  controller-only player can resume). Only devices reporting `mapping: "standard"` are used — a
+  pedal or flight stick resting at −1 would otherwise steer by itself; others get a "layout not
+  supported" notice. Pads connect and disconnect at any time; a disconnect or a pause releases
+  whatever the pad held, and a button still held across a pause does not fire again. The pure
+  `GamepadMapper` is unit-tested.
 - Solo keyboard layout is rebindable in Controls (also mid-match from the pause menu): pick an
   action, press a key; a key already in use swaps with the action's old key, so nothing is ever
   unbound; menu/browser keys (Esc, P, M, Tab, F-keys, Meta) are reserved. Stored overrides are

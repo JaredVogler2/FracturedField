@@ -20,10 +20,14 @@ export function fitBroadcastCamera(
   portraitSlot: 0 | 1 = 0,
   /** Fraction of the viewport height reserved at the bottom for HUD panels (0..0.4). */
   hudBottom = 0,
-  /** Fraction reserved at the bottom for on-screen thumb controls (portrait; 0..0.4). */
-  controlsBottom = 0,
+  /**
+   * Force a framing. The caller fits into the free part of a screen (beside or above thumb
+   * controls), whose aspect can differ from the screen's: a portrait phone keeps the portrait
+   * framing even when the area above its controls is nearly square.
+   */
+  layout?: 'portrait' | 'landscape',
 ): CameraPose {
-  const portrait = aspect < 0.9;
+  const portrait = layout ? layout === 'portrait' : aspect < 0.9;
   const fov = portrait ? 52 : 38;
   const pitch = THREE.MathUtils.degToRad(portrait ? 54 : 49);
   const L = arena.halfLength;
@@ -53,10 +57,7 @@ export function fitBroadcastCamera(
   const margin = {
     x: 0.95,
     yTop: 0.84,
-    yBottom:
-      controlsBottom > 0
-        ? -1 + 2 * Math.min(0.4, controlsBottom) + 0.04
-        : Math.min(-0.5, -0.9 + hudBottom * 2),
+    yBottom: Math.min(-0.5, -0.9 + hudBottom * 2),
   };
   const fits = (d: number): boolean => {
     cam.position.copy(target).addScaledVector(dir, -d);
