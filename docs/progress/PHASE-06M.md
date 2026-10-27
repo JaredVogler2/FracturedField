@@ -236,3 +236,62 @@ rounds, and each failure was reproduced here with the page's CPU throttled
 
   After the fix the test passed 3 of 3 runs here (2.8 and 3.0 min at 3× throttle, 2.3 min at
   normal speed).
+- `d150d2d`: the hands tests passed, but six other online tests failed where the guest joins the
+  room (`openRoom`: the guest's seat never arrived, or the lobby never opened). None had failed
+  before Phase 7B. CPU throttling did not reproduce it; pinning the browser, the preview server
+  and the room worker to two of this machine's four cores (`taskset -c 0,1`) did, on the first
+  run. (CI's runner has four virtual CPUs; the browser job there behaved like this machine with
+  two.) A probe of the guest page (`scripts/probe-join.mjs`: WebSocket and fetch events, long
+  tasks) showed the cause: the guest received its WELCOME and lobby within 50 ms, then its page
+  froze for 22 s (two long tasks of 7.5 and 14.4 s) while it built the match scene, and when it
+  woke its room client closed the healthy socket itself as "connection stalled" (no message for
+  15 s; a frozen page cannot send pings, so no pongs come back). A CPU profile put 48 of the
+  guest's 69 s of main-thread time in three.js's first-use program check, waiting on software
+  WebGL to compile and link 47 shader programs (about 1 s each on two cores). Joining replaces the
+  menu's canvas with a new WebGL context, so every program compiles a second time. The client's
+  deadlines (connect 8 s, stall 4 s live / 15 s idle) and the room API's 8 s request timeout
+  counted the page's own freeze as network silence. That is a product defect, not only a test
+  one: a phone compiling shaders can freeze too. Depending on where the freeze lands, the client
+  either dropped a link that had just been welcomed, or abandoned a socket whose WELCOME was
+  already queued behind the timer and then reconnected into the next freeze.
+
+  The deadlines now count only time the page was awake: a heartbeat counts at most 1 s
+  (`MAX_BEAT_MS`), and the room API's timeout counts at most 0.5 s per 0.25 s tick. A dead link
+  is still found: every heartbeat counts. `client-freeze.test.ts` covers a WELCOME queued behind
+  a 20 s freeze, a 22 s freeze after WELCOME, a link that stays silent while the page is awake
+  (found dead after 15 s of awake silence, freeze or not) and the awake connect timeout; the
+  first three fail on the previous client. `awake-deadline.test.ts` covers the request timeout.
+  With only this fix, pinned to two cores, the six tests went from 0 of 6 joining to 3 of 6
+  passing: the other three were seated but ran out of time later, behind more compile freezes.
+  A probe of the programs a page links (`scripts/probe-programs.mjs`) showed why there were so
+  many: 52 on the low tier, 17 of
+  them a second time when the core appeared. The core's point light was mounted with the core's
+  visual (when the first snapshot listed the core), and three.js compiles the number of point
+  lights into every lit program, so every lit material compiled twice. The light is now mounted
+  with the scene (`CoreLight` in `Entities.tsx`), follows the core and is dark while there is
+  none: 40 programs, each compiled once. With both fixes, pinned to two cores, five of the six
+  passed in one run. The sixth, leaving mid-match, did everything it checks and then ran out of
+  its 120 s budget: over that test the guest builds its scene three times (menu, match, menu
+  again), each a full compile. Its budget is now 180 s, as the refresh test's is; no assertion
+  changed. It then passed (1.7 min).
+
+  On four cores the full browser suite then passed 42 of 44. Both failures had also failed on
+  `main`'s own last run (the PR #2 merge), and neither involves this change:
+  - **Hands Lab, mouse:** the first task's core never reached its start. The lab placed the task
+    50 ms after its panel appeared, but the sim worker drops a placement made before its world
+    exists, which on a slow page is still the case when Start is pressed. Later tasks, started by
+    hand once play runs, were never affected. The panel now starts a task once the snapshot shows
+    the match playing. This is a product fix: on a slow device a player saw the same. Pinned to
+    two cores the test then passed twice.
+  - **The first online duel** lost a round on territory. Its host is a scripted mouse player that
+    lines up behind the core within 1 m at 1.4 m (up to 35° off) and pulses from as far as 20 m,
+    where a goal needs about 7°. Most of its shots rebound off the end wall, and a round without
+    a goal goes to whichever half the core is in when the golden rift ends: a coin flip. A
+    headless model of this duel (the real sim, the player's rule with its page delays, 30 matches
+    each) has the host winning 2–0 in 27 of 30 matches on a busy page and 23 of 30 on a slower
+    one. The fix is the next CI item: run this player inside the page, deciding every frame, as
+    the touch and camera players already do.
+
+  Joining still compiles every program a second time, because each match view creates its own
+  WebGL context. Keeping one renderer across the menu and matches would remove that freeze too.
+  That is a performance item for later (D15), not part of this fix.

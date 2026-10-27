@@ -32,6 +32,7 @@ export function Entities() {
   });
   return (
     <group>
+      <CoreLight />
       {list.map((e) => {
         switch (e.kind) {
           case 'core':
@@ -76,7 +77,6 @@ export function CoreVisual({ id }: { id: number }) {
   const spin = useRef<THREE.Group>(null);
   const ringA = useRef<THREE.Mesh>(null);
   const ringB = useRef<THREE.Mesh>(null);
-  const light = useRef<THREE.PointLight>(null);
   const frame = useRenderFrame();
   const plasma = useDisposable(() => createCorePlasmaMaterial(), []);
   const shell = useDisposable(() => createCoreShellMaterial(), []);
@@ -100,18 +100,6 @@ export function CoreVisual({ id }: { id: number }) {
     if (spin.current && e) spin.current.quaternion.set(e.qx, e.qy, e.qz, e.qw);
     if (ringA.current) ringA.current.rotation.z += dt * (0.6 + energy * 3);
     if (ringB.current) ringB.current.rotation.x += dt * (0.45 + energy * 2.4);
-    if (light.current) {
-      // Element state reads on the core itself: heat warms the glow, charge crackles blue.
-      const heat = e ? Math.max(0, Math.min(1, (e.temp - 40) / 120)) : 0;
-      const charged = e ? e.charge : 0;
-      const flicker = charged > 0 ? 0.6 + 0.4 * Math.sin(performance.now() * 0.09) : 1;
-      light.current.color
-        .copy(CORE_VIOLET)
-        .lerp(CORE_HEAT, heat)
-        .lerp(CORE_ARC, charged * 0.8);
-      light.current.intensity =
-        LIGHTING.coreLightIntensity * (0.8 + energy * 0.7) * (1 + charged * 0.6) * flicker;
-    }
     if (e) shell.uniforms.uIntensity.value *= 1 - e.wet * 0.25;
   });
   return (
@@ -130,14 +118,57 @@ export function CoreVisual({ id }: { id: number }) {
       <mesh ref={ringB} rotation-y={Math.PI / 2.6} material={brass} castShadow>
         <torusGeometry args={[r * 1.5, 0.035, 8, 64]} />
       </mesh>
-      <pointLight
-        ref={light}
-        color={PALETTE.riftViolet}
-        intensity={LIGHTING.coreLightIntensity}
-        distance={LIGHTING.coreLightDistance}
-        decay={2}
-      />
     </group>
+  );
+}
+
+/**
+ * The core's light, mounted for as long as the scene is: three.js compiles the number of point
+ * lights into every lit material, so a light that came and went with the core (its first
+ * snapshot, a rematch) recompiled all of them, a hitch of seconds on a slow GPU and of tens of
+ * seconds on software WebGL. It follows the core and is dark while there is none.
+ */
+function CoreLight() {
+  const frame = useRenderFrame();
+  const light = useRef<THREE.PointLight>(null);
+  const coreId = useRef(-1);
+  useFrame(() => {
+    const l = light.current;
+    const entities = frame.current?.entities;
+    if (!l) return;
+    let e = entities?.get(coreId.current);
+    if (!e && entities) {
+      for (const x of entities.values()) {
+        if (x.kind !== 'core') continue;
+        coreId.current = x.id;
+        e = x;
+        break;
+      }
+    }
+    if (!e) {
+      l.intensity = 0;
+      return;
+    }
+    l.position.set(e.px, e.py, e.pz);
+    // Element state reads on the core itself: heat warms the glow, charge crackles blue.
+    const energy = Math.min(1, Math.hypot(e.vx, e.vy, e.vz) / 18);
+    const heat = Math.max(0, Math.min(1, (e.temp - 40) / 120));
+    const flicker = e.charge > 0 ? 0.6 + 0.4 * Math.sin(performance.now() * 0.09) : 1;
+    l.color
+      .copy(CORE_VIOLET)
+      .lerp(CORE_HEAT, heat)
+      .lerp(CORE_ARC, e.charge * 0.8);
+    l.intensity =
+      LIGHTING.coreLightIntensity * (0.8 + energy * 0.7) * (1 + e.charge * 0.6) * flicker;
+  });
+  return (
+    <pointLight
+      ref={light}
+      color={PALETTE.riftViolet}
+      intensity={0}
+      distance={LIGHTING.coreLightDistance}
+      decay={2}
+    />
   );
 }
 

@@ -125,7 +125,9 @@ test('online duel: a refresh resumes the same seat mid-match; the rival is pause
 });
 
 test('online duel: leaving mid-match forfeits and the rival is told', async ({ browser }) => {
-  test.setTimeout(120_000);
+  // The guest builds its scene three times (menu, match, menu again), each a full shader compile:
+  // about 20 s apiece on a software renderer with two cores to spare (PR #3, round 3).
+  test.setTimeout(180_000);
   const { ctxA, ctxB, a, b, errors } = await openRoom(browser);
   await readyUp(a, b);
   await b.keyboard.press('Escape');
