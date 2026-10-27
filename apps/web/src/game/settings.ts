@@ -1,4 +1,10 @@
 import { create } from 'zustand';
+import {
+  ADVANCED_ABILITIES,
+  DEFAULT_ABILITIES,
+  DEFAULT_LOADOUT,
+  type AdvancedAbilityId,
+} from '@ff/game-data';
 import type { QualityTier } from '../render/art-tokens';
 
 export interface Settings {
@@ -9,6 +15,24 @@ export interface Settings {
   reducedFlashes: boolean;
   devHud: boolean;
   hints: boolean;
+  /** Preferred advanced-move picks (used for every new match until changed). */
+  loadout: [AdvancedAbilityId, AdvancedAbilityId];
+  /** Player 2's picks in a shared-screen duel. */
+  loadoutP2: [AdvancedAbilityId, AdvancedAbilityId];
+}
+
+/** Advanced moves that can currently be picked (implemented and enabled). */
+export const PICKABLE: readonly AdvancedAbilityId[] = ADVANCED_ABILITIES.filter(
+  (id) => DEFAULT_ABILITIES[id].available,
+);
+
+function validLoadout(v: unknown): v is [AdvancedAbilityId, AdvancedAbilityId] {
+  return (
+    Array.isArray(v) &&
+    v.length === 2 &&
+    v[0] !== v[1] &&
+    v.every((x) => (PICKABLE as readonly unknown[]).includes(x))
+  );
 }
 
 const KEY = 'ff.settings.v1';
@@ -30,12 +54,17 @@ function load(): Settings {
     reducedFlashes: false,
     devHud: false,
     hints: true,
+    loadout: [...DEFAULT_LOADOUT],
+    loadoutP2: [...DEFAULT_LOADOUT],
   };
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return defaults;
     const parsed = JSON.parse(raw) as Partial<Settings>;
-    return { ...defaults, ...parsed };
+    const merged = { ...defaults, ...parsed };
+    if (!validLoadout(merged.loadout)) merged.loadout = [...DEFAULT_LOADOUT];
+    if (!validLoadout(merged.loadoutP2)) merged.loadoutP2 = [...DEFAULT_LOADOUT];
+    return merged;
   } catch {
     return defaults;
   }
@@ -59,6 +88,8 @@ export const useSettings = create<SettingsStore>((set, get) => ({
         reducedFlashes: st.reducedFlashes,
         devHud: st.devHud,
         hints: st.hints,
+        loadout: st.loadout,
+        loadoutP2: st.loadoutP2,
       };
       localStorage.setItem(KEY, JSON.stringify(plain));
     } catch {

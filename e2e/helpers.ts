@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import { expect, type Browser, type Page } from '@playwright/test';
 
 export interface Snap {
   tick: number;
@@ -93,4 +93,55 @@ export async function autopilotUntilGoal(
     await page.waitForTimeout(70);
   }
   throw new Error('autopilot did not score in time');
+}
+
+const VIEW = { width: 960, height: 540 };
+
+/** Host creates a room, a second browser context (another "device") joins by invite link. */
+export async function openRoom(browser: Browser) {
+  const ctxA = await browser.newContext({ viewport: VIEW });
+  const ctxB = await browser.newContext({ viewport: VIEW });
+  const a = await ctxA.newPage();
+  const b = await ctxB.newPage();
+  const errors: string[] = [];
+  a.on('pageerror', (e) => errors.push(`A: ${e.message}`));
+  b.on('pageerror', (e) => errors.push(`B: ${e.message}`));
+
+  // Host creates a room (fast test rules are honoured by development room services only).
+  await a.goto('/?fast=1&test=1&quality=low');
+  await a.getByTestId('play-online').click();
+  await expect(a.getByTestId('room-service-health')).toHaveClass(/ok/);
+  await a.getByTestId('create-room').click();
+  await expect(a.getByTestId('online-lobby')).toBeVisible();
+  const code = (await a.getByTestId('room-code').textContent())!.trim();
+  expect(code).toMatch(/^[23456789BCDFGHJKMNPQRSTVWXYZ]{6}$/);
+  await expect(a).toHaveURL(new RegExp(`room=${code}`));
+
+  // Guest opens the invite link on another "device" and joins with one click.
+  await b.goto(`/?room=${code}&test=1&quality=low`);
+  await expect(b.getByTestId('room-code-input')).toHaveValue(code);
+  await b.getByTestId('join-room').click();
+  await expect(b.getByTestId('online-lobby')).toBeVisible();
+  await expect.poll(() => debug(a, 'slot')).toBe(0);
+  await expect.poll(() => debug(b, 'slot')).toBe(1);
+  await expect(a.getByTestId('lobby-seat-1').locator('.seat-status')).toHaveText('not ready');
+  await expect(b.getByTestId('lobby-seat-0').locator('.seat-status')).toHaveText('not ready');
+  return { ctxA, ctxB, a, b, code, errors };
+}
+
+/** Both seats press READY and wait until the authoritative match is playing. */
+export async function readyUp(
+  a: Page,
+  b: Page,
+  opts: { hostAlreadyReady?: boolean } = {},
+): Promise<void> {
+  if (!opts.hostAlreadyReady) await a.getByTestId('ready').click();
+  await expect(b.getByTestId('lobby-seat-0').locator('.seat-status')).toHaveText('ready');
+  await b.getByTestId('ready').click();
+  for (const p of [a, b]) {
+    await expect
+      .poll(async () => (await snapshot(p))?.match.phase, { timeout: 30_000 })
+      .toBe('playing');
+    await expect(p.getByTestId('online-lobby')).toBeHidden();
+  }
 }

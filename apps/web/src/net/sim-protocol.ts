@@ -1,3 +1,4 @@
+import type { AbilityId } from '@ff/game-data';
 import type {
   ActionIntent,
   ActionResult,
@@ -17,9 +18,19 @@ export type ToSimWorker =
       readonly bots: readonly { readonly slot: PlayerSlot; readonly difficulty: BotDifficulty }[];
       /** Optional rule overrides (fast test rounds). Local play only. */
       readonly fast?: boolean;
+      /** Advanced-move picks per seat. */
+      readonly loadouts?: readonly [readonly AbilityId[], readonly AbilityId[]];
     }
   | { readonly type: 'intent'; readonly slot: PlayerSlot; readonly intent: ActionIntent }
-  | { readonly type: 'ready'; readonly slots: readonly PlayerSlot[] }
+  | {
+      readonly type: 'ready';
+      readonly slots: readonly PlayerSlot[];
+      /** Advanced-move picks per readied seat (applied before the match starts). */
+      readonly loadouts?: readonly {
+        readonly slot: PlayerSlot;
+        readonly picks: readonly AbilityId[];
+      }[];
+    }
   | { readonly type: 'rematch'; readonly slots: readonly PlayerSlot[] }
   | { readonly type: 'pause'; readonly paused: boolean }
   | { readonly type: 'dispose' };

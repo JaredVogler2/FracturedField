@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { DEFAULT_RULES } from '@ff/game-data';
+import { DEFAULT_RULES, type AdvancedAbilityId } from '@ff/game-data';
 import { normalizeRoomCode, type InputSource, type LobbySeat, type PlayerSlot } from '@ff/protocol';
 import { useHud } from '../game/store';
 import { checkRoomService, type RoomServiceHealth } from '../net/room-service';
 import { RoomApiError, createRoom, joinRoom } from '../net/room-api';
 import { seatFromGrant, saveSeat, type StoredSeat } from '../net/seat-store';
 import { Glyph } from './Glyph';
+import { LoadoutPicker, loadoutLabel } from './Loadout';
 import { teamOf } from './teams';
 
 export function inviteLink(code: string): string {
@@ -148,6 +149,11 @@ function SeatRow({ slot, you, seat }: { slot: PlayerSlot; you: boolean; seat: Lo
         {you ? 'You' : 'Rival'} · {teamOf(slot).name}
       </span>
       <span className="seat-status">{status}</span>
+      {seat?.occupied && seat.loadout ? (
+        <span className="seat-picks" data-testid={`lobby-picks-${slot}`}>
+          {loadoutLabel(seat.loadout)}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -160,6 +166,8 @@ export function OnlineLobby({
   onInputMode,
   onReady,
   onLeave,
+  loadout,
+  onLoadout,
 }: {
   seat: StoredSeat;
   ready: boolean;
@@ -167,6 +175,8 @@ export function OnlineLobby({
   onInputMode: (m: InputSource) => void;
   onReady: (ready: boolean) => void;
   onLeave: () => void;
+  loadout: readonly [AdvancedAbilityId, AdvancedAbilityId];
+  onLoadout: (next: [AdvancedAbilityId, AdvancedAbilityId]) => void;
 }) {
   const lobby = useHud((s) => s.lobby);
   const transport = useHud((s) => s.transport);
@@ -247,6 +257,7 @@ export function OnlineLobby({
             </button>
           ))}
         </div>
+        <LoadoutPicker value={loadout} onChange={onLoadout} disabled={ready} />
         <p className="muted" data-testid="lobby-hint" aria-live="polite">
           {hint}
         </p>

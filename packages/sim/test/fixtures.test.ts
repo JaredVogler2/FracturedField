@@ -1,22 +1,28 @@
 /**
  * D04 regression fixtures: every element reaction must change a scoring trajectory, proven by a
- * control/reaction pair that differ only in the reaction's cause. Fixtures live in
- * test/fixtures/reactions/*.json (seed, staged bodies and initial water patches, per-tick intents,
- * expectations). Final state hashes are pinned in test/fixtures/golden.json; regenerate with
- * UPDATE_GOLDEN=1 after an intentional SIM_VERSION change.
+ * control/reaction pair that differ only in the reaction's cause. Fixtures are JSON documents in
+ * packages/sim/fixtures/reactions (seed, staged bodies and initial water patches, per-tick
+ * intents, expectations), run by the same ScenarioRun the Physics Lab uses. Final state hashes are
+ * pinned in test/fixtures/golden.json; regenerate with UPDATE_GOLDEN=1 after an intentional
+ * SIM_VERSION change.
  */
 import { afterAll, describe, expect, it } from 'vitest';
-import { DEFAULT_RULES, type AbilityId } from '@ff/game-data';
-import type { GameEvent, IntentAction, IntentPhase, PlayerSlot } from '@ff/protocol';
-import { IntentScript, skipCountdown } from '@ff/test-utils';
-import { GameWorld } from '../src/index.js';
+import { DEFAULT_RULES } from '@ff/game-data';
+import {
+  REACTION_FIXTURES,
+  ScenarioRun,
+  parseScenarioFixture,
+  type ScenarioExpectation,
+  type ScenarioFixture,
+  type ScenarioOutcome,
+  type VariantName,
+} from '../src/scenario-entry.js';
 
 // The sim package compiles without Node typings; declare the few globals this runner needs.
 declare const console: { log(...args: unknown[]): void; table(data: unknown): void };
 declare const process: { env: Record<string, string | undefined> };
 
 interface FsLike {
-  readdirSync(p: string): string[];
   readFileSync(p: string, enc: 'utf8'): string;
   writeFileSync(p: string, data: string): void;
   existsSync(p: string): boolean;
@@ -27,117 +33,18 @@ const fs = (await import(/* @vite-ignore */ nodeFs)) as FsLike;
 // Relative to the repository root, where vitest runs.
 const DIR = 'packages/sim/test/fixtures';
 
-type Vec3T = [number, number, number];
-type Step =
-  | { t: number; place: string; p: Vec3T; v?: Vec3T }
-  | {
-      t: number;
-      slot: PlayerSlot;
-      act: IntentAction;
-      phase?: IntentPhase;
-      at: [number, number];
-      modifier?: number;
-      dir?: [number, number];
-    };
+type Outcome = ScenarioOutcome & { readonly hash: string };
 
-interface Expectation {
-  /** Exact first scorer (null = no goal within the run). */
-  goal?: PlayerSlot | null;
-  /** This slot must NOT score. */
-  notGoal?: PlayerSlot;
-  /** Exact counts of reaction kinds over the run. */
-  reactions?: Record<string, number>;
-  maxCoreHeight?: { atLeast?: number; atMost?: number };
-  coreVeiled?: boolean;
-}
-
-interface Variant {
-  pools?: { owner: PlayerSlot; x: number; z: number; r: number; depth: number; temp?: number }[];
-  script?: Step[];
-  expect: Expectation;
-}
-
-interface Fixture {
-  id: string;
-  title: string;
-  seed: number;
-  ticks: number;
-  loadouts?: [AbilityId[], AbilityId[]];
-  script: Step[];
-  variants: { control: Variant; reaction: Variant };
-}
-
-interface Outcome {
-  goal: PlayerSlot | null;
-  goalTick: number | null;
-  reactions: Record<string, number>;
-  maxCoreHeight: number;
-  coreVeiled: boolean;
-  hash: string;
-}
-
-async function runVariant(fx: Fixture, v: Variant): Promise<Outcome> {
-  const w = await GameWorld.create({
-    seed: fx.seed,
-    autoStart: true,
-    ...(fx.loadouts ? { loadouts: fx.loadouts } : {}),
-  });
-  skipCountdown(w);
-  w.debugClearKickoffShield();
-  const s = new IntentScript(w);
-  for (const p of v.pools ?? []) w.debugAddPool(p.owner, p.x, p.z, p.r, p.depth, p.temp);
-  const steps = [...fx.script, ...(v.script ?? [])].sort((a, b) => a.t - b.t);
-  const out: Outcome = {
-    goal: null,
-    goalTick: null,
-    reactions: {},
-    maxCoreHeight: 0,
-    coreVeiled: false,
-    hash: '',
-  };
-  const entityFor = (ref: string): number => {
-    if (ref === 'core') return w.coreEntityId;
-    const [kind, index] = ref.split(':');
-    const id = w.debugEntities(kind!)[Number(index ?? 0)];
-    if (id === undefined) throw new Error(`fixture ${fx.id}: no ${ref}`);
-    return id;
-  };
-  for (let t = 0; t < fx.ticks; t++) {
-    for (const st of steps) {
-      if (st.t !== t) continue;
-      if ('place' in st) {
-        const v3 = st.v ?? [0, 0, 0];
-        w.debugPlaceBody(entityFor(st.place), st.p[0], st.p[1], st.p[2], v3[0], v3[1], v3[2]);
-      } else {
-        w.debugPlaceManipulator(st.slot, st.at[0], st.at[1]);
-        s.send(st.slot, st.act, st.phase ?? 'tap', {
-          at: st.at,
-          ...(st.modifier !== undefined ? { modifier: st.modifier } : {}),
-          ...(st.dir ? { dir: st.dir } : {}),
-        });
-      }
-    }
-    const r = w.stepFixed();
-    for (const e of r.events as GameEvent[]) {
-      if (e.type === 'reaction') out.reactions[e.kind] = (out.reactions[e.kind] ?? 0) + 1;
-      if (e.type === 'goal' && out.goal === null) {
-        out.goal = e.scorer;
-        out.goalTick = t;
-      }
-    }
-    const core = w.snapshot().entities.find((e) => e.kind === 'core');
-    if (core) {
-      out.maxCoreHeight = Math.max(out.maxCoreHeight, core.p[1]);
-      if (core.veil) out.coreVeiled = true;
-    }
-    if (out.goal !== null) break;
+async function runVariant(fx: ScenarioFixture, name: VariantName): Promise<Outcome> {
+  const run = await ScenarioRun.create(fx, name);
+  try {
+    return run.runToEnd();
+  } finally {
+    run.dispose();
   }
-  out.hash = w.stateHash();
-  w.dispose();
-  return out;
 }
 
-function check(fx: Fixture, name: string, e: Expectation, o: Outcome): void {
+function check(fx: ScenarioFixture, name: string, e: ScenarioExpectation, o: Outcome): void {
   const where = `${fx.id} ${name}`;
   if (e.goal !== undefined) expect(o.goal, `${where}: goal`).toBe(e.goal);
   if (e.notGoal !== undefined) expect(o.goal, `${where}: must not score`).not.toBe(e.notGoal);
@@ -154,13 +61,7 @@ function check(fx: Fixture, name: string, e: Expectation, o: Outcome): void {
   if (e.coreVeiled !== undefined) expect(o.coreVeiled, `${where}: veil`).toBe(e.coreVeiled);
 }
 
-const files = fs
-  .readdirSync(`${DIR}/reactions`)
-  .filter((f) => f.endsWith('.json'))
-  .sort();
-const fixtures = files.map(
-  (f) => JSON.parse(fs.readFileSync(`${DIR}/reactions/${f}`, 'utf8')) as Fixture,
-);
+const fixtures = REACTION_FIXTURES;
 const goldenPath = `${DIR}/golden.json`;
 const golden: Record<string, string> = fs.existsSync(goldenPath)
   ? (JSON.parse(fs.readFileSync(goldenPath, 'utf8')) as Record<string, string>)
@@ -183,10 +84,48 @@ describe('D04 reaction fixtures: each reaction changes a scoring trajectory', ()
     expect(DEFAULT_RULES.elements.boilTemp).toBeGreaterThan(DEFAULT_RULES.elements.meltTemp);
   });
 
+  it('rejects malformed fixture documents', () => {
+    expect(() => parseScenarioFixture({ id: 'X', title: 't', seed: 1 })).toThrow();
+    expect(() =>
+      parseScenarioFixture({
+        id: 'X',
+        title: 't',
+        seed: 1,
+        ticks: 10,
+        script: [{ t: 0, slot: 2, act: 'pulse', at: [0, 0] }],
+        variants: { control: { expect: {} }, reaction: { expect: {} } },
+      }),
+    ).toThrow(/bad action/);
+  });
+
+  it('rewinding to a mark replays the identical ticks (Lab rewind is deterministic)', async () => {
+    const fx = fixtures.find((f) => f.id === 'R5')!;
+    const run = await ScenarioRun.create(fx, 'reaction');
+    try {
+      for (let i = 0; i < 40; i++) run.step();
+      const mark = run.mark();
+      const hashes: string[] = [];
+      for (let i = 0; i < 60 && !run.done; i++) {
+        run.step();
+        hashes.push(run.world.stateHash());
+      }
+      await run.rewind(mark);
+      expect(run.t).toBe(40);
+      const replay: string[] = [];
+      for (let i = 0; i < hashes.length; i++) {
+        run.step();
+        replay.push(run.world.stateHash());
+      }
+      expect(replay).toEqual(hashes);
+    } finally {
+      run.dispose();
+    }
+  });
+
   for (const fx of fixtures) {
     it(`${fx.id}: ${fx.title}`, async () => {
-      const control = await runVariant(fx, fx.variants.control);
-      const reaction = await runVariant(fx, fx.variants.reaction);
+      const control = await runVariant(fx, 'control');
+      const reaction = await runVariant(fx, 'reaction');
       check(fx, 'control', fx.variants.control.expect, control);
       check(fx, 'reaction', fx.variants.reaction.expect, reaction);
       // The pair must differ in outcome, not just in decoration.

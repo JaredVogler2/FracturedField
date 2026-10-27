@@ -1,3 +1,4 @@
+import type { AdvancedAbilityId } from '@ff/game-data';
 import type {
   ActionIntent,
   ActionResult,
@@ -10,6 +11,11 @@ import type {
   ResyncMessage,
   WorldSnapshot,
 } from '@ff/protocol';
+
+/** Advanced-move picks per seat (only the caller's own seats are honoured). */
+export type SeatLoadouts = Partial<
+  Record<PlayerSlot, readonly [AdvancedAbilityId, AdvancedAbilityId]>
+>;
 
 export type TransportState =
   'idle' | 'connecting' | 'connected' | 'reconnecting' | 'closed' | 'error';
@@ -53,7 +59,8 @@ export interface SessionDriver {
   readonly tickRate: number;
   start(): Promise<void>;
   sendIntent(slot: PlayerSlot, intent: ActionIntent): void;
-  setReady(ready: boolean, inputMode: InputSource): void;
+  /** `loadouts` = advanced-move picks per local seat, applied when the match starts. */
+  setReady(ready: boolean, inputMode: InputSource, loadouts?: SeatLoadouts): void;
   requestRematch(): void;
   /** Local practice only: freeze the local authority (online matches never pause on request). */
   setPaused?(paused: boolean): void;

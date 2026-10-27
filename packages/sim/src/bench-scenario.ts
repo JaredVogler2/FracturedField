@@ -1,4 +1,10 @@
-import { MERIDIAN_ARENA, type ArenaLayout, type BoulderObstacle } from '@ff/game-data';
+import {
+  MERIDIAN_ARENA,
+  type AbilityId,
+  type AbilityTable,
+  type ArenaLayout,
+  type BoulderObstacle,
+} from '@ff/game-data';
 import type { ActionIntent, PlayerSlot } from '@ff/protocol';
 import { Rng } from './rng.js';
 import type { GameWorld } from './game.js';
@@ -136,4 +142,158 @@ export class BenchInputs {
 /** Positions of dynamic bodies for the region stand-in, read from the world snapshot. */
 export function bodyPositions(world: GameWorld): { x: number; z: number }[] {
   return world.snapshot().entities.map((e) => ({ x: e.p[0], z: e.p[2] }));
+}
+
+/** Loadouts that put every advanced element system in play (seat 0 + seat 1). */
+export const ELEMENT_STRESS_LOADOUTS: readonly [readonly AbilityId[], readonly AbilityId[]] = [
+  ['freeze', 'charge'],
+  ['gravity', 'magnetize'],
+];
+
+/** Ability table without cooldowns or lockouts: saturates every element cap (stress only). */
+export function saturatedAbilities(base: AbilityTable): AbilityTable {
+  const out = {} as Record<AbilityId, AbilityTable[AbilityId]>;
+  for (const id of Object.keys(base) as AbilityId[])
+    out[id] = { ...base[id], cooldownSeconds: 0, lockoutSeconds: 0 };
+  return out as unknown as AbilityTable;
+}
+
+/**
+ * Worst-case element load (D04 "worst-case 2-player overlapping effects"): each seat works a
+ * rotating set of spots on its half — soak, heat twice (boil to steam), heat dry ground (flame) —
+ * while seat 0 freezes and discharges and seat 1 drops gravity wells and holds the magnet, both
+ * sweeping, pulsing and guarding. Energy is topped up and boulders are periodically slammed
+ * (debug hooks) so the load is sustained; this measures simulation CPU at the caps, not balance.
+ * Every cast is an ordinary ActionIntent: validation, cooldowns and lockouts apply (pass
+ * `saturatedAbilities` to the world to remove cooldowns and push every region to its cap).
+ */
+export class ElementStress {
+  private seq: [number, number] = [0, 0];
+  private tick = 0;
+  private readonly spot: [number, number] = [0, 0];
+  private readonly infuseStep: [number, number] = [0, 0];
+  private readonly rng: Rng;
+  private readonly infuseEvery: number;
+  private readonly pace: number;
+  private readonly fillPools: boolean;
+  constructor(
+    seed = 17,
+    opts: {
+      /** Ticks between infuse attempts per seat (25 ≈ the real 0.8 s cooldown). */
+      readonly infuseEvery?: number;
+      /** Multiplier on every other cast interval (< 1 = more often; for saturated tables). */
+      readonly pace?: number;
+      /** Keep standing water at the pool cap with staged patches (debug hook). */
+      readonly fillPools?: boolean;
+    } = {},
+  ) {
+    this.rng = new Rng(seed);
+    this.infuseEvery = opts.infuseEvery ?? 25;
+    this.pace = opts.pace ?? 1;
+    this.fillPools = opts.fillPools ?? false;
+  }
+
+  private every(t: number, n: number, phase: number): boolean {
+    const k = Math.max(2, Math.round(n * this.pace));
+    return (t + phase) % k === 0;
+  }
+
+  private spotXZ(slot: PlayerSlot, k: number): [number, number] {
+    const side = slot === 0 ? -1 : 1;
+    const i = ((k % 6) + 6) % 6;
+    return [side * (3.5 + (i % 3) * 5), (Math.floor(i / 3) - 0.5) * 9];
+  }
+
+  private sink: (slot: PlayerSlot, intent: ActionIntent) => void = () => undefined;
+
+  private cast(
+    world: GameWorld,
+    slot: PlayerSlot,
+    at: readonly [number, number],
+    action: ActionIntent['action'],
+    phase: ActionIntent['phase'],
+    modifier?: number,
+  ): void {
+    world.debugPlaceManipulator(slot, at[0], at[1]);
+    const side = slot === 0 ? -1 : 1;
+    this.sink(slot, {
+      seq: this.seq[slot]++,
+      clientTime: this.tick * 33,
+      action,
+      phase,
+      aim: [
+        Math.max(-1, Math.min(1, at[0] / world.arena.halfLength)),
+        Math.max(-1, Math.min(1, at[1] / world.arena.halfWidth)),
+      ],
+      ...(action === 'sweep' ? { dir: [0, side] as const } : {}),
+      intensity: 1,
+      ...(modifier !== undefined ? { modifier } : {}),
+      source: 'bot',
+    });
+  }
+
+  /**
+   * Advances one tick of load. `apply` receives every intent (default: straight into the world);
+   * hosts that also take intents from elsewhere pass a sink that keeps sequence numbers ordered.
+   */
+  drive(
+    world: GameWorld,
+    apply: (slot: PlayerSlot, intent: ActionIntent) => void = (slot, intent) => {
+      world.applyCommand(slot, intent);
+    },
+  ): void {
+    this.sink = apply;
+    const t = this.tick++;
+    // Rounds still end (every 30 s) so the field resets and fractured boulders are rebuilt, as in
+    // play; otherwise the clock is held so the load never pauses for long.
+    if (world.phase === 'matchEnd') world.rematch();
+    if (t % 900 === 899) world.debugSetClock(1);
+    else if (t % 240 === 0) world.debugSetClock(9000);
+    for (const slot of [0, 1] as const) {
+      world.debugSetEnergy(slot, 100);
+      const off = slot * 5;
+      const here = this.spotXZ(slot, this.spot[slot]);
+      const prev = this.spotXZ(slot, this.spot[slot] - 1);
+      if ((t + off) % this.infuseEvery === 0) {
+        // soak → heat → heat (boils: steam) → heat on dry ground beside it (flame).
+        const k = this.infuseStep[slot]++ % 4;
+        if (k === 3) {
+          const dry: [number, number] = [here[0], here[1] + (here[1] > 0 ? -3.6 : 3.6)];
+          this.cast(world, slot, dry, 'infuse', 'tap', 1);
+          this.spot[slot]++;
+        } else this.cast(world, slot, here, 'infuse', 'tap', k === 0 ? 0 : 1);
+        continue;
+      }
+      const jitter: [number, number] = [
+        here[0] + this.rng.range(-1.5, 1.5),
+        here[1] + this.rng.range(-1.5, 1.5),
+      ];
+      if (slot === 0 && this.every(t, 37, 7)) this.cast(world, 0, prev, 'freeze', 'tap');
+      else if (slot === 0 && this.every(t, 41, 3)) this.cast(world, 0, jitter, 'charge', 'tap');
+      else if (slot === 1 && this.every(t, 61, 11)) this.cast(world, 1, jitter, 'gravity', 'tap');
+      else if (slot === 1 && t % 150 === 30) this.cast(world, 1, jitter, 'magnetize', 'start');
+      else if (slot === 1 && t % 150 === 90) this.cast(world, 1, jitter, 'magnetize', 'end');
+      else if (this.every(t + off, 75, 35))
+        this.cast(world, slot, jitter, 'sweep', 'tap', slot === 0 ? 1 : -1);
+      else if (this.every(t + off, 24, 12)) this.cast(world, slot, jitter, 'pulse', 'tap');
+      else if (this.every(t + off, 110, 50)) this.cast(world, slot, jitter, 'guard', 'tap');
+      else if (t % 3 === slot) this.cast(world, slot, jitter, 'aim', 'hold');
+    }
+    if (this.fillPools && t % 15 === 0) {
+      const pools = world.debugRegions().pools;
+      if (pools.length < world.rules.elements.maxPools) {
+        // Standing water across the middle lanes, between the two seats' heat spots.
+        const k = Math.floor(t / 15) % 8;
+        const x = (k % 4) * 4 - 6;
+        const z = (Math.floor(k / 4) - 0.5) * 4.5;
+        world.debugAddPool(k % 2 === 0 ? 0 : 1, x, z, 2.2, 0.8);
+      }
+    }
+    // Keep fractures (and the shard budget) busy: slam a boulder into the arena every 1.5 s.
+    if (t % 45 === 10) {
+      const boulders = world.debugEntities('boulder');
+      const id = boulders[Math.floor(this.rng.range(0, boulders.length))];
+      if (id !== undefined) world.debugApplyImpulse(id, this.rng.range(-400, 400), 0, 600);
+    }
+  }
 }

@@ -16,6 +16,13 @@ export interface RenderEntity {
   vy: number;
   vz: number;
   ttl: number;
+  /** Authoritative element state from the newer snapshot (not interpolated). */
+  wet: number;
+  temp: number;
+  charge: number;
+  veiled: boolean;
+  shocked: boolean;
+  energized: number;
 }
 
 export interface RenderManipulator {
@@ -187,6 +194,12 @@ export class SnapshotBuffer {
           vy: 0,
           vz: 0,
           ttl: -1,
+          wet: 0,
+          temp: 20,
+          charge: 0,
+          veiled: false,
+          shocked: false,
+          energized: 0,
         };
         map.set(eb.id, r);
       }
@@ -212,6 +225,12 @@ export class SnapshotBuffer {
         r.pz += r.vz * extrapolateSeconds;
       }
       r.ttl = eb.ttl;
+      r.wet = eb.w ?? 0;
+      r.temp = eb.h ?? 20;
+      r.charge = eb.c ?? 0;
+      r.veiled = eb.veil === 1;
+      r.shocked = eb.sh === 1;
+      r.energized = eb.en ?? 0;
     }
     for (const id of map.keys()) if (!seen.has(id)) map.delete(id);
     for (const slot of [0, 1] as const) {

@@ -2,7 +2,7 @@
  * Local authority worker: runs the shared GameWorld (and any snapshot bots) at a fixed 30 Hz off
  * the render thread, emitting exactly the snapshot/event/ack stream a remote room would.
  */
-import { DEFAULT_RULES, FAST_RULES } from '@ff/game-data';
+import { DEFAULT_RULES, FAST_RULES, type AbilityId } from '@ff/game-data';
 import type { PlayerSlot } from '@ff/protocol';
 import { GameWorld, SnapshotBot, physicsVersion } from '@ff/sim';
 import type { FromSimWorker, ToSimWorker } from './sim-protocol';
@@ -24,6 +24,8 @@ let stepMs = 0;
 let seed = 0;
 let endAnnounced = false;
 const ready: [boolean, boolean] = [false, false];
+/** Picks that arrived with READY before physics finished loading. */
+const pendingLoadouts: [readonly AbilityId[] | null, readonly AbilityId[] | null] = [null, null];
 const rematch: [boolean, boolean] = [false, false];
 
 function post(msg: FromSimWorker): void {
@@ -36,7 +38,12 @@ async function init(msg: Extract<ToSimWorker, { type: 'init' }>): Promise<void> 
     seed,
     autoStart: msg.autoStart,
     ...(msg.fast ? { rules: FAST_RULES } : {}),
+    ...(msg.loadouts ? { loadouts: msg.loadouts } : {}),
   });
+  for (const slot of [0, 1] as const) {
+    const picks = pendingLoadouts[slot];
+    if (picks) world.setLoadout(slot, picks);
+  }
   bots = msg.bots.map((b, i) => new SnapshotBot(b.slot, b.difficulty, seed + i + 1));
   for (const b of msg.bots) ready[b.slot] = true;
   endAnnounced = false;
@@ -89,8 +96,12 @@ function pump(): void {
   if (steps === 4 && acc > dt * 4) acc = 0; // throttled: drop backlog rather than fast-forward
 }
 
-function setReady(slots: readonly PlayerSlot[]): void {
-  for (const s of slots) ready[s] = true;
+function setReady(msg: Extract<ToSimWorker, { type: 'ready' }>): void {
+  for (const l of msg.loadouts ?? []) {
+    if (world) world.setLoadout(l.slot, l.picks);
+    else pendingLoadouts[l.slot] = l.picks;
+  }
+  for (const s of msg.slots) ready[s] = true;
   if (ready[0] && ready[1]) world?.startMatch();
 }
 
@@ -113,7 +124,7 @@ scope.onmessage = (ev: MessageEvent<ToSimWorker>) => {
       world?.applyCommand(msg.slot, msg.intent);
       break;
     case 'ready':
-      setReady(msg.slots);
+      setReady(msg);
       break;
     case 'rematch':
       requestRematch(msg.slots);

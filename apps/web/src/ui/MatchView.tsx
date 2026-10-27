@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
+import { DEFAULT_LOADOUT, type AdvancedAbilityId } from '@ff/game-data';
 import type { InputSource, PlayerSlot } from '@ff/protocol';
 import type { BotDifficulty } from '@ff/sim';
 import { GameClient } from '../game/client';
@@ -10,7 +11,7 @@ import { WorkerSession } from '../net/worker-session';
 import { RemoteSession } from '../net/remote-session';
 import { roomServiceUrl, roomSocketUrl } from '../net/room-service';
 import { forgetSeat, updateSeatTicket, type StoredSeat } from '../net/seat-store';
-import type { SessionDriver } from '../net/session';
+import type { SeatLoadouts, SessionDriver } from '../net/session';
 import { GameClientProvider, useGameClient } from '../render/frame-context';
 import { GameScene } from '../render/Scene';
 import { InputManager, type SeatConfig } from '../input/manager';
@@ -20,6 +21,7 @@ import { sfx } from '../audio/sfx';
 import { Hud, type HudSeat } from './Hud';
 import { Banners, DenyToast, MatchEndPanel, PauseMenu } from './Overlays';
 import { TouchControls } from './TouchControls';
+import { LoadoutPicker, parseLoadout } from './Loadout';
 import { NetStatusOverlay, OnlineLobby } from './Online';
 import { teamOf } from './teams';
 import { DevHud } from '../hud/DevHud';
@@ -153,7 +155,28 @@ export function MatchView({
     return q === 'low' || q === 'medium' || q === 'high' ? q : null;
   }, []);
   const devHud = useSettings((s) => s.devHud);
+  const loadout = useSettings((s) => s.loadout);
+  const loadoutP2 = useSettings((s) => s.loadoutP2);
   useEventAudio(client, setup.localSlots);
+
+  // Advanced-move picks of the seats played on this device (sent with READY; the authority
+  // validates them and applies them when the match starts).
+  const seatLoadouts = useMemo<SeatLoadouts>(() => {
+    switch (mode.kind) {
+      case 'duel':
+        return { 0: loadout, 1: loadoutP2 };
+      case 'bot':
+        return { 0: loadout };
+      case 'online':
+        return mode.seat.slot === 0 ? { 0: loadout } : { 1: loadout };
+      case 'attract':
+        return {};
+    }
+  }, [mode, loadout, loadoutP2]);
+  const seats = useMemo(
+    () => setup.seats.map((s) => ({ ...s, loadout: seatLoadouts[s.slot] ?? DEFAULT_LOADOUT })),
+    [setup.seats, seatLoadouts],
+  );
 
   // Read-only test hook (?test=1): lets automated E2E "players" see the same public state a human
   // sees on screen and project world points to screen coordinates. Grants no authority.
@@ -233,6 +256,11 @@ export function MatchView({
     [client, mode.kind, online],
   );
 
+  const actionFor = useCallback(
+    (slot: PlayerSlot, seq: number) => input.current?.actionForSeq(slot, seq),
+    [],
+  );
+
   // Refused actions flash the matching HUD chip briefly.
   useEffect(
     () =>
@@ -270,14 +298,14 @@ export function MatchView({
   const start = useCallback(() => {
     sfx.unlock();
     sfx.play('ui');
-    session.current?.setReady(true, touch ? 'touch' : 'keyboard');
+    session.current?.setReady(true, touch ? 'touch' : 'keyboard', seatLoadouts);
     setStarted(true);
-  }, [touch]);
+  }, [touch, seatLoadouts]);
 
   const setOnlineReady = (ready: boolean) => {
     sfx.unlock();
     sfx.play('ui');
-    session.current?.setReady(ready, inputMode);
+    session.current?.setReady(ready, inputMode, seatLoadouts);
     setStarted(ready);
   };
 
@@ -339,6 +367,19 @@ export function MatchView({
   const mySlot = online?.slot ?? 0;
   const rivalSlot: PlayerSlot = mySlot === 0 ? 1 : 0;
   const rivalSeat = lobby?.seats[rivalSlot];
+  const rivalPicks = rivalSeat?.loadout;
+  const rivalLoadout = useMemo<readonly [AdvancedAbilityId, AdvancedAbilityId] | undefined>(() => {
+    if (!online) return mode.kind === 'bot' ? DEFAULT_LOADOUT : undefined;
+    return parseLoadout(rivalPicks) ?? DEFAULT_LOADOUT;
+  }, [online, mode.kind, rivalPicks]);
+  const hudSeats = useMemo(
+    () =>
+      setup.hudSeats.map((h) => {
+        const picks = h.local ? seatLoadouts[h.slot] : rivalLoadout;
+        return picks ? { ...h, loadout: picks } : h;
+      }),
+    [setup.hudSeats, seatLoadouts, rivalLoadout],
+  );
   const serverReady = online ? (lobby?.seats[mySlot].ready ?? started) : started;
   const inLobby = online !== null && !matchEnd && (phase === undefined || phase === 'lobby');
   const matchNote = !online
@@ -363,16 +404,25 @@ export function MatchView({
           portraitSlot={mySlot}
         >
           {setup.seats.length > 0 ? (
-            <InputBridge seats={setup.seats} managerRef={input} session={session} />
+            <InputBridge seats={seats} managerRef={input} session={session} />
           ) : null}
         </GameScene>
         {mode.kind !== 'attract' ? (
           <>
-            <Hud seats={setup.hudSeats} denied={denied} mirror={mySlot === 1} />
+            <Hud seats={hudSeats} denied={denied} mirror={mySlot === 1} />
             <Banners client={client} />
-            <DenyToast client={client} localSlots={setup.localSlots} mirror={mySlot === 1} />
+            <DenyToast
+              client={client}
+              localSlots={setup.localSlots}
+              mirror={mySlot === 1}
+              actionFor={actionFor}
+            />
             {touch && setup.localSlots.length === 1 ? (
-              <TouchControls manager={input} slot={setup.localSlots[0]!} />
+              <TouchControls
+                manager={input}
+                slot={setup.localSlots[0]!}
+                loadout={seatLoadouts[setup.localSlots[0]!] ?? DEFAULT_LOADOUT}
+              />
             ) : null}
             <button
               className="icon-btn pause-btn"
@@ -394,6 +444,8 @@ export function MatchView({
             onInputMode={setInputMode}
             onReady={setOnlineReady}
             onLeave={exit}
+            loadout={loadout}
+            onLoadout={(next) => useSettings.getState().set('loadout', next)}
           />
         ) : null}
         {online ? (
@@ -467,6 +519,10 @@ function ReadyGate({
   onExit: () => void;
   touch: boolean;
 }) {
+  const loadout = useSettings((s) => s.loadout);
+  const loadoutP2 = useSettings((s) => s.loadoutP2);
+  const set = (key: 'loadout' | 'loadoutP2', v: [AdvancedAbilityId, AdvancedAbilityId]) =>
+    useSettings.getState().set(key, v);
   return (
     <div className="modal-backdrop soft">
       <div className="panel ready-gate" data-testid="ready-gate">
@@ -479,23 +535,44 @@ function ReadyGate({
             <li>Drag on the arena to move your force point</li>
             <li>PULSE pushes the core away from your force point</li>
             <li>LIFT (hold) raises it · SWEEP lays a crosswind · GUARD raises a barrier</li>
+            <li>WET soaks the ground · HEAT sets a flame · your two picks below</li>
           </ul>
         ) : mode.kind === 'duel' ? (
           <div className="duel-keys">
             <div>
-              <b>Player 1</b> WASD move · Space pulse · L-Shift lift · Q/E sweep · F guard · mouse
-              aims too
+              <b>Player 1</b> WASD move · Space pulse · L-Shift lift · Q/E sweep · F guard · 1/2 wet
+              /heat · 3/4 picks · mouse aims too
             </div>
             <div>
-              <b>Player 2</b> Arrows/IJKL move · Enter pulse · R-Shift lift · , . sweep · / guard
+              <b>Player 2</b> Arrows/IJKL move · Enter pulse · R-Shift lift · , . sweep · / guard ·
+              7/8 wet/heat · 9/0 picks
             </div>
           </div>
         ) : (
           <ul className="hints">
             <li>Mouse or WASD moves your force point · click / Space = PULSE</li>
             <li>Right mouse / Shift (hold) = LIFT · wheel / Q E = SWEEP · F = GUARD</li>
+            <li>1 / R = WET · 2 / T = HEAT · 3 / C and 4 / V = your two picks</li>
             <li>Pulse pushes the core away from your force point — get behind it</li>
           </ul>
+        )}
+        {mode.kind === 'duel' ? (
+          <div className="loadout-pair">
+            <div>
+              <div className="loadout-who">Player 1</div>
+              <LoadoutPicker value={loadout} onChange={(v) => set('loadout', v)} />
+            </div>
+            <div>
+              <div className="loadout-who">Player 2</div>
+              <LoadoutPicker
+                value={loadoutP2}
+                onChange={(v) => set('loadoutP2', v)}
+                testIdPrefix="loadout-p2"
+              />
+            </div>
+          </div>
+        ) : (
+          <LoadoutPicker value={loadout} onChange={(v) => set('loadout', v)} />
         )}
         <div className="row">
           <button className="btn primary big" onClick={onStart} data-testid="start-match" autoFocus>

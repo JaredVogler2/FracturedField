@@ -122,17 +122,33 @@ const DENY_TEXT: Record<string, string> = {
   illegal_target: 'Cannot place there',
   not_playing: 'Wait for kickoff',
   limit: 'Limit reached',
+  not_available: 'Not in your loadout',
 };
+
+/** Action-specific wording where the generic text would not say what to do differently. */
+const DENY_TEXT_FOR: Record<string, Record<string, string>> = {
+  charge: { out_of_range: 'Nothing conductive in reach' },
+  magnetize: { out_of_range: 'No lodestone in range' },
+  lift: { out_of_range: 'Nothing to lift there' },
+  infuse: { limit: 'Too many pools and flames' },
+};
+
+export function denyText(reason: string, action?: string): string | undefined {
+  return (action ? DENY_TEXT_FOR[action]?.[reason] : undefined) ?? DENY_TEXT[reason];
+}
 
 /** Short, non-blocking text for refused local actions (accessible alternative to the sound). */
 export function DenyToast({
   client,
   localSlots,
   mirror = false,
+  actionFor,
 }: {
   client: GameClient;
   localSlots: readonly PlayerSlot[];
   mirror?: boolean;
+  /** Maps an acked intent back to the ability it requested (for action-specific wording). */
+  actionFor?: (slot: PlayerSlot, seq: number) => string | undefined;
 }) {
   const [msg, setMsg] = useState<{ id: number; text: string; slot: PlayerSlot } | null>(null);
   useEffect(() => {
@@ -140,7 +156,7 @@ export function DenyToast({
     let id = 0;
     const off = client.acks.on(({ slot, result }) => {
       if (result.accepted || !localSlots.includes(slot) || !result.reason) return;
-      const text = DENY_TEXT[result.reason];
+      const text = denyText(result.reason, actionFor?.(slot, result.seq));
       if (!text) return;
       setMsg({ id: ++id, text, slot });
       if (timer) clearTimeout(timer);
@@ -150,7 +166,7 @@ export function DenyToast({
       off();
       if (timer) clearTimeout(timer);
     };
-  }, [client, localSlots]);
+  }, [client, localSlots, actionFor]);
   if (!msg) return null;
   return (
     <div

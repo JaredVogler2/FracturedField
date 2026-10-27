@@ -40,6 +40,14 @@ export function Entities() {
             return <Boulder key={e.id} id={e.id} />;
           case 'guard':
             return <Guard key={e.id} id={e.id} owner={e.owner} />;
+          case 'lodestone':
+            return <Lodestone key={e.id} id={e.id} />;
+          case 'shard':
+            return (
+              <Boulder key={e.id} id={e.id} radius={DEFAULT_RULES.elements.fracture.shardRadius} />
+            );
+          case 'ice':
+            return null; // drawn by WaterAndIce from the pool region (same frustum as the collider)
           default:
             return <Boulder key={e.id} id={e.id} />;
         }
@@ -92,7 +100,19 @@ export function CoreVisual({ id }: { id: number }) {
     if (spin.current && e) spin.current.quaternion.set(e.qx, e.qy, e.qz, e.qw);
     if (ringA.current) ringA.current.rotation.z += dt * (0.6 + energy * 3);
     if (ringB.current) ringB.current.rotation.x += dt * (0.45 + energy * 2.4);
-    if (light.current) light.current.intensity = LIGHTING.coreLightIntensity * (0.8 + energy * 0.7);
+    if (light.current) {
+      // Element state reads on the core itself: heat warms the glow, charge crackles blue.
+      const heat = e ? Math.max(0, Math.min(1, (e.temp - 40) / 120)) : 0;
+      const charged = e ? e.charge : 0;
+      const flicker = charged > 0 ? 0.6 + 0.4 * Math.sin(performance.now() * 0.09) : 1;
+      light.current.color
+        .copy(CORE_VIOLET)
+        .lerp(CORE_HEAT, heat)
+        .lerp(CORE_ARC, charged * 0.8);
+      light.current.intensity =
+        LIGHTING.coreLightIntensity * (0.8 + energy * 0.7) * (1 + charged * 0.6) * flicker;
+    }
+    if (e) shell.uniforms.uIntensity.value *= 1 - e.wet * 0.25;
   });
   return (
     <group ref={group}>
@@ -121,8 +141,17 @@ export function CoreVisual({ id }: { id: number }) {
   );
 }
 
-function Boulder({ id }: { id: number }) {
+const CORE_VIOLET = new THREE.Color(PALETTE.riftViolet);
+const CORE_HEAT = new THREE.Color('#ff7a2a');
+const CORE_ARC = new THREE.Color('#9fd8ff');
+const STONE_DRY = new THREE.Color(MATERIALS.boulderColor);
+const STONE_WET = new THREE.Color(MATERIALS.boulderColor).multiplyScalar(0.55);
+const HEAT_GLOW = new THREE.Color('#ff5a1a');
+const SHOCK_GLOW = new THREE.Color('#ff2e12');
+
+function Boulder({ id, radius = 0.75 }: { id: number; radius?: number }) {
   const ref = useRef<THREE.Mesh>(null);
+  const frame = useRenderFrame();
   const geometry = useDisposable(() => {
     const g = new THREE.IcosahedronGeometry(1, 2);
     const p = g.attributes.position as THREE.BufferAttribute;
@@ -148,7 +177,22 @@ function Boulder({ id }: { id: number }) {
     flatShading: true,
   });
   useEntityTransform(id, ref);
-  const radius = 0.75;
+  // Authoritative element state: wet stone darkens and gleams, hot stone glows, shocked stone
+  // shows pulsing cracks (it will break at under half its strength).
+  useFrame(() => {
+    const e = frame.current?.entities.get(id);
+    if (!e) return;
+    material.color.copy(STONE_DRY).lerp(STONE_WET, e.wet);
+    material.roughness = 0.88 - e.wet * 0.5;
+    const heat = Math.max(0, Math.min(1, (e.temp - 60) / 200));
+    if (e.shocked) {
+      material.emissive.copy(SHOCK_GLOW);
+      material.emissiveIntensity = 0.4 + 0.35 * Math.sin(performance.now() * 0.012);
+    } else {
+      material.emissive.copy(HEAT_GLOW);
+      material.emissiveIntensity = heat * 1.4 + e.charge * 0.6;
+    }
+  });
   return (
     <mesh
       ref={ref}
@@ -158,6 +202,41 @@ function Boulder({ id }: { id: number }) {
       castShadow
       receiveShadow
     />
+  );
+}
+
+/** Steel lodestone: brass bands light up blue while it is an electromagnet (energized). */
+function Lodestone({ id }: { id: number }) {
+  const ref = useRef<THREE.Group>(null);
+  const frame = useRenderFrame();
+  const r = 0.55;
+  const steel = useStandardMaterial({ color: '#8d98a4', roughness: 0.26, metalness: 1 });
+  const band = useStandardMaterial({
+    color: PALETTE.brass,
+    roughness: 0.32,
+    metalness: 1,
+    emissive: '#3d8bff',
+    emissiveIntensity: 0,
+  });
+  useEntityTransform(id, ref);
+  useFrame(() => {
+    const e = frame.current?.entities.get(id);
+    if (!e) return;
+    const t = performance.now() * 0.02;
+    band.emissiveIntensity = e.energized > 0 ? 2.4 + 0.9 * Math.sin(t) : e.charge > 0 ? 1.2 : 0;
+  });
+  return (
+    <group ref={ref}>
+      <mesh material={steel} castShadow receiveShadow>
+        <sphereGeometry args={[r, 32, 20]} />
+      </mesh>
+      <mesh material={band} rotation-x={Math.PI / 2}>
+        <torusGeometry args={[r * 1.02, 0.055, 10, 48]} />
+      </mesh>
+      <mesh material={band}>
+        <torusGeometry args={[r * 1.02, 0.035, 10, 48]} />
+      </mesh>
+    </group>
   );
 }
 
@@ -191,7 +270,10 @@ function Guard({ id, owner }: { id: number; owner: PlayerSlot | -1 }) {
     g.scale.set(1, 0.15 + 0.85 * rise, 1);
     g.position.y = e.py * (0.15 + 0.85 * rise);
     const fade = e.ttl > 0 ? Math.min(1, e.ttl / 20) : 1;
-    edge.emissiveIntensity = 0.6 + 1.8 * fade;
+    // A soaked or charged guard telegraphs that a discharge could overload it.
+    const crackle = e.charge > 0 ? 1.5 * Math.abs(Math.sin(now * 0.05)) : 0;
+    edge.emissiveIntensity = 0.6 + 1.8 * fade + crackle;
+    stone.color.copy(GUARD_DRY).lerp(GUARD_WET, e.wet);
   });
   return (
     <group ref={ref}>
@@ -204,6 +286,9 @@ function Guard({ id, owner }: { id: number; owner: PlayerSlot | -1 }) {
     </group>
   );
 }
+
+const GUARD_DRY = new THREE.Color(MATERIALS.guardColor);
+const GUARD_WET = new THREE.Color(MATERIALS.guardColor).multiplyScalar(0.6);
 
 /** Player manipulator markers (where each player's force originates). */
 export function Manipulators() {

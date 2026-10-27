@@ -1,0 +1,149 @@
+{
+  "measuredAt": "2026-10-27T05:06:34.627Z",
+  "runtime": "node v22.22.0 (offline, single thread) — NOT a Worker or device measurement",
+  "host": {
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "cpuCount": 4
+  },
+  "rapier": "0.21.0",
+  "setup": {
+    "driver": "ElementStress (both seats, overlapping element casts + periodic boulder slams)",
+    "dynamicBodiesInArena": 20,
+    "ticksMeasured": 3600,
+    "warmupTicks": 150,
+    "loadouts": [
+      ["freeze", "charge"],
+      ["gravity", "magnetize"]
+    ],
+    "caps": {
+      "pools": 8,
+      "steams": 6,
+      "flames": 6,
+      "shardsPerFracture": 3,
+      "dynamicBodies": 20,
+      "effects": 30
+    }
+  },
+  "results": [
+    {
+      "scenario": "rules (real cooldowns)",
+      "stepMs": {
+        "mean": 0.1878,
+        "p50": 0.1555,
+        "p95": 0.4282,
+        "p99": 0.8814,
+        "max": 4.2487
+      },
+      "snapshotEncodeMs": {
+        "mean": 0.064,
+        "p50": 0.0536,
+        "p95": 0.1284,
+        "p99": 0.1901,
+        "max": 0.8601
+      },
+      "snapshotBytes": {
+        "mean": 3043,
+        "max": 4202
+      },
+      "loadReached": {
+        "meanPools": 1.49,
+        "meanSteams": 1.6,
+        "meanFlames": 3.4,
+        "maxPools": 5,
+        "maxSteams": 4,
+        "maxFlames": 6,
+        "entities": 20,
+        "effects": 3,
+        "elementBodies": 7,
+        "shards": 17,
+        "wells": 1
+      },
+      "intents": {
+        "accepted": 468,
+        "refused": 517
+      },
+      "phases": {
+        "playing": 3136,
+        "roundEnd": 210,
+        "countdown": 179,
+        "goal": 74,
+        "matchEnd": 1
+      },
+      "reactions": {
+        "ignite": 134,
+        "boil": 42,
+        "fracture": 45,
+        "soak": 47,
+        "douse": 25,
+        "chill": 54,
+        "well": 13,
+        "shock": 17,
+        "freeze": 5,
+        "melt": 1,
+        "overload": 1,
+        "quench": 1
+      },
+      "p99ShareOfTickBudget": 0.0264
+    },
+    {
+      "scenario": "saturated (no cooldowns, staged pools: caps reached)",
+      "stepMs": {
+        "mean": 0.1112,
+        "p50": 0.0731,
+        "p95": 0.3195,
+        "p99": 0.5779,
+        "max": 2.3214
+      },
+      "snapshotEncodeMs": {
+        "mean": 0.047,
+        "p50": 0.0326,
+        "p95": 0.116,
+        "p99": 0.1851,
+        "max": 2.2258
+      },
+      "snapshotBytes": {
+        "mean": 3765,
+        "max": 5612
+      },
+      "loadReached": {
+        "meanPools": 3.2,
+        "meanSteams": 5.76,
+        "meanFlames": 5.42,
+        "maxPools": 8,
+        "maxSteams": 6,
+        "maxFlames": 6,
+        "entities": 20,
+        "effects": 4,
+        "elementBodies": 19,
+        "shards": 17,
+        "wells": 0
+      },
+      "intents": {
+        "accepted": 2940,
+        "refused": 475
+      },
+      "phases": {
+        "playing": 3254,
+        "roundEnd": 210,
+        "countdown": 136
+      },
+      "reactions": {
+        "ignite": 1630,
+        "boil": 673,
+        "quench": 111,
+        "douse": 478,
+        "chill": 361,
+        "soak": 540,
+        "shock": 178,
+        "fracture": 35,
+        "freeze": 29,
+        "melt": 28,
+        "overload": 28,
+        "shatter": 1
+      },
+      "p99ShareOfTickBudget": 0.0173
+    }
+  ]
+}

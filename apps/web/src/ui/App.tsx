@@ -186,6 +186,8 @@ function BindingTable({ title, b }: { title: string; b: KeyBindings }) {
     ['Lift (hold)', b.lift],
     ['Sweep ↑ / ↓', [...b.sweepUp.slice(0, 1), ...b.sweepDown.slice(0, 1)]],
     ['Guard', b.guard],
+    ['Infuse wet / heat', [...b.infuseWet.slice(0, 1), ...b.infuseHeat.slice(0, 1)]],
+    ['Pick 1 / Pick 2', [...b.adv1.slice(0, 1), ...b.adv2.slice(0, 1)]],
   ];
   return (
     <div className="binding-table">
@@ -227,6 +229,22 @@ function ControlsPanel({ onClose }: { onClose: () => void }) {
           Mouse: point to aim · left click Pulse · right button hold Lift · wheel Sweep · middle
           click Guard. Esc / P pauses, M toggles sound. Touch: drag to aim, buttons for abilities.
         </p>
+        <div className="me-eyebrow">ELEMENTS</div>
+        <ul className="hints element-rules">
+          <li>
+            <b>Wet</b> soaks the ground into a pool: it slows rolling bodies and conducts charge.
+          </li>
+          <li>
+            <b>Heat</b> sets a flame that drifts with any crosswind; it boils water into steam that
+            floats the core.
+          </li>
+          <li>
+            Picks — <b>Freeze</b> turns water into a slick ice ramp and cracks hot stone ·{' '}
+            <b>Charge</b> jumps through water, steel and wet stone (overloads a wet guard) ·{' '}
+            <b>Gravity</b> bends every flight path for a moment · <b>Magnet</b> (hold) drags the
+            steel lodestones.
+          </li>
+        </ul>
         <button className="btn primary" onClick={onClose} autoFocus>
           Close
         </button>

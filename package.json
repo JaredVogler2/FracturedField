@@ -2,7 +2,7 @@
   "name": "fracture-field",
   "private": true,
   "version": "0.1.0",
-  "description": "FRACTURE FIELD — two-player, server-authoritative elemental physics arena game",
+  "description": "FRACTURE FIELD \u2014 two-player, server-authoritative elemental physics arena game",
   "type": "module",
   "packageManager": "pnpm@10.28.0",
   "engines": {
@@ -21,6 +21,7 @@
     "test:e2e": "playwright test",
     "test:worker": "pnpm --filter @ff/room-worker test:live",
     "benchmark:sim": "tsx packages/sim/bench/bench-sim.ts",
+    "benchmark:elements": "tsx packages/sim/bench/bench-elements.ts",
     "benchmark:worker": "pnpm --filter @ff/room-worker bench:live",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build"
   },

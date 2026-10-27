@@ -1,9 +1,16 @@
-import { DEFAULT_ABILITIES, DEFAULT_RULES, type AbilityId } from '@ff/game-data';
+import {
+  DEFAULT_ABILITIES,
+  DEFAULT_LOADOUT,
+  DEFAULT_RULES,
+  type AbilityId,
+  type AdvancedAbilityId,
+} from '@ff/game-data';
 import type { PlayerSlot, PlayerSnapshot } from '@ff/protocol';
 import { useHud } from '../game/store';
 import { Glyph } from './Glyph';
 import { teamOf } from './teams';
 import { keyLabel, type KeyBindings } from '../input/bindings';
+import { ABILITY_INFO, loadoutLabel } from './Loadout';
 
 const TICK = DEFAULT_RULES.match.tickRate;
 
@@ -17,14 +24,28 @@ export interface HudSeat {
   readonly label: string;
   readonly bindings?: KeyBindings;
   readonly local: boolean;
+  readonly loadout?: readonly [AdvancedAbilityId, AdvancedAbilityId];
 }
 
-const ABILITY_ORDER: { id: AbilityId; name: string; key: keyof KeyBindings }[] = [
-  { id: 'pulse', name: 'Pulse', key: 'pulse' },
-  { id: 'lift', name: 'Lift', key: 'lift' },
-  { id: 'sweep', name: 'Sweep', key: 'sweepUp' },
-  { id: 'guard', name: 'Guard', key: 'guard' },
-];
+interface Chip {
+  readonly id: AbilityId;
+  readonly name: string;
+  readonly key: keyof KeyBindings;
+  readonly element?: 'wet' | 'heat';
+}
+
+function chipsFor(loadout: readonly [AdvancedAbilityId, AdvancedAbilityId]): Chip[] {
+  return [
+    { id: 'pulse', name: 'Pulse', key: 'pulse' },
+    { id: 'lift', name: 'Lift', key: 'lift' },
+    { id: 'sweep', name: 'Sweep', key: 'sweepUp' },
+    { id: 'guard', name: 'Guard', key: 'guard' },
+    { id: 'infuse', name: 'Wet', key: 'infuseWet', element: 'wet' },
+    { id: 'infuse', name: 'Heat', key: 'infuseHeat', element: 'heat' },
+    { id: loadout[0], name: ABILITY_INFO[loadout[0]].name, key: 'adv1' },
+    { id: loadout[1], name: ABILITY_INFO[loadout[1]].name, key: 'adv2' },
+  ];
+}
 
 /**
  * In-match HUD. Placed in screen corners and the top edge so it never covers the core or goals.
@@ -164,9 +185,14 @@ function PlayerPanel({
           {Math.floor(energy)}
         </span>
       </div>
+      {!seat.local && seat.loadout ? (
+        <div className="pp-picks" title="Their advanced moves">
+          {loadoutLabel(seat.loadout)}
+        </div>
+      ) : null}
       {seat.local ? (
         <div className="abilities">
-          {ABILITY_ORDER.map((a) => {
+          {chipsFor(seat.loadout ?? DEFAULT_LOADOUT).map((a) => {
             const def = DEFAULT_ABILITIES[a.id];
             const cd = player.cd[a.id] ?? 0;
             const total = Math.max(1, Math.round(def.cooldownSeconds * TICK));
@@ -177,9 +203,9 @@ function PlayerPanel({
             const key = seat.bindings?.[a.key][0];
             return (
               <div
-                key={a.id}
-                className={`ability${!affordable ? ' poor' : ''}${held ? ' held' : ''}${flash ? ' denied' : ''}`}
-                title={`${a.name} — ${def.cost} energy`}
+                key={a.key}
+                className={`ability${!affordable ? ' poor' : ''}${held ? ' held' : ''}${flash ? ' denied' : ''}${a.element ? ` el-${a.element}` : ''}`}
+                title={`${a.name} — ${def.cost} energy · ${ABILITY_INFO[a.id].blurb}`}
               >
                 <div className="ab-cd" style={{ height: `${frac * 100}%` }} />
                 <span className="ab-name">{a.name}</span>

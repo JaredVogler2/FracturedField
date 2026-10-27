@@ -1,6 +1,7 @@
 /**
  * In-Worker benchmark driver (D01 work package 7): real-time 30 Hz simulation of 20 dynamic bodies
  * + 20 regions inside the Durable Object runtime with two connected WebSocket clients, for >= 60 s.
+ * BENCH_SCENARIO=elements runs the D04 worst-case element load (ElementStress) instead.
  * Run: `pnpm benchmark:worker` (spawns local wrangler dev). Results are written to docs/benchmarks.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -11,6 +12,7 @@ import { TestSocket, startWorker, workerDir } from './wrangler-harness.js';
 const seconds = Number(process.env.BENCH_SECONDS ?? 60);
 const bodies = Number(process.env.BENCH_BODIES ?? 20);
 const regions = Number(process.env.BENCH_REGIONS ?? 20);
+const scenario = process.env.BENCH_SCENARIO === 'elements' ? 'elements' : 'base';
 const port = Number(process.env.WORKER_PORT ?? 8792);
 const worker = await startWorker(port);
 
@@ -20,7 +22,7 @@ try {
     await TestSocket.open(`${worker.wsBase}/spike/bench/ws`),
   ];
   const start = await fetch(
-    `${worker.base}/spike/bench/start?seconds=${seconds}&bodies=${bodies}&regions=${regions}`,
+    `${worker.base}/spike/bench/start?seconds=${seconds}&bodies=${bodies}&regions=${regions}&scenario=${scenario}`,
     { method: 'POST' },
   );
   console.log('start:', await start.text());
@@ -79,7 +81,12 @@ try {
   }
   const dir = path.resolve(workerDir, '../../docs/benchmarks');
   mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, `worker-bench-${bodies}b-${regions}r-${seconds}s.json`);
+  const file = path.join(
+    dir,
+    scenario === 'elements'
+      ? `worker-bench-elements-${bodies}b-${seconds}s.json`
+      : `worker-bench-${bodies}b-${regions}r-${seconds}s.json`,
+  );
   writeFileSync(file, JSON.stringify(out, null, 2) + '\n');
   console.log(`saved ${path.relative(process.cwd(), file)}`);
   for (const c of clients) c.close();

@@ -124,6 +124,7 @@ export default {
           seconds: clampInt(url.searchParams.get('seconds'), 5, 600, 60),
           bodies: clampInt(url.searchParams.get('bodies'), 1, 40, 20),
           regions: clampInt(url.searchParams.get('regions'), 0, 64, 20),
+          scenario: url.searchParams.get('scenario') === 'elements' ? 'elements' : 'base',
         };
         return json(await bench.start(config), 200, cors);
       }

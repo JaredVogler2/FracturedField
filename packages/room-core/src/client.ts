@@ -1,3 +1,4 @@
+import type { AdvancedAbilityId } from '@ff/game-data';
 import {
   IDLE_PING_FRAME,
   PROTOCOL_VERSION,
@@ -374,8 +375,22 @@ export class RoomClient {
     return ok;
   }
 
-  setReady(ready: boolean, inputMode: InputSource): boolean {
-    return this.isConnected && this.raw({ t: 'ready', ready, inputMode });
+  setReady(
+    ready: boolean,
+    inputMode: InputSource,
+    loadout?: readonly [AdvancedAbilityId, AdvancedAbilityId],
+  ): boolean {
+    return (
+      this.isConnected &&
+      this.raw({
+        t: 'ready',
+        ready,
+        inputMode,
+        ...(loadout
+          ? { loadout: [loadout[0], loadout[1]] as [AdvancedAbilityId, AdvancedAbilityId] }
+          : {}),
+      })
+    );
   }
 
   requestRematch(want = true): boolean {

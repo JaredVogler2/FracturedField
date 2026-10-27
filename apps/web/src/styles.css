@@ -569,6 +569,22 @@ kbd {
   border-color: #ff6b6b;
   animation: shake 0.25s;
 }
+/* Element casts read by colour as well as by name (wet = water blue, heat = ember orange). */
+.ability.el-wet {
+  border-color: rgba(80, 180, 232, 0.55);
+  background: rgba(14, 44, 64, 0.62);
+}
+.ability.el-heat {
+  border-color: rgba(255, 128, 64, 0.55);
+  background: rgba(58, 24, 10, 0.62);
+}
+.pp-picks {
+  margin-top: 5px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
 @keyframes shake {
   25% {
     transform: translateX(-2px);
@@ -715,6 +731,32 @@ kbd {
   grid-column: 2;
   grid-row: 1;
 }
+/* Element row: sits left of the core buttons so the right thumb reaches every cast. */
+.tc-elements {
+  position: absolute;
+  right: calc(100% + 8px);
+  bottom: 0;
+  display: grid;
+  grid-template-columns: 64px 64px;
+  grid-auto-rows: 52px;
+  gap: 8px;
+}
+.tc-el {
+  font-size: 11px;
+  border-color: rgba(156, 125, 255, 0.6);
+  background: rgba(16, 10, 30, 0.6);
+  color: #e6ddff;
+}
+.tc-el.el-wet {
+  border-color: rgba(80, 180, 232, 0.7);
+  background: rgba(10, 34, 52, 0.62);
+  color: #d6f1ff;
+}
+.tc-el.el-heat {
+  border-color: rgba(255, 128, 64, 0.7);
+  background: rgba(48, 18, 6, 0.62);
+  color: #ffe2cc;
+}
 
 /* ---------------------------------------------------------------- online */
 .online-health {
@@ -816,6 +858,73 @@ kbd {
   color: var(--text);
   font-weight: 700;
 }
+.seat-row {
+  flex-wrap: wrap;
+}
+.seat-picks {
+  flex-basis: 100%;
+  padding-left: 30px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+/* ---------------------------------------------------------------- loadout */
+.loadout {
+  margin: 4px 0 16px;
+}
+.loadout-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.loadout-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-height: 52px;
+  padding: 8px 6px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-border);
+  background: rgba(154, 170, 183, 0.06);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+.loadout-chip b {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+}
+.loadout-chip small {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.loadout-chip.on {
+  border-color: var(--violet);
+  background: rgba(156, 125, 255, 0.16);
+  box-shadow: inset 0 0 12px rgba(156, 125, 255, 0.25);
+}
+.loadout-chip:focus-visible {
+  outline: 3px solid var(--cyan);
+  outline-offset: 2px;
+}
+.loadout-chip:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.loadout-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+.loadout-who {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
 .me-note {
   text-align: center;
   margin: 0 0 12px;
@@ -904,5 +1013,200 @@ kbd {
   .ability.denied,
   .spinner {
     animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------- physics lab (dev tool) */
+.lab {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  background: var(--sky-abyss);
+}
+.lab-stage {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.lab-tick {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(5, 12, 19, 0.72);
+  border: 1px solid var(--panel-border);
+  font:
+    600 12px/1.6 ui-monospace,
+    Menlo,
+    monospace;
+  color: var(--text);
+  pointer-events: none;
+}
+.lab-panel {
+  width: 360px;
+  flex: 0 0 360px;
+  overflow-y: auto;
+  padding: 14px;
+  background: rgba(8, 18, 28, 0.96);
+  border-left: 1px solid var(--panel-border);
+  font-size: 13px;
+}
+.lab-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.lab-title {
+  font-weight: 700;
+  line-height: 1.35;
+}
+.lab-section {
+  padding: 10px 0;
+  border-top: 1px solid var(--panel-border);
+}
+.lab-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.lab-transport .btn {
+  min-width: 0;
+  padding: 0 10px;
+}
+.lab-select {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+  background: rgba(4, 10, 16, 0.8);
+  color: var(--text);
+  font: inherit;
+}
+.lab-select.small {
+  flex: 0 0 auto;
+  width: 70px;
+}
+.lab-scrub {
+  width: 100%;
+}
+.lab-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px;
+  color: var(--text-dim);
+  font:
+    11px/1.6 ui-monospace,
+    Menlo,
+    monospace;
+}
+.lab-checks {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+}
+.lab-checks li {
+  padding: 2px 0;
+}
+.lab-checks .pass span {
+  color: #9be8a4;
+}
+.lab-checks .fail {
+  color: #ffb3b3;
+}
+.lab-checks .pending {
+  color: var(--text-dim);
+}
+.lab-warn {
+  margin: 8px 0 0;
+  color: #ffd08a;
+  font-size: 12px;
+}
+.lab-toggles,
+.lab-body-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.lab-chip {
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+  background: rgba(154, 170, 183, 0.06);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.lab-chip.on {
+  border-color: var(--cyan);
+  background: rgba(80, 216, 232, 0.14);
+}
+.lab-chip:focus-visible {
+  outline: 3px solid var(--cyan);
+  outline-offset: 2px;
+}
+.lab-bodies {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.lab-body-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.lab-body-head span {
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: right;
+}
+.lab-log {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  font:
+    11px/1.55 ui-monospace,
+    Menlo,
+    monospace;
+}
+.lab-log-t {
+  display: inline-block;
+  min-width: 34px;
+  color: var(--text-dim);
+}
+.lab-log .k-reaction {
+  color: #c9b8ff;
+}
+.lab-log .k-goal {
+  color: #ffe08a;
+  font-weight: 700;
+}
+.lab-log .k-charge {
+  color: #9fe7ff;
+}
+@media (max-width: 820px) {
+  .lab {
+    flex-direction: column;
+  }
+  .lab-stage {
+    flex: 0 0 55%;
+  }
+  .lab-panel {
+    width: 100%;
+    flex: 1;
+    border-left: 0;
+    border-top: 1px solid var(--panel-border);
   }
 }

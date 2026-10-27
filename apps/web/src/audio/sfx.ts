@@ -2,7 +2,7 @@
  * Procedural sound effects (original, synthesized at runtime with WebAudio — no sample assets).
  * Every sound is triggered by an authoritative event, never by local input alone.
  */
-type SfxName =
+export type SfxName =
   | 'pulse'
   | 'sweep'
   | 'guard'
@@ -14,7 +14,22 @@ type SfxName =
   | 'kickoff'
   | 'roundEnd'
   | 'deny'
-  | 'ui';
+  | 'ui'
+  | 'soak'
+  | 'ignite'
+  | 'chill'
+  | 'freeze'
+  | 'melt'
+  | 'boil'
+  | 'douse'
+  | 'shatter'
+  | 'fracture'
+  | 'quench'
+  | 'zap'
+  | 'overload'
+  | 'energize'
+  | 'well'
+  | 'magnet';
 
 class SoundKit {
   private ctx: AudioContext | null = null;
@@ -113,6 +128,72 @@ class SoundKit {
         break;
       case 'ui':
         this.tone(p, t, 'sine', 880, 880, 0.05, 0.1);
+        break;
+      // Elements: each family has its own timbre so a reaction is recognisable off-screen.
+      case 'soak':
+        this.burst(p, t, 700, 0.35, 0.3 * k, 'lowpass', 220);
+        this.tone(p, t, 'sine', 320, 170, 0.16, 0.16 * k);
+        break;
+      case 'ignite':
+        this.burst(p, t, 900, 0.5, 0.28 * k, 'bandpass', 3200);
+        this.burst(p, t + 0.08, 5200, 0.12, 0.08 * k, 'highpass');
+        break;
+      case 'chill':
+        this.burst(p, t, 7000, 0.45, 0.16 * k, 'highpass', 2200);
+        this.tone(p, t, 'triangle', 1568, 1480, 0.3, 0.06 * k);
+        break;
+      case 'freeze':
+        this.tone(p, t, 'triangle', 1320, 1290, 0.5, 0.1 * k);
+        this.tone(p, t + 0.05, 'triangle', 1975, 1960, 0.4, 0.06 * k);
+        this.burst(p, t, 4200, 0.12, 0.14 * k, 'highpass');
+        break;
+      case 'melt':
+        this.burst(p, t, 900, 0.5, 0.14 * k, 'lowpass', 400);
+        this.tone(p, t, 'sine', 520, 300, 0.25, 0.08 * k);
+        break;
+      case 'boil':
+        this.burst(p, t, 3200, 0.9, 0.2 * k, 'highpass', 1800);
+        this.burst(p, t, 500, 0.6, 0.12 * k, 'bandpass', 900);
+        break;
+      case 'douse':
+        this.burst(p, t, 4500, 0.4, 0.16 * k, 'highpass', 1400);
+        break;
+      case 'shatter':
+        this.burst(p, t, 3600, 0.3, 0.38 * k, 'highpass');
+        this.tone(p, t, 'triangle', 2637, 2500, 0.18, 0.07 * k);
+        this.tone(p, t + 0.04, 'triangle', 3136, 3000, 0.15, 0.05 * k);
+        this.tone(p, t + 0.09, 'triangle', 2349, 2200, 0.2, 0.05 * k);
+        break;
+      case 'fracture':
+        this.burst(p, t, 320, 0.45, 0.45 * k, 'lowpass');
+        this.burst(p, t, 2200, 0.1, 0.25 * k, 'bandpass');
+        this.tone(p, t, 'square', 110, 40, 0.3, 0.1 * k);
+        break;
+      case 'quench':
+        this.burst(p, t, 5200, 0.35, 0.22 * k, 'highpass', 2600);
+        this.tone(p, t, 'sine', 900, 200, 0.2, 0.08 * k);
+        break;
+      case 'zap':
+        this.tone(p, t, 'sawtooth', 1400, 260, 0.12, 0.12 * k);
+        this.tone(p, t, 'square', 82, 78, 0.22, 0.06 * k);
+        this.burst(p, t, 6000, 0.08, 0.16 * k, 'highpass');
+        break;
+      case 'overload':
+        this.tone(p, t, 'sawtooth', 2000, 120, 0.3, 0.16 * k);
+        this.burst(p, t, 3000, 0.35, 0.36 * k, 'highpass');
+        this.tone(p, t, 'square', 220, 60, 0.25, 0.1 * k);
+        break;
+      case 'energize':
+        this.tone(p, t, 'sawtooth', 110, 220, 0.6, 0.07 * k);
+        this.tone(p, t, 'sine', 440, 660, 0.5, 0.06 * k);
+        break;
+      case 'well':
+        this.tone(p, t, 'sine', 92, 30, 1.1, 0.5 * k);
+        this.burst(p, t, 260, 0.9, 0.18 * k, 'lowpass', 90);
+        break;
+      case 'magnet':
+        this.tone(p, t, 'triangle', 140, 170, 0.45, 0.12 * k);
+        this.tone(p, t, 'sine', 280, 340, 0.4, 0.05 * k);
         break;
     }
     // Disconnect the panner after the longest voice has finished.

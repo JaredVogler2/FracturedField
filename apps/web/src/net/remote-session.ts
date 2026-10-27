@@ -6,7 +6,7 @@ import {
   type ClientSocket,
   type RoomClientState,
 } from '@ff/room-core/client';
-import type { SessionCallbacks, SessionDriver, TransportState } from './session';
+import type { SeatLoadouts, SessionCallbacks, SessionDriver, TransportState } from './session';
 import type { StoredSeat } from './seat-store';
 
 /** Adapts the browser WebSocket to the transport-agnostic client socket. */
@@ -168,8 +168,8 @@ export class RemoteSession implements SessionDriver {
     this.client.sendIntent(intent);
   }
 
-  setReady(ready: boolean, inputMode: InputSource): void {
-    this.client.setReady(ready, inputMode);
+  setReady(ready: boolean, inputMode: InputSource, loadouts?: SeatLoadouts): void {
+    this.client.setReady(ready, inputMode, loadouts?.[this.opts.seat.slot]);
   }
 
   requestRematch(): void {

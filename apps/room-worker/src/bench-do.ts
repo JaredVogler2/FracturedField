@@ -2,6 +2,8 @@ import { DurableObject } from 'cloudflare:workers';
 import { FixedRateLoop } from '@ff/room-core';
 import {
   BenchInputs,
+  ELEMENT_STRESS_LOADOUTS,
+  ElementStress,
   GameWorld,
   RegionLoad,
   bodyPositions,
@@ -9,13 +11,20 @@ import {
   physicsVersion,
 } from '@ff/sim';
 import { DEFAULT_RULES } from '@ff/game-data';
-import { decodeClientMessage, encodeMessage, type PlayerSlot } from '@ff/protocol';
+import {
+  decodeClientMessage,
+  encodeMessage,
+  type ActionIntent,
+  type PlayerSlot,
+} from '@ff/protocol';
 import type { Env } from './env.js';
 
 export interface BenchConfig {
   readonly seconds: number;
   readonly bodies: number;
   readonly regions: number;
+  /** `base`: synthetic input + region stand-in (D01). `elements`: worst-case element load (D04). */
+  readonly scenario?: 'base' | 'elements';
 }
 
 export interface BenchReport {
@@ -47,6 +56,10 @@ export interface BenchReport {
   readonly clients: number;
   readonly clientIntents: number;
   readonly entities: number;
+  /** Most simultaneous pools + steam + flames seen (element scenario). */
+  readonly peakElementRegions: number;
+  /** Outcomes of every intent the world processed (generator + sockets). */
+  readonly intents: { readonly accepted: number; readonly refused: number };
   readonly timerResolutionMs: number;
   readonly notes: readonly string[];
 }
@@ -69,6 +82,21 @@ export class BenchDurableObject extends DurableObject<Env> {
   private startedAt = 0;
   private endedAt = 0;
   private config: BenchConfig = { seconds: 0, bodies: 0, regions: 0 };
+  private stress: ElementStress | null = null;
+  private peakRegions = 0;
+  private nextSeq: [number, number] = [0, 0];
+  private accepted = 0;
+  private refused = 0;
+
+  /**
+   * Generator and socket intents share each seat: re-stamp sequence numbers so neither source
+   * makes the other's intents stale (the world drops seq <= last accepted).
+   */
+  private apply(world: GameWorld, slot: PlayerSlot, intent: ActionIntent): void {
+    const seq = Math.max(this.nextSeq[slot], world.lastSeq(slot) + 1);
+    this.nextSeq[slot] = seq + 1;
+    world.applyCommand(slot, { ...intent, seq });
+  }
   private status: BenchReport['status'] = 'idle';
   private snapDebt = 0;
   private clientIntents = 0;
@@ -79,13 +107,21 @@ export class BenchDurableObject extends DurableObject<Env> {
     if (this.status === 'running') return { started: false };
     this.world?.dispose();
     this.config = config;
+    const elements = config.scenario === 'elements';
     this.world = await GameWorld.create({
       seed: 1234,
       arena: makeBenchArena(config.bodies),
       autoStart: true,
+      ...(elements ? { loadouts: ELEMENT_STRESS_LOADOUTS } : {}),
     });
-    this.regions = new RegionLoad(config.regions, 5);
+    // The element scenario runs the real element systems, so the stand-in region load is off.
+    this.regions = elements ? null : new RegionLoad(config.regions, 5);
     this.inputs = new BenchInputs(11);
+    this.stress = elements ? new ElementStress(19) : null;
+    this.peakRegions = 0;
+    this.nextSeq = [0, 0];
+    this.accepted = 0;
+    this.refused = 0;
     this.samples = [];
     this.batch = [];
     this.batchAcc = 0;
@@ -107,9 +143,16 @@ export class BenchDurableObject extends DurableObject<Env> {
       DEFAULT_RULES.match.tickRate,
       () => {
         const t0 = Date.now();
-        for (const { slot, intent } of this.inputs.next(world.tick))
-          world.applyCommand(slot, intent);
-        world.stepFixed();
+        if (this.stress)
+          this.stress.drive(world, (slot, intent) => this.apply(world, slot, intent));
+        else
+          for (const { slot, intent } of this.inputs.next(world.tick))
+            this.apply(world, slot, intent);
+        const step = world.stepFixed();
+        for (const r of step.results) {
+          if (r.result.accepted) this.accepted++;
+          else this.refused++;
+        }
         this.snapDebt += DEFAULT_RULES.match.snapshotRate / DEFAULT_RULES.match.tickRate;
         if (this.snapDebt >= 1) {
           this.snapDebt -= 1;
@@ -130,6 +173,7 @@ export class BenchDurableObject extends DurableObject<Env> {
         }
         const dt = Date.now() - t0;
         this.samples.push(dt);
+        this.peakRegions = Math.max(this.peakRegions, world.counters.regions);
         this.batchAcc += dt;
         if (++this.batchCount === 30) {
           this.batch.push(this.batchAcc / 30);
@@ -184,6 +228,8 @@ export class BenchDurableObject extends DurableObject<Env> {
       clients: this.sockets.size,
       clientIntents: this.clientIntents,
       entities: this.world?.counters.entities ?? 0,
+      peakElementRegions: this.peakRegions,
+      intents: { accepted: this.accepted, refused: this.refused },
       timerResolutionMs: 1,
       notes: [
         'Date.now() inside workerd advances in 1 ms steps; per-tick percentiles are quantised to 1 ms.',
@@ -207,7 +253,7 @@ export class BenchDurableObject extends DurableObject<Env> {
       const d = decodeClientMessage(ev.data, DEFAULT_RULES.network.maxMessageBytes);
       if (d.ok && d.msg.t === 'intent' && this.world && this.status === 'running') {
         this.clientIntents++;
-        this.world.applyCommand(slot, d.msg.i);
+        this.apply(this.world, slot, d.msg.i);
       }
     });
     server.addEventListener('close', () => this.sockets.delete(server));

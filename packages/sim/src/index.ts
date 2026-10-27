@@ -15,5 +15,13 @@ export {
 } from './game.js';
 export { runPhysicsHarness, HARNESS_TICKS, type HarnessResult } from './harness.js';
 export * as simMath from './math.js';
-export { makeBenchArena, RegionLoad, BenchInputs, bodyPositions } from './bench-scenario.js';
+export {
+  makeBenchArena,
+  RegionLoad,
+  BenchInputs,
+  bodyPositions,
+  ElementStress,
+  ELEMENT_STRESS_LOADOUTS,
+  saturatedAbilities,
+} from './bench-scenario.js';
 export { SnapshotBot, type BotDifficulty } from './bot.js';

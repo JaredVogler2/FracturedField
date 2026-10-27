@@ -1,5 +1,5 @@
 import * as v from 'valibot';
-import { ABILITY_IDS } from '@ff/game-data';
+import { ABILITY_IDS, ADVANCED_ABILITIES } from '@ff/game-data';
 import { INPUT_SOURCES, INTENT_PHASES } from './types.js';
 
 /** Finite number within [min, max]; rejects NaN and ±Infinity. */
@@ -42,6 +42,10 @@ export const ReadySchema = v.strictObject({
   t: v.literal('ready'),
   ready: v.boolean(),
   inputMode: v.picklist(INPUT_SOURCES),
+  /** Advanced-move picks for the coming match (validated again by the authority). */
+  loadout: v.optional(
+    v.strictTuple([v.picklist(ADVANCED_ABILITIES), v.picklist(ADVANCED_ABILITIES)]),
+  ),
 });
 
 export const IntentMessageSchema = v.strictObject({

@@ -33,7 +33,11 @@ test('3D arena boots, renders WebGL and advances the shared simulation without e
   await page.waitForTimeout(3000);
   const t2 = await tickOf();
   expect(t2).toBeGreaterThan(t1);
-  await expect(page.locator('[data-key="bodies"]')).toHaveText('3');
+  // Core + 2 boulders + 2 steel lodestones (Phase 04), plus any transient guard/shard the demo
+  // bots create; never more than the dynamic-body cap.
+  const bodies = Number(await page.locator('[data-key="bodies"]').textContent());
+  expect(bodies).toBeGreaterThanOrEqual(5);
+  expect(bodies).toBeLessThanOrEqual(20);
   // The canvas must contain a rendered image, not a blank clear colour.
   const shot = await page.locator('canvas').screenshot();
   expect(shot.byteLength).toBeGreaterThan(30_000);

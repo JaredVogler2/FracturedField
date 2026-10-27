@@ -6,6 +6,7 @@ const ArenaDemoPage = lazy(() =>
   import('./routes/ArenaDemoPage').then((m) => ({ default: m.ArenaDemoPage })),
 );
 const SpikePage = lazy(() => import('./routes/SpikePage').then((m) => ({ default: m.SpikePage })));
+const LabPage = lazy(() => import('./routes/LabPage').then((m) => ({ default: m.LabPage })));
 const App = lazy(() => import('./ui/App').then((m) => ({ default: m.App })));
 
 function Router() {
@@ -17,6 +18,8 @@ function Router() {
       return <ArenaDemoPage debug />;
     case '/demo':
       return <ArenaDemoPage />;
+    case '/lab':
+      return <LabPage />;
     default:
       return <App />;
   }

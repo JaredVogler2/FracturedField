@@ -267,6 +267,76 @@ export function EventEffects() {
             spawnRing(e.p[0], 0.05, e.p[2], hex, 1, DEFAULT_ABILITIES.sweep.radius, 0.45, 0.5);
           } else if (e.ability === 'lift' && e.phase === 'start') {
             spawnRing(e.p[0], 0.05, e.p[2], hex, 0.2, 1.4, 0.4, 0.7);
+          } else if (e.ability === 'infuse') {
+            spawnRing(
+              e.p[0],
+              0.05,
+              e.p[2],
+              e.mag === 1 ? '#ff8a3a' : '#5fc8ff',
+              0.3,
+              2.4,
+              0.35,
+              0.7,
+            );
+          } else if (e.ability === 'freeze') {
+            spawnRing(e.p[0], 0.06, e.p[2], '#d8f6ff', 0.3, 2.6, 0.4, 0.8);
+          } else if (e.ability === 'charge') {
+            spawnRing(e.p[0], 0.07, e.p[2], '#a9dcff', 0.2, 2.6, 0.22, reducedFlashes ? 0.3 : 0.9);
+          } else if (e.ability === 'gravity') {
+            spawnRing(e.p[0], 0.05, e.p[2], '#b48cff', 7, 0.6, 0.5, 0.8);
+          }
+          break;
+        }
+        case 'reaction': {
+          const [x, y, z] = e.p;
+          switch (e.kind) {
+            case 'soak':
+              spawnRing(x, 0.04, z, '#4fb6ff', 0.4, 2.6, 0.5, 0.6);
+              burst(x, 0.2, z, '#6cc6ff', 26, 4, 0.55, 9, 1.4);
+              break;
+            case 'ignite':
+              burst(x, 0.3, z, '#ff7a22', 34, 3.5, 0.7, -2, 1.6);
+              break;
+            case 'chill':
+              burst(x, 0.4, z, '#e0f8ff', 30, 4, 0.6, 1, 0.8);
+              break;
+            case 'freeze':
+              spawnRing(x, 0.05, z, '#cdf3ff', 0.5, 3.2, 0.6, 0.9);
+              burst(x, y, z, '#e8fbff', 46, 5, 0.8, 6, 1.2);
+              break;
+            case 'melt':
+              burst(x, 0.2, z, '#7fd3ff', 30, 3, 0.6, 6, 1.0);
+              break;
+            case 'boil':
+              burst(x, 0.5, z, '#f2f6fa', 60, 3.5, 1.1, -3, 2.2);
+              break;
+            case 'douse':
+            case 'quench':
+              burst(x, Math.max(0.3, y), z, '#dfe6ec', 28, 2.5, 0.8, -2.5, 1.8);
+              break;
+            case 'shatter':
+              spawnRing(x, 0.06, z, '#dff8ff', 0.4, 3.6, 0.4, 0.9);
+              burst(x, y, z, '#eafcff', 70, 8, 0.8, 10, 1.4);
+              break;
+            case 'fracture':
+              shatter(x, y, z, 12);
+              burst(x, y, z, '#c9a27e', 40, 6, 0.7, 9, 1.2);
+              break;
+            case 'shock':
+              spawnRing(x, 0.06, z, '#8fd0ff', 0.3, 2.8, 0.25, reducedFlashes ? 0.25 : 0.8);
+              break;
+            case 'overload':
+              burst(x, y, z, '#bfe6ff', 70, 9, 0.6, 4, 1.4);
+              shatter(x, y, z, 10);
+              break;
+            case 'energize':
+              spawnRing(x, 0.05, z, '#5aa8ff', 0.4, 2.2, 0.5, 0.9);
+              break;
+            case 'well':
+              spawnRing(x, 0.05, z, '#9c7dff', 6, 0.4, 0.6, 0.8);
+              break;
+            default:
+              break;
           }
           break;
         }

@@ -1,7 +1,7 @@
-import { DEFAULT_RULES } from '@ff/game-data';
+import { DEFAULT_RULES, type AbilityId } from '@ff/game-data';
 import type { ActionIntent, InputSource, PlayerSlot } from '@ff/protocol';
 import type { BotDifficulty } from '@ff/sim';
-import type { SessionCallbacks, SessionDriver } from './session';
+import type { SeatLoadouts, SessionCallbacks, SessionDriver } from './session';
 import type { FromSimWorker, ToSimWorker } from './sim-protocol';
 
 export interface WorkerSessionOptions {
@@ -10,6 +10,7 @@ export interface WorkerSessionOptions {
   readonly seed?: number;
   readonly autoStart?: boolean;
   readonly fast?: boolean;
+  readonly loadouts?: readonly [readonly AbilityId[], readonly AbilityId[]];
 }
 
 /**
@@ -84,6 +85,7 @@ export class WorkerSession implements SessionDriver {
         autoStart: this.opts.autoStart ?? false,
         bots: this.opts.bots ?? [],
         ...(this.opts.fast ? { fast: true } : {}),
+        ...(this.opts.loadouts ? { loadouts: this.opts.loadouts } : {}),
       });
     });
   }
@@ -97,8 +99,17 @@ export class WorkerSession implements SessionDriver {
     this.post({ type: 'intent', slot, intent });
   }
 
-  setReady(ready: boolean, _inputMode: InputSource): void {
-    if (ready) this.post({ type: 'ready', slots: this.localSlots });
+  setReady(ready: boolean, _inputMode: InputSource, loadouts?: SeatLoadouts): void {
+    if (!ready) return;
+    const picks = this.localSlots.flatMap((slot) => {
+      const l = loadouts?.[slot];
+      return l ? [{ slot, picks: [...l] }] : [];
+    });
+    this.post({
+      type: 'ready',
+      slots: this.localSlots,
+      ...(picks.length ? { loadouts: picks } : {}),
+    });
   }
 
   requestRematch(): void {

@@ -82,12 +82,12 @@ export function SweepFields() {
 
   const color = useMemo(() => new THREE.Color(), []);
   useFrame(({ clock }) => {
-    const effects = frame.current?.latest?.effects ?? [];
+    const effects = (frame.current?.latest?.effects ?? []).filter((e) => e.kind === 'sweep');
     const t = clock.elapsedTime;
     for (let i = 0; i < MAX_SWEEPS; i++) {
       const pool = pools[i]!;
       const fx = effects[i];
-      if (!fx || fx.kind !== 'sweep') {
+      if (!fx) {
         pool.lines.visible = false;
         pool.ring.visible = false;
         continue;
@@ -262,7 +262,8 @@ export function CoreTrail() {
     const pos = geo.attributes.position!.array as Float32Array;
     const col = geo.attributes.color!.array as Float32Array;
     const width = Math.min(0.9, 0.15 + speed * 0.035);
-    const strength = Math.min(1, speed / 14);
+    // Inside steam the server veils the core: its trail fades so the path is not given away.
+    const strength = core.veiled ? 0 : Math.min(1, speed / 14);
     for (let i = 0; i < TRAIL; i++) {
       const p = h[Math.min(i, count.current - 1)]!;
       const q = h[Math.min(i + 1, count.current - 1)]!;
@@ -334,7 +335,8 @@ export function AimPreview({ slots }: { slots: readonly PlayerSlot[] }) {
       const mesh = refs[slot].current;
       if (!mesh) continue;
       const active = slots.includes(slot) && f?.latest?.match.phase === 'playing';
-      if (!active || !core || !f) {
+      // A veiled core (inside steam) gets no aim preview: the server withholds that read.
+      if (!active || !core || !f || core.veiled) {
         mesh.visible = false;
         continue;
       }

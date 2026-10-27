@@ -2487,6 +2487,24 @@ export class GameWorld {
     return st ? { ...st } : null;
   }
 
+  /**
+   * Debug/Lab-only material toggle: sets wetness / temperature / thermal shock of an element-bearing
+   * body directly (Physics Lab "material state toggles"). Not reachable from any network message.
+   */
+  debugSetBodyElement(
+    id: EntityId,
+    patch: { readonly wet?: number; readonly temp?: number; readonly shocked?: boolean },
+  ): boolean {
+    const e = this.physics.entities.get(id);
+    if (!e || !ELEMENTAL.has(e.kind)) return false;
+    const st = this.bodyState(id);
+    if (patch.wet !== undefined) st.wet = clamp(patch.wet, 0, 1);
+    if (patch.temp !== undefined) st.temp = clamp(patch.temp, -60, 400);
+    if (patch.shocked !== undefined)
+      st.shocked = patch.shocked ? this.ticks(this.rules.elements.body.shockedSeconds) : 0;
+    return true;
+  }
+
   /** Debug/test-only: entity ids of a kind, ascending. */
   debugEntities(kind: string): EntityId[] {
     const out: EntityId[] = [];

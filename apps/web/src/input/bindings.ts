@@ -9,6 +9,12 @@ export interface KeyBindings {
   readonly sweepUp: readonly string[];
   readonly sweepDown: readonly string[];
   readonly guard: readonly string[];
+  /** INFUSE wet / heat. */
+  readonly infuseWet: readonly string[];
+  readonly infuseHeat: readonly string[];
+  /** The two advanced moves of the seat's loadout (first and second pick). */
+  readonly adv1: readonly string[];
+  readonly adv2: readonly string[];
 }
 
 export type BindingAction = keyof KeyBindings;
@@ -24,6 +30,10 @@ export const P1_BINDINGS: KeyBindings = {
   sweepUp: ['KeyQ'],
   sweepDown: ['KeyE'],
   guard: ['KeyF'],
+  infuseWet: ['Digit1', 'KeyR'],
+  infuseHeat: ['Digit2', 'KeyT'],
+  adv1: ['Digit3', 'KeyC'],
+  adv2: ['Digit4', 'KeyV'],
 };
 
 /** Player 2 on a shared keyboard (right hand): arrows or IJKL, abilities on the right cluster. */
@@ -37,6 +47,10 @@ export const P2_BINDINGS: KeyBindings = {
   sweepUp: ['Comma', 'Numpad4'],
   sweepDown: ['Period', 'Numpad6'],
   guard: ['Slash', 'Numpad5'],
+  infuseWet: ['Digit7', 'Numpad7'],
+  infuseHeat: ['Digit8', 'Numpad8'],
+  adv1: ['Digit9', 'Numpad9'],
+  adv2: ['Digit0', 'NumpadAdd'],
 };
 
 /** Solo play: both hands' layouts drive the single seat. */
@@ -50,6 +64,10 @@ export const SOLO_BINDINGS: KeyBindings = {
   sweepUp: [...P1_BINDINGS.sweepUp, 'KeyU'],
   sweepDown: [...P1_BINDINGS.sweepDown, 'KeyO'],
   guard: [...P1_BINDINGS.guard, 'KeyL'],
+  infuseWet: [...P1_BINDINGS.infuseWet, 'Digit7'],
+  infuseHeat: [...P1_BINDINGS.infuseHeat, 'Digit8'],
+  adv1: [...P1_BINDINGS.adv1, 'Digit9'],
+  adv2: [...P1_BINDINGS.adv2, 'Digit0'],
 };
 
 /** Human-readable key label for the controls panel. */

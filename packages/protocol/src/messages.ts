@@ -29,6 +29,8 @@ export interface LobbySeat {
   readonly ready: boolean;
   readonly inputMode: InputSource | null;
   readonly wantsRematch: boolean;
+  /** Advanced moves this seat picked (public: part of the strategy both players see). */
+  readonly loadout: readonly string[] | null;
 }
 
 export interface WelcomeMessage {

@@ -1,4 +1,10 @@
-import { DEFAULT_RULES, MERIDIAN_ARENA } from '@ff/game-data';
+import {
+  DEFAULT_ABILITIES,
+  DEFAULT_LOADOUT,
+  DEFAULT_RULES,
+  MERIDIAN_ARENA,
+  type AdvancedAbilityId,
+} from '@ff/game-data';
 import { IntentEmitter, worldToAim, type ActionEdge, type IntentSink } from '@ff/controls';
 import type { InputSource, PlayerSlot, Vec2, WorldSnapshot } from '@ff/protocol';
 import { view } from '../render/view';
@@ -30,6 +36,8 @@ export class SeatInput {
     readonly slot: PlayerSlot,
     source: InputSource,
     send: IntentSink,
+    /** Advanced moves bound to the seat's two loadout keys. */
+    readonly loadout: readonly [AdvancedAbilityId, AdvancedAbilityId] = DEFAULT_LOADOUT,
   ) {
     this.activeSource = source;
     this.emitter = new IntentEmitter(slot, source, send, 15);
@@ -181,6 +189,15 @@ class KeyboardController {
         this.seat.edge({ action: 'lift', phase: 'end' }, now);
       return;
     }
+    if (action === 'adv1' || action === 'adv2') {
+      const ability = this.seat.loadout[action === 'adv1' ? 0 : 1];
+      if (DEFAULT_ABILITIES[ability].kind === 'hold') {
+        if (pressed && !repeat) this.seat.edge({ action: ability, phase: 'start' }, now);
+        else if (!pressed && !this.held(action))
+          this.seat.edge({ action: ability, phase: 'end' }, now);
+      } else if (pressed && !repeat) this.seat.edge({ action: ability, phase: 'tap' }, now);
+      return;
+    }
     if (!pressed || repeat) return;
     const axes = view.groundAxes();
     switch (action) {
@@ -189,6 +206,12 @@ class KeyboardController {
         break;
       case 'guard':
         this.seat.edge({ action: 'guard', phase: 'tap' }, now);
+        break;
+      case 'infuseWet':
+        this.seat.edge({ action: 'infuse', phase: 'tap', modifier: 0 }, now);
+        break;
+      case 'infuseHeat':
+        this.seat.edge({ action: 'infuse', phase: 'tap', modifier: 1 }, now);
         break;
       case 'sweepUp':
         this.seat.edge(
@@ -396,6 +419,7 @@ export interface SeatConfig {
   readonly bindings: KeyBindings;
   readonly pointer: boolean;
   readonly touch: boolean;
+  readonly loadout?: readonly [AdvancedAbilityId, AdvancedAbilityId];
 }
 
 interface Pausable {
@@ -417,7 +441,7 @@ export class InputManager {
 
   constructor(configs: readonly SeatConfig[], element: HTMLElement, send: IntentSink) {
     for (const c of configs) {
-      const seat = new SeatInput(c.slot, 'keyboard', send);
+      const seat = new SeatInput(c.slot, 'keyboard', send, c.loadout ?? DEFAULT_LOADOUT);
       this.seats.set(c.slot, seat);
       const kb = new KeyboardController(seat, c.bindings);
       this.keyboards.push(kb);

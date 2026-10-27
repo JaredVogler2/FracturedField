@@ -11,6 +11,7 @@ import { view } from './view';
 import { useSettings } from '../game/settings';
 import { EventEffects } from './vfx/EventEffects';
 import { AimPreview, CoreTrail, LiftTethers, Reticles, SweepFields } from './vfx/FieldEffects';
+import { ChargeBolts, ElementRegions, MagnetFields, WaterAndIce } from './vfx/ElementEffects';
 import type { PlayerSlot } from '@ff/protocol';
 import { LIGHTING, POST, QUALITY, type QualityTier } from './art-tokens';
 import { fitBroadcastCamera } from './camera';
@@ -24,7 +25,15 @@ export interface SceneProps {
   readonly portraitSlot?: 0 | 1;
   /** Seats controlled on this device (aim previews / reticles). */
   readonly localSlots?: readonly PlayerSlot[];
+  /** Fixed camera instead of the fitted broadcast view (Physics Lab close-ups). */
+  readonly camera?: CameraOverride;
   readonly children?: ReactNode;
+}
+
+export interface CameraOverride {
+  readonly position: readonly [number, number, number];
+  readonly target: readonly [number, number, number];
+  readonly fov: number;
 }
 
 /** The 3D arena canvas: lighting, atmosphere, arena, authoritative entities and post. */
@@ -33,6 +42,7 @@ export function GameScene({
   side = 1,
   portraitSlot = 0,
   localSlots = [],
+  camera,
   children,
 }: SceneProps) {
   const tier = QUALITY[quality];
@@ -54,14 +64,18 @@ export function GameScene({
       }}
     >
       <FrameDriver />
-      <CameraRig side={side} portraitSlot={portraitSlot} />
+      <CameraRig side={side} portraitSlot={portraitSlot} override={camera} />
       <Atmosphere />
       <Lights tier={tier} />
       <Arena textureSize={tier.textureSize} />
       <Entities />
       <Manipulators />
+      <WaterAndIce />
       <CoreTrail />
       <SweepFields />
+      <ElementRegions density={tier.name === 'low' ? 0.5 : tier.name === 'medium' ? 0.75 : 1} />
+      <MagnetFields />
+      <ChargeBolts />
       <LiftTethers />
       <AimPreview slots={localSlots} />
       <Reticles slots={localSlots} />
@@ -88,7 +102,15 @@ export function GameScene({
   );
 }
 
-function CameraRig({ side, portraitSlot }: { side: 1 | -1; portraitSlot: 0 | 1 }) {
+function CameraRig({
+  side,
+  portraitSlot,
+  override,
+}: {
+  side: 1 | -1;
+  portraitSlot: 0 | 1;
+  override?: CameraOverride | undefined;
+}) {
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
   const size = useThree((s) => s.size);
   const client = useGameClient();
@@ -99,14 +121,20 @@ function CameraRig({ side, portraitSlot }: { side: 1 | -1; portraitSlot: 0 | 1 }
     const aspect = size.width / Math.max(1, size.height);
     // Short landscape screens: reserve the band the bottom HUD panels occupy (~78 px).
     const hudBottom = aspect > 1.2 && size.height < 560 ? Math.min(0.22, 78 / size.height) : 0;
-    const pose = fitBroadcastCamera(MERIDIAN_ARENA, aspect, side, portraitSlot, hudBottom);
-    camera.fov = pose.fov;
-    camera.position.copy(pose.position);
-    camera.lookAt(pose.target);
+    if (override) {
+      camera.fov = override.fov;
+      camera.position.set(...override.position);
+      camera.lookAt(...override.target);
+    } else {
+      const pose = fitBroadcastCamera(MERIDIAN_ARENA, aspect, side, portraitSlot, hudBottom);
+      camera.fov = pose.fov;
+      camera.position.copy(pose.position);
+      camera.lookAt(pose.target);
+    }
     camera.updateProjectionMatrix();
-    base.current.copy(pose.position);
+    base.current.copy(camera.position);
     view.camera = camera;
-  }, [camera, size.width, size.height, side, portraitSlot]);
+  }, [camera, size.width, size.height, side, portraitSlot, override]);
   useEffect(
     () =>
       client.events.on((e) => {

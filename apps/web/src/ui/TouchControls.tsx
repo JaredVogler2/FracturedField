@@ -1,5 +1,7 @@
 import type { RefObject } from 'react';
+import { DEFAULT_ABILITIES, type AdvancedAbilityId } from '@ff/game-data';
 import type { PlayerSlot } from '@ff/protocol';
+import { ABILITY_INFO } from './Loadout';
 import type { InputManager } from '../input/manager';
 import { view } from '../render/view';
 import { sfx } from '../audio/sfx';
@@ -11,9 +13,11 @@ import { sfx } from '../audio/sfx';
 export function TouchControls({
   manager,
   slot,
+  loadout,
 }: {
   manager: RefObject<InputManager | null>;
   slot: PlayerSlot;
+  loadout: readonly [AdvancedAbilityId, AdvancedAbilityId];
 }) {
   const tap = (edge: Parameters<InputManager['action']>[1]) => (e: React.PointerEvent) => {
     e.preventDefault();
@@ -62,6 +66,46 @@ export function TouchControls({
       >
         GUARD
       </button>
+      <div className="tc-elements">
+        <button
+          className="tc-btn tc-el el-wet"
+          onPointerDown={tap({ action: 'infuse', phase: 'tap', modifier: 0 })}
+          aria-label="Infuse water"
+        >
+          WET
+        </button>
+        <button
+          className="tc-btn tc-el el-heat"
+          onPointerDown={tap({ action: 'infuse', phase: 'tap', modifier: 1 })}
+          aria-label="Infuse heat"
+        >
+          HEAT
+        </button>
+        {loadout.map((id) =>
+          DEFAULT_ABILITIES[id].kind === 'hold' ? (
+            <button
+              key={id}
+              className="tc-btn tc-el"
+              onPointerDown={tap({ action: id, phase: 'start' })}
+              onPointerUp={tap({ action: id, phase: 'end' })}
+              onPointerCancel={tap({ action: id, phase: 'end' })}
+              onPointerLeave={tap({ action: id, phase: 'end' })}
+              aria-label={`${ABILITY_INFO[id].name} (hold)`}
+            >
+              {ABILITY_INFO[id].name.toUpperCase()}
+            </button>
+          ) : (
+            <button
+              key={id}
+              className="tc-btn tc-el"
+              onPointerDown={tap({ action: id, phase: 'tap' })}
+              aria-label={ABILITY_INFO[id].name}
+            >
+              {ABILITY_INFO[id].name.toUpperCase()}
+            </button>
+          ),
+        )}
+      </div>
     </div>
   );
 }

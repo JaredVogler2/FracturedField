@@ -1,4 +1,10 @@
-import { rulesFor, secondsToTicks, type GameRules, type RulesetId } from '@ff/game-data';
+import {
+  rulesFor,
+  secondsToTicks,
+  type AbilityId,
+  type GameRules,
+  type RulesetId,
+} from '@ff/game-data';
 import {
   PROTOCOL_VERSION,
   SIM_VERSION,
@@ -53,6 +59,8 @@ export interface RoomConnection {
 }
 
 interface SeatState {
+  /** Advanced-move picks sent with READY (null = default loadout). */
+  loadout: AbilityId[] | null;
   issued: boolean;
   /** Current ticket generation; the previous one is also accepted once (lost WELCOME). */
   nonce: number;
@@ -82,6 +90,7 @@ export interface PersistedSeat {
   readonly nonce: number;
   readonly ready: boolean;
   readonly inputMode: InputSource | null;
+  readonly loadout?: readonly AbilityId[];
 }
 
 export interface PersistedRoom {
@@ -605,6 +614,7 @@ export class RoomAuthority {
       case 'ready': {
         seat.ready = msg.ready;
         seat.inputMode = msg.inputMode;
+        if (msg.loadout) seat.loadout = [...msg.loadout];
         this.maybeStartMatch();
         this.broadcastLobby();
         void this.save();
@@ -673,6 +683,11 @@ export class RoomAuthority {
     if (this.phase !== 'lobby' || !this.world) return;
     const both = this.seats.every((s) => s.issued && s.conn !== null && s.ready);
     if (!both) return;
+    // Picks are validated by the world (invalid picks keep the default loadout).
+    for (const slot of [0, 1] as const) {
+      const picks = this.seats[slot].loadout;
+      if (picks) this.world.setLoadout(slot, picks);
+    }
     this.world.startMatch();
     this.phase = 'live';
     this.snapshotDebt = 0;
@@ -833,6 +848,7 @@ export class RoomAuthority {
         ready: s.ready,
         inputMode: s.inputMode,
         wantsRematch: s.wantsRematch,
+        loadout: s.loadout,
       };
     };
     return { t: 'lobby', phase: this.phase, seats: [seat(0), seat(1)] };
@@ -881,11 +897,18 @@ function seatFrom(p: PersistedSeat): SeatState {
     wantsRematch: false,
     conn: null,
     disconnectedAt: p.issued ? 0 : null,
+    loadout: p.loadout ? [...p.loadout] : null,
   };
 }
 
 function persistSeat(s: SeatState): PersistedSeat {
-  return { issued: s.issued, nonce: s.nonce, ready: s.ready, inputMode: s.inputMode };
+  return {
+    issued: s.issued,
+    nonce: s.nonce,
+    ready: s.ready,
+    inputMode: s.inputMode,
+    ...(s.loadout ? { loadout: [...s.loadout] } : {}),
+  };
 }
 
 function safeSend(conn: RoomConnection, text: string): void {
