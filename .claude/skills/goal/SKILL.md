@@ -8,13 +8,13 @@ disable-model-invocation: true
 
 Operate as the lead implementation agent. This is a command to WRITE and TEST game code, not merely propose it.
 
-1. Read CLAUDE.md, README.md, prompts/00-ORCHESTRATOR.md and docs/BUILD_STATUS.md, then inspect actual git state and existing code.
-2. Determine earliest uncompleted phase among prompts/01-ARCHITECTURE-SPIKE.md through prompts/13-FINAL-REVIEW.md. Read the relevant prompt and supporting docs in full.
+1. Read CLAUDE.md, README.md, docs/BUILD_ORDER.md, docs/CREATIVE_TARGET.md, prompts/00-ORCHESTRATOR.md and docs/BUILD_STATUS.md, then inspect actual git state and existing code.
+2. Determine earliest uncompleted phase among prompts/01-ARCHITECTURE-SPIKE.md through prompts/13-FINAL-REVIEW.md. **For this phase, also execute all associated deep-dives D01–D16 from docs/BUILD_ORDER.md**, specifically Phase 07 split into five art milestones 7A–7E. Read the relevant main and companion prompts and supporting docs in full.
 3. IMPLEMENT that phase end to end, iteratively, using available tools. Produce runnable code, automated tests and a build. Do not spend an entire run only outlining implementation.
 4. Use original game assets, safe dependencies and official documentation. Real websocket authority, server physics, camera/gyro paths, and visuals must be demonstrable.
 5. Run tests honestly. Record exact results and uncertainties in docs/progress/PHASE-XX.md and docs/BUILD_STATUS.md. Commit validated code and documentation.
 6. If phase is not complete, focus on fixing failed gates; don't prematurely skip ahead.
-7. Continue to the next phase only when current acceptance gates pass; for long sessions prioritize small, cohesive commits and resumed progress.
+7. Continue to the next phase only when current acceptance gates pass; for long sessions prioritize small, cohesive commits and resumed progress. For Phase 07, capture/render critique from actual gameplay and make at least two iterative art revisions; do not claim world-class visuals without benchmarked visual evidence.
 8. At the end report user-facing concise phase status, working commands, any legitimate blockers, commit SHA and next action.
 
 Optional user-added constraints: $ARGUMENTS
