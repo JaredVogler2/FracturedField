@@ -10,6 +10,10 @@ import type { InputSource, PlayerSlot, Vec2, WorldSnapshot } from '@ff/protocol'
 import { view } from '../render/view';
 import { localAim } from '../render/vfx/local-aim';
 import type { KeyBindings, BindingAction } from './bindings';
+import { MODE_SOURCE, type ControlMode } from './capabilities';
+import type { MotionConfig } from './motion';
+import { MotionController } from './motion-controller';
+import { GamepadController } from './gamepad';
 
 const ARENA = MERIDIAN_ARENA;
 const SPACE = { halfLength: ARENA.halfLength, halfWidth: ARENA.halfWidth };
@@ -75,9 +79,15 @@ export class SeatInput {
   /** Recent sequence -> ability, so refused actions can be shown on the right HUD chip. */
   private readonly recent = new Map<number, string>();
 
-  edge(edge: ActionEdge, now: number): void {
+  /**
+   * Sends an ability edge. `source` is the device that pressed it (a thumb button, a key, a pad
+   * button) and is reported on this intent only; aim intents keep reporting the aim owner.
+   */
+  edge(edge: ActionEdge, now: number, source: InputSource = this.activeSource): void {
     const seq = this.emitter.nextSeq;
+    if (source !== this.activeSource) this.emitter.setSource(source);
     this.emitter.edge(edge, this.aim(), now);
+    if (source !== this.activeSource) this.emitter.setSource(this.activeSource);
     this.recent.set(seq, edge.action);
     if (this.recent.size > 64) {
       const first = this.recent.keys().next();
@@ -97,7 +107,7 @@ class KeyboardHub {
   private attached = false;
 
   private onDown = (e: KeyboardEvent): void => {
-    if (isTypingTarget(e.target)) return;
+    if (isTypingTarget(e.target) || isControlActivation(e)) return;
     if (GAME_KEYS.has(e.code)) e.preventDefault();
     const fresh = !this.down.has(e.code);
     this.down.add(e.code);
@@ -135,21 +145,25 @@ class KeyboardHub {
   }
 }
 
-const GAME_KEYS = new Set([
-  'Space',
-  'ArrowUp',
-  'ArrowDown',
-  'ArrowLeft',
-  'ArrowRight',
-  'Slash',
-  'Tab',
-]);
+/** Keys whose browser default (scrolling, quick find) would fight the game. Tab stays free. */
+const GAME_KEYS = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Slash']);
 
 function isTypingTarget(t: EventTarget | null): boolean {
   return (
     t instanceof HTMLInputElement ||
     t instanceof HTMLTextAreaElement ||
     (t instanceof HTMLElement && t.isContentEditable)
+  );
+}
+
+/** Enter on a focused control (button, link, select) activates that control, not a game key. */
+function isControlActivation(e: KeyboardEvent): boolean {
+  if (e.code !== 'Enter' && e.code !== 'NumpadEnter') return false;
+  const t = e.target;
+  return (
+    t instanceof HTMLButtonElement ||
+    t instanceof HTMLSelectElement ||
+    t instanceof HTMLAnchorElement
   );
 }
 
@@ -162,16 +176,23 @@ class KeyboardController {
   private paused = false;
 
   constructor(
-    private readonly seat: SeatInput,
+    readonly seat: SeatInput,
     bindings: KeyBindings,
   ) {
+    this.setBindings(bindings);
+    this.unsubscribe = hub.subscribe((code, pressed, repeat) => this.onKey(code, pressed, repeat));
+  }
+
+  /** Replaces the layout live (rebinding during a pause); held abilities are released first. */
+  setBindings(bindings: KeyBindings): void {
+    if (this.lookup.size > 0) this.seat.emitter.releaseAll(performance.now());
+    this.lookup.clear();
     for (const [action, codes] of Object.entries(bindings) as [
       BindingAction,
       readonly string[],
     ][]) {
       for (const code of codes) this.lookup.set(code, action);
     }
-    this.unsubscribe = hub.subscribe((code, pressed, repeat) => this.onKey(code, pressed, repeat));
   }
 
   private held(action: BindingAction): boolean {
@@ -179,48 +200,47 @@ class KeyboardController {
     return false;
   }
 
+  private fire(edge: ActionEdge, now: number): void {
+    this.seat.edge(edge, now, 'keyboard');
+  }
+
   private onKey(code: string, pressed: boolean, repeat: boolean): void {
     const action = this.lookup.get(code);
     if (!action || this.paused) return;
     const now = performance.now();
     if (action === 'lift') {
-      if (pressed && !repeat) this.seat.edge({ action: 'lift', phase: 'start' }, now);
-      else if (!pressed && !this.held('lift'))
-        this.seat.edge({ action: 'lift', phase: 'end' }, now);
+      if (pressed && !repeat) this.fire({ action: 'lift', phase: 'start' }, now);
+      else if (!pressed && !this.held('lift')) this.fire({ action: 'lift', phase: 'end' }, now);
       return;
     }
     if (action === 'adv1' || action === 'adv2') {
       const ability = this.seat.loadout[action === 'adv1' ? 0 : 1];
       if (DEFAULT_ABILITIES[ability].kind === 'hold') {
-        if (pressed && !repeat) this.seat.edge({ action: ability, phase: 'start' }, now);
-        else if (!pressed && !this.held(action))
-          this.seat.edge({ action: ability, phase: 'end' }, now);
-      } else if (pressed && !repeat) this.seat.edge({ action: ability, phase: 'tap' }, now);
+        if (pressed && !repeat) this.fire({ action: ability, phase: 'start' }, now);
+        else if (!pressed && !this.held(action)) this.fire({ action: ability, phase: 'end' }, now);
+      } else if (pressed && !repeat) this.fire({ action: ability, phase: 'tap' }, now);
       return;
     }
     if (!pressed || repeat) return;
     const axes = view.groundAxes();
     switch (action) {
       case 'pulse':
-        this.seat.edge({ action: 'pulse', phase: 'tap' }, now);
+        this.fire({ action: 'pulse', phase: 'tap' }, now);
         break;
       case 'guard':
-        this.seat.edge({ action: 'guard', phase: 'tap' }, now);
+        this.fire({ action: 'guard', phase: 'tap' }, now);
         break;
       case 'infuseWet':
-        this.seat.edge({ action: 'infuse', phase: 'tap', modifier: 0 }, now);
+        this.fire({ action: 'infuse', phase: 'tap', modifier: 0 }, now);
         break;
       case 'infuseHeat':
-        this.seat.edge({ action: 'infuse', phase: 'tap', modifier: 1 }, now);
+        this.fire({ action: 'infuse', phase: 'tap', modifier: 1 }, now);
         break;
       case 'sweepUp':
-        this.seat.edge(
-          { action: 'sweep', phase: 'tap', modifier: 1, dir: [axes.up.x, axes.up.z] },
-          now,
-        );
+        this.fire({ action: 'sweep', phase: 'tap', modifier: 1, dir: [axes.up.x, axes.up.z] }, now);
         break;
       case 'sweepDown':
-        this.seat.edge(
+        this.fire(
           { action: 'sweep', phase: 'tap', modifier: -1, dir: [-axes.up.x, -axes.up.z] },
           now,
         );
@@ -287,6 +307,10 @@ class PointerController {
     this.project(performance.now());
   };
 
+  private fire(edge: ActionEdge, now: number): void {
+    this.seat.edge(edge, now, 'pointer');
+  }
+
   private project(now: number): void {
     if (!this.lastClient) return;
     const p = view.screenToArena(
@@ -304,13 +328,13 @@ class PointerController {
     const now = performance.now();
     this.lastClient = { x: e.clientX, y: e.clientY };
     this.project(now);
-    if (e.button === 0) this.seat.edge({ action: 'pulse', phase: 'tap' }, now);
+    if (e.button === 0) this.fire({ action: 'pulse', phase: 'tap' }, now);
     else if (e.button === 2) {
       this.liftButtonDown = true;
-      this.seat.edge({ action: 'lift', phase: 'start' }, now);
+      this.fire({ action: 'lift', phase: 'start' }, now);
     } else if (e.button === 1) {
       e.preventDefault();
-      this.seat.edge({ action: 'guard', phase: 'tap' }, now);
+      this.fire({ action: 'guard', phase: 'tap' }, now);
     }
   };
 
@@ -318,7 +342,7 @@ class PointerController {
     if (e.pointerType !== 'mouse') return;
     if (e.button === 2 && this.liftButtonDown) {
       this.liftButtonDown = false;
-      this.seat.edge({ action: 'lift', phase: 'end' }, performance.now());
+      this.fire({ action: 'lift', phase: 'end' }, performance.now());
     }
   };
 
@@ -328,7 +352,7 @@ class PointerController {
     const axes = view.groundAxes();
     const up = e.deltaY < 0;
     const now = performance.now();
-    this.seat.edge(
+    this.fire(
       {
         action: 'sweep',
         phase: 'tap',
@@ -418,14 +442,29 @@ export interface SeatConfig {
   readonly slot: PlayerSlot;
   readonly bindings: KeyBindings;
   readonly pointer: boolean;
-  readonly touch: boolean;
+  /**
+   * The seat's control mode, for a single local player (touch/accessible add drag-aim on the
+   * arena, motion adds gyro aiming). Shared-keyboard duel seats leave it unset.
+   */
+  readonly mode?: ControlMode;
+  /** A game controller may drive this seat (single local player; plugs in at any time). */
+  readonly gamepad?: boolean;
   readonly loadout?: readonly [AdvancedAbilityId, AdvancedAbilityId];
 }
 
-interface Pausable {
+/**
+ * One input method feeding a seat (D06 "InputController"). It is enabled by construction and
+ * writes into its SeatInput: the aim (getAim = SeatInput.aim()) and ability edges (actionStart /
+ * actionHold / actionEnd = SeatInput.edge phases). Disposal removes every listener it added.
+ */
+export interface InputAdapter {
   pause(): void;
   resume(): void;
   dispose(): void;
+  /** Re-zero against the player's current pose (motion recenter); absent where meaningless. */
+  calibrate?(): void;
+  /** Optional per-frame work (motion stall detection, gamepad polling). */
+  tick?(now: number): void;
 }
 
 /**
@@ -434,12 +473,18 @@ interface Pausable {
  */
 export class InputManager {
   readonly seats = new Map<PlayerSlot, SeatInput>();
-  private readonly controllers: Pausable[] = [];
+  private readonly controllers: InputAdapter[] = [];
   private readonly keyboards: KeyboardController[] = [];
+  /** Adapters that belong to a seat's current control mode (swapped by setMode). */
+  private readonly modal = new Map<PlayerSlot, { mode: ControlMode; adapters: InputAdapter[] }>();
   private lastFrame = performance.now();
   private paused = false;
 
-  constructor(configs: readonly SeatConfig[], element: HTMLElement, send: IntentSink) {
+  constructor(
+    configs: readonly SeatConfig[],
+    private readonly element: HTMLElement,
+    send: IntentSink,
+  ) {
     for (const c of configs) {
       const seat = new SeatInput(c.slot, 'keyboard', send, c.loadout ?? DEFAULT_LOADOUT);
       this.seats.set(c.slot, seat);
@@ -447,10 +492,51 @@ export class InputManager {
       this.keyboards.push(kb);
       this.controllers.push(kb);
       if (c.pointer) this.controllers.push(new PointerController(seat, element));
-      if (c.touch) this.controllers.push(new TouchAimController(seat, element));
+      if (c.gamepad && typeof navigator.getGamepads === 'function')
+        this.controllers.push(new GamepadController(seat));
+      if (c.mode) this.setMode(c.slot, c.mode);
     }
     document.addEventListener('visibilitychange', this.onVisibility);
     window.addEventListener('blur', this.onBlur);
+  }
+
+  /**
+   * Hot-swaps a seat's control mode mid-match: held abilities are released first (no effect
+   * survives the handover), the old mode's listeners are removed, and the seat keeps its intent
+   * sequence, so the authority sees one continuous stream. From the swap on, the seat reports the
+   * new mode's source (on-screen buttons and the idle aim pump included).
+   */
+  setMode(slot: PlayerSlot, mode: ControlMode, motion: Partial<MotionConfig> = {}): void {
+    const seat = this.seats.get(slot);
+    if (!seat) return;
+    const current = this.modal.get(slot);
+    if (current?.mode === mode) return;
+    const now = performance.now();
+    seat.emitter.releaseAll(now);
+    seat.claim(MODE_SOURCE[mode], now);
+    for (const a of current?.adapters ?? []) a.dispose();
+    const adapters: InputAdapter[] = [];
+    if (mode === 'touch' || mode === 'accessible')
+      adapters.push(new TouchAimController(seat, this.element));
+    if (mode === 'motion') adapters.push(new MotionController(seat, motion));
+    if (this.paused) for (const a of adapters) a.pause();
+    this.modal.set(slot, { mode, adapters });
+  }
+
+  mode(slot: PlayerSlot): ControlMode | undefined {
+    return this.modal.get(slot)?.mode;
+  }
+
+  /** Applies a changed keyboard layout to a seat without restarting its intent stream. */
+  setBindings(slot: PlayerSlot, bindings: KeyBindings): void {
+    for (const kb of this.keyboards) if (kb.seat.slot === slot) kb.setBindings(bindings);
+  }
+
+  /** The seat's motion adapter, when it is in motion mode. */
+  motion(slot: PlayerSlot): MotionController | undefined {
+    return this.modal
+      .get(slot)
+      ?.adapters.find((a): a is MotionController => a instanceof MotionController);
   }
 
   private onVisibility = (): void => {
@@ -478,6 +564,8 @@ export class InputManager {
         seat.setReticle(m[0], m[1]);
       }
     }
+    for (const c of this.controllers) c.tick?.(now);
+    for (const { adapters } of this.modal.values()) for (const a of adapters) a.tick?.(now);
     if (this.paused) return;
     for (const kb of this.keyboards) kb.update(dt, now);
     for (const seat of this.seats.values()) seat.emitter.aim(seat.aim(), now);
@@ -514,15 +602,16 @@ export class InputManager {
     return this.seats.get(slot);
   }
 
-  /** Programmatic ability edge (touch buttons, accessibility controls). */
-  action(slot: PlayerSlot, edge: ActionEdge): void {
-    this.seats.get(slot)?.edge(edge, performance.now());
+  /** Ability edge from an on-screen control (the thumb buttons in touch, motion and simplified). */
+  action(slot: PlayerSlot, edge: ActionEdge, source: InputSource = 'touch'): void {
+    this.seats.get(slot)?.edge(edge, performance.now(), source);
   }
 
   setPaused(paused: boolean): void {
     this.paused = paused;
     if (paused) this.releaseAll();
-    for (const c of this.controllers) {
+    const all = [...this.controllers, ...[...this.modal.values()].flatMap((m) => m.adapters)];
+    for (const c of all) {
       if (paused) c.pause();
       else c.resume();
     }
@@ -532,6 +621,8 @@ export class InputManager {
     this.releaseAll();
     for (const slot of this.seats.keys()) localAim.delete(slot);
     for (const c of this.controllers) c.dispose();
+    for (const { adapters } of this.modal.values()) for (const a of adapters) a.dispose();
+    this.modal.clear();
     document.removeEventListener('visibilitychange', this.onVisibility);
     window.removeEventListener('blur', this.onBlur);
   }

@@ -7,6 +7,12 @@ import {
 } from '@ff/game-data';
 import type { Calibration } from '@ff/gestures';
 import type { QualityTier } from '../render/art-tokens';
+import type { ControlMode } from '../input/capabilities';
+import {
+  DEFAULT_BINDINGS_OVERRIDE,
+  validBindingOverride,
+  type BindingOverride,
+} from '../input/bindings';
 
 export interface Settings {
   sound: boolean;
@@ -22,6 +28,53 @@ export interface Settings {
   loadoutP2: [AdvancedAbilityId, AdvancedAbilityId];
   /** Camera control preferences (stored on this device only). */
   camera: CameraPrefs;
+  /** How this device's player controls their seat (touch, motion, keyboard, simplified). */
+  controls: ControlPrefs;
+  /** Solo keyboard layout changes (per action; unset actions keep the defaults). */
+  bindings: BindingOverride;
+}
+
+export interface ControlPrefs {
+  /** Chosen control mode; null = the device's recommended default. */
+  mode: ControlMode | null;
+  /** Which thumb holds the ability buttons (the other aims). */
+  hand: 'right' | 'left';
+  /** Motion aiming: turn the phone (pointer) or tip it like a tray (tilt). */
+  motionStyle: 'pointer' | 'tilt';
+  /** 0.5 calm … 2 twitchy. */
+  motionSensitivity: number;
+  /** Hold moves (LIFT, MAGNET) toggle on tap instead of needing a held finger. */
+  sticky: boolean;
+}
+
+export const DEFAULT_CONTROLS: ControlPrefs = {
+  mode: null,
+  hand: 'right',
+  motionStyle: 'pointer',
+  motionSensitivity: 1,
+  sticky: false,
+};
+
+const CONTROL_MODES: readonly ControlMode[] = [
+  'desktop',
+  'touch',
+  'motion',
+  'camera',
+  'accessible',
+];
+
+function validControls(v: unknown): ControlPrefs {
+  if (typeof v !== 'object' || v === null) return { ...DEFAULT_CONTROLS };
+  const c = v as Partial<ControlPrefs>;
+  const sens = c.motionSensitivity;
+  return {
+    mode: CONTROL_MODES.includes(c.mode as ControlMode) ? (c.mode as ControlMode) : null,
+    hand: c.hand === 'left' ? 'left' : 'right',
+    motionStyle: c.motionStyle === 'tilt' ? 'tilt' : 'pointer',
+    motionSensitivity:
+      typeof sens === 'number' && Number.isFinite(sens) ? Math.min(2, Math.max(0.5, sens)) : 1,
+    sticky: c.sticky === true,
+  };
 }
 
 export interface CameraPrefs {
@@ -110,6 +163,8 @@ function load(): Settings {
     loadout: [...DEFAULT_LOADOUT],
     loadoutP2: [...DEFAULT_LOADOUT],
     camera: { ...DEFAULT_CAMERA },
+    controls: { ...DEFAULT_CONTROLS },
+    bindings: { ...DEFAULT_BINDINGS_OVERRIDE },
   };
   try {
     const raw = localStorage.getItem(KEY);
@@ -119,6 +174,8 @@ function load(): Settings {
     if (!validLoadout(merged.loadout)) merged.loadout = [...DEFAULT_LOADOUT];
     if (!validLoadout(merged.loadoutP2)) merged.loadoutP2 = [...DEFAULT_LOADOUT];
     merged.camera = validCamera(merged.camera);
+    merged.controls = validControls(merged.controls);
+    merged.bindings = validBindingOverride(merged.bindings);
     return merged;
   } catch {
     return defaults;
@@ -146,6 +203,8 @@ export const useSettings = create<SettingsStore>((set, get) => ({
         loadout: st.loadout,
         loadoutP2: st.loadoutP2,
         camera: st.camera,
+        controls: st.controls,
+        bindings: st.bindings,
       };
       localStorage.setItem(KEY, JSON.stringify(plain));
     } catch {

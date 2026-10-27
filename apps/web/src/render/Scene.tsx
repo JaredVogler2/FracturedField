@@ -27,6 +27,11 @@ export interface SceneProps {
   readonly localSlots?: readonly PlayerSlot[];
   /** Fixed camera instead of the fitted broadcast view (Physics Lab close-ups). */
   readonly camera?: CameraOverride;
+  /**
+   * Where on-screen thumb controls sit, if any: the arena is framed into the rest of the screen
+   * so controls never cover a goal (a side strip in landscape, a bottom band in portrait).
+   */
+  readonly controlsSide?: 'left' | 'right' | null;
   readonly children?: ReactNode;
 }
 
@@ -43,6 +48,7 @@ export function GameScene({
   portraitSlot = 0,
   localSlots = [],
   camera,
+  controlsSide = null,
   children,
 }: SceneProps) {
   const tier = QUALITY[quality];
@@ -64,7 +70,12 @@ export function GameScene({
       }}
     >
       <FrameDriver />
-      <CameraRig side={side} portraitSlot={portraitSlot} override={camera} />
+      <CameraRig
+        side={side}
+        portraitSlot={portraitSlot}
+        override={camera}
+        controlsSide={controlsSide}
+      />
       <Atmosphere />
       <Lights tier={tier} />
       <Arena textureSize={tier.textureSize} />
@@ -102,14 +113,20 @@ export function GameScene({
   );
 }
 
+/** Screen space the thumb controls take (CSS px): one column + margins / cluster + element row. */
+const CONTROLS_STRIP_PX = 196;
+const CONTROLS_BAND_PX = 236;
+
 function CameraRig({
   side,
   portraitSlot,
   override,
+  controlsSide,
 }: {
   side: 1 | -1;
   portraitSlot: 0 | 1;
   override?: CameraOverride | undefined;
+  controlsSide: 'left' | 'right' | null;
 }) {
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
   const size = useThree((s) => s.size);
@@ -118,23 +135,48 @@ function CameraRig({
   const base = useRef(new THREE.Vector3());
   const shake = useRef(0);
   useEffect(() => {
-    const aspect = size.width / Math.max(1, size.height);
+    const w = Math.max(1, size.width);
+    const h = Math.max(1, size.height);
+    const aspect = w / h;
+    const landscape = aspect >= 0.9;
+    // Thumb controls: a side strip in landscape, a bottom band in portrait.
+    const strip =
+      controlsSide && landscape && !override ? Math.min(0.32, CONTROLS_STRIP_PX / w) : 0;
+    const band = controlsSide && !landscape && !override ? Math.min(0.4, CONTROLS_BAND_PX / h) : 0;
     // Short landscape screens: reserve the band the bottom HUD panels occupy (~78 px).
-    const hudBottom = aspect > 1.2 && size.height < 560 ? Math.min(0.22, 78 / size.height) : 0;
+    const hudBottom = aspect > 1.2 && h < 560 && !strip ? Math.min(0.22, 78 / h) : 0;
+    // We size the frustum ourselves (the view offset below needs the full virtual width), so
+    // R3F must not reset the aspect on resize.
+    (camera as THREE.PerspectiveCamera & { manual?: boolean }).manual = true;
     if (override) {
       camera.fov = override.fov;
       camera.position.set(...override.position);
       camera.lookAt(...override.target);
     } else {
-      const pose = fitBroadcastCamera(MERIDIAN_ARENA, aspect, side, portraitSlot, hudBottom);
+      // Fit the arena into the free part of the screen, then shift the image so it is centred
+      // there: setViewOffset moves the projection without changing perspective, and raycasts
+      // (aiming) use the same projection, so pointer → arena stays exact.
+      const pose = fitBroadcastCamera(
+        MERIDIAN_ARENA,
+        aspect * (1 - strip),
+        side,
+        portraitSlot,
+        hudBottom,
+        band,
+      );
       camera.fov = pose.fov;
       camera.position.copy(pose.position);
       camera.lookAt(pose.target);
     }
+    const shift = (strip * w) / 2;
+    camera.aspect = (w + 2 * shift) / h;
+    if (shift > 0)
+      camera.setViewOffset(w + 2 * shift, h, controlsSide === 'right' ? 2 * shift : 0, 0, w, h);
+    else camera.clearViewOffset();
     camera.updateProjectionMatrix();
     base.current.copy(camera.position);
     view.camera = camera;
-  }, [camera, size.width, size.height, side, portraitSlot, override]);
+  }, [camera, size.width, size.height, side, portraitSlot, override, controlsSide]);
   useEffect(
     () =>
       client.events.on((e) => {

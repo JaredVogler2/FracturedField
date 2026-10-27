@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { DEFAULT_LOADOUT, type AdvancedAbilityId } from '@ff/game-data';
-import type { InputSource, PlayerSlot } from '@ff/protocol';
+import type { PlayerSlot } from '@ff/protocol';
 import type { BotDifficulty } from '@ff/sim';
 import { GameClient } from '../game/client';
 import { useHud } from '../game/store';
@@ -15,7 +15,15 @@ import type { SeatLoadouts, SessionDriver } from '../net/session';
 import { GameClientProvider, useGameClient } from '../render/frame-context';
 import { GameScene } from '../render/Scene';
 import { InputManager, type SeatConfig } from '../input/manager';
-import { P1_BINDINGS, P2_BINDINGS, SOLO_BINDINGS } from '../input/bindings';
+import { P1_BINDINGS, P2_BINDINGS, SOLO_BINDINGS, applyOverride } from '../input/bindings';
+import {
+  MODE_SOURCE,
+  controlModes,
+  defaultMode,
+  detectCapabilities,
+  type Capabilities,
+  type ControlMode,
+} from '../input/capabilities';
 import { useEventAudio } from '../audio/event-audio';
 import { sfx } from '../audio/sfx';
 import { Hud, type HudSeat } from './Hud';
@@ -23,11 +31,26 @@ import { Banners, DenyToast, MatchEndPanel, PauseMenu } from './Overlays';
 import { TouchControls } from './TouchControls';
 import { LoadoutPicker, parseLoadout } from './Loadout';
 import { CameraControl } from './camera/CameraControl';
+import { ControlPicker } from './controls/ControlPicker';
+import { ModeChip } from './controls/ModeChip';
+import { MotionPanel } from './controls/MotionPanel';
+import { GamepadNotice } from './controls/GamepadNotice';
 import { NetStatusOverlay, OnlineLobby } from './Online';
 import { teamOf } from './teams';
 import { DevHud } from '../hud/DevHud';
 import { NetPanel } from '../hud/NetPanel';
 import { view } from '../render/view';
+
+/**
+ * ?test=1 only: what this device sent (source and action, never the aim), numbered so an E2E
+ * check can look at what came after a point in time.
+ */
+const intentLog:
+  { n: number; slot: number; source: string; action: string; phase: string }[] | null =
+  typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('test')
+    ? []
+    : null;
+let intentCount = 0;
 
 export type MatchMode =
   | { kind: 'attract' }
@@ -43,7 +66,7 @@ interface ModeSetup {
   readonly labels: readonly [string, string];
 }
 
-function setupFor(mode: MatchMode, touch: boolean): ModeSetup {
+function setupFor(mode: MatchMode): ModeSetup {
   switch (mode.kind) {
     case 'attract':
       return {
@@ -60,15 +83,9 @@ function setupFor(mode: MatchMode, touch: boolean): ModeSetup {
       return {
         localSlots: [0],
         bots: [{ slot: 1, difficulty: mode.difficulty }],
-        seats: [{ slot: 0, bindings: SOLO_BINDINGS, pointer: true, touch }],
+        seats: [{ slot: 0, bindings: SOLO_BINDINGS, pointer: true, gamepad: true }],
         hudSeats: [
-          // Touch players get on-screen buttons; keyboard hints would only confuse them.
-          {
-            slot: 0,
-            label: 'YOU · EMBER',
-            ...(touch ? {} : { bindings: SOLO_BINDINGS }),
-            local: true,
-          },
+          { slot: 0, label: 'YOU · EMBER', bindings: SOLO_BINDINGS, local: true },
           { slot: 1, label: `BOT · ${mode.difficulty.toUpperCase()}`, local: false },
         ],
         labels: ['YOU', 'BOT'],
@@ -78,8 +95,8 @@ function setupFor(mode: MatchMode, touch: boolean): ModeSetup {
         localSlots: [0, 1],
         bots: [],
         seats: [
-          { slot: 0, bindings: P1_BINDINGS, pointer: true, touch: false },
-          { slot: 1, bindings: P2_BINDINGS, pointer: false, touch: false },
+          { slot: 0, bindings: P1_BINDINGS, pointer: true },
+          { slot: 1, bindings: P2_BINDINGS, pointer: false },
         ],
         hudSeats: [
           { slot: 0, label: 'PLAYER 1 · EMBER', bindings: P1_BINDINGS, local: true },
@@ -94,14 +111,9 @@ function setupFor(mode: MatchMode, touch: boolean): ModeSetup {
       return {
         localSlots: [me],
         bots: [],
-        seats: [{ slot: me, bindings: SOLO_BINDINGS, pointer: true, touch }],
+        seats: [{ slot: me, bindings: SOLO_BINDINGS, pointer: true, gamepad: true }],
         hudSeats: [
-          {
-            slot: me,
-            label: `YOU · ${teamOf(me).name}`,
-            ...(touch ? {} : { bindings: SOLO_BINDINGS }),
-            local: true,
-          },
+          { slot: me, label: `YOU · ${teamOf(me).name}`, bindings: SOLO_BINDINGS, local: true },
           { slot: rival, label: `RIVAL · ${teamOf(rival).name}`, local: false },
         ],
         labels,
@@ -110,8 +122,15 @@ function setupFor(mode: MatchMode, touch: boolean): ModeSetup {
   }
 }
 
-const isTouchDevice = () =>
-  typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
+/**
+ * The mode a match opens in: the player's last choice when this device still offers it — except
+ * motion, whose sensor permission needs a fresh tap (iOS), so it reopens as touch.
+ */
+function startingMode(saved: ControlMode | null, caps: Capabilities): ControlMode {
+  const offered = (m: ControlMode) => controlModes(caps).some((o) => o.mode === m && o.available);
+  if (saved === 'motion') return offered('touch') ? 'touch' : defaultMode(caps);
+  return saved && offered(saved) ? saved : defaultMode(caps);
+}
 
 /**
  * One match (or the attract demo behind the menu): owns the GameClient, the local authority
@@ -131,8 +150,9 @@ export function MatchView({
   onExit: () => void;
   onOpenControls: () => void;
 }) {
-  const touch = useMemo(() => isTouchDevice(), []);
-  const setup = useMemo(() => setupFor(mode, touch), [mode, touch]);
+  const caps = useMemo(() => detectCapabilities(), []);
+  const touch = caps.touch;
+  const setup = useMemo(() => setupFor(mode), [mode]);
   const online = mode.kind === 'online' ? mode.seat : null;
   const client = useMemo(
     () => new GameClient(online ? { delayTicks: 3, remote: true } : 1),
@@ -145,10 +165,43 @@ export function MatchView({
   const [paused, setPaused] = useState(false);
   const [rematchWaiting, setRematchWaiting] = useState(false);
   const [denied, setDenied] = useState<ReadonlySet<string>>(new Set());
-  const [inputMode, setInputMode] = useState<InputSource>(touch ? 'touch' : 'keyboard');
+  const controls = useSettings((s) => s.controls);
+  const bindingOverride = useSettings((s) => s.bindings);
+  const [controlMode, setControlModeState] = useState<ControlMode>(() =>
+    startingMode(useSettings.getState().controls.mode, caps),
+  );
+  const setControlMode = useCallback((m: ControlMode) => {
+    setControlModeState(m);
+    const s = useSettings.getState();
+    s.set('controls', { ...s.controls, mode: m });
+  }, []);
+  // What READY reports for the chosen mode (the authority treats them all alike).
+  const inputMode = MODE_SOURCE[controlMode];
   const [manager, setManager] = useState<InputManager | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
-  const fallbackMode: InputSource = touch ? 'touch' : 'keyboard';
+  const fallbackMode: ControlMode = touch ? 'touch' : 'desktop';
+  const soloSlot = setup.localSlots.length === 1 ? setup.localSlots[0]! : null;
+  const soloBindings = useMemo(
+    () => applyOverride(SOLO_BINDINGS, bindingOverride),
+    [bindingOverride],
+  );
+  const motionCfg = useMemo(
+    () => ({ style: controls.motionStyle, sensitivity: controls.motionSensitivity }),
+    [controls.motionStyle, controls.motionSensitivity],
+  );
+  // A replaced manager starts in the current mode (its first intents already carry its source).
+  const modeRef = useRef(controlMode);
+  // Hot-swap the seat's adapters (never recreate the manager: its intent stream continues).
+  useEffect(() => {
+    modeRef.current = controlMode;
+    if (manager && soloSlot !== null) manager.setMode(soloSlot, controlMode, motionCfg);
+  }, [manager, soloSlot, controlMode, motionCfg]);
+  useEffect(() => {
+    if (manager && soloSlot !== null) manager.motion(soloSlot)?.configure(motionCfg);
+  }, [manager, soloSlot, motionCfg]);
+  useEffect(() => {
+    if (manager && soloSlot !== null) manager.setBindings(soloSlot, soloBindings);
+  }, [manager, soloSlot, soloBindings]);
   const matchEnd = useHud((s) => s.matchEnd);
   const phase = useHud((s) => s.match?.phase);
   const lobby = useHud((s) => s.lobby);
@@ -237,6 +290,7 @@ export function MatchView({
       casts: () => [...casts],
       snapshot: () => client.buffer.latest,
       project: (x: number, y: number, z: number) => view.worldToClient(x, y, z),
+      intents: () => [...(intentLog ?? [])],
       slot: () => useHud.getState().mySlot,
       transport: () => useHud.getState().transport.state,
       lobby: () => useHud.getState().lobby,
@@ -429,11 +483,22 @@ export function MatchView({
     () =>
       setup.hudSeats.map((h) => {
         const picks = h.local ? seatLoadouts[h.slot] : rivalLoadout;
-        return picks ? { ...h, loadout: picks } : h;
+        let seat: HudSeat = picks ? { ...h, loadout: picks } : h;
+        // A single local player sees key hints only when playing with the keyboard.
+        if (h.local && h.slot === soloSlot) {
+          const { bindings: _hints, ...rest } = seat;
+          seat = controlMode === 'desktop' ? { ...rest, bindings: soloBindings } : rest;
+        }
+        return seat;
       }),
-    [setup.hudSeats, seatLoadouts, rivalLoadout],
+    [setup.hudSeats, seatLoadouts, rivalLoadout, soloSlot, controlMode, soloBindings],
   );
   const serverReady = online ? (lobby?.seats[mySlot].ready ?? started) : started;
+  // On-screen thumb controls (touch, motion, simplified): the HUD and camera make room for them.
+  const touchUi =
+    soloSlot !== null &&
+    mode.kind !== 'attract' &&
+    (controlMode === 'touch' || controlMode === 'motion' || controlMode === 'accessible');
   const inLobby = online !== null && !matchEnd && (phase === undefined || phase === 'lobby');
   const matchNote = !online
     ? undefined
@@ -449,16 +514,18 @@ export function MatchView({
 
   return (
     <GameClientProvider client={client}>
-      <div className="stage">
+      <div className={`stage${touchUi ? ` touch-ui hand-${controls.hand}` : ''}`}>
         <GameScene
           quality={qualityOverride ?? resolveQuality(quality)}
           localSlots={setup.localSlots}
           side={mySlot === 1 ? -1 : 1}
           portraitSlot={mySlot}
+          controlsSide={touchUi ? controls.hand : null}
         >
           {setup.seats.length > 0 ? (
             <InputBridge
               seats={seats}
+              startMode={modeRef}
               managerRef={input}
               session={session}
               onManager={setManager}
@@ -475,12 +542,35 @@ export function MatchView({
               mirror={mySlot === 1}
               actionFor={actionFor}
             />
-            {touch && setup.localSlots.length === 1 ? (
+            {touchUi && soloSlot !== null ? (
               <TouchControls
                 manager={input}
-                slot={setup.localSlots[0]!}
-                loadout={seatLoadouts[setup.localSlots[0]!] ?? DEFAULT_LOADOUT}
+                slot={soloSlot}
+                loadout={seatLoadouts[soloSlot] ?? DEFAULT_LOADOUT}
+                hand={controls.hand}
+                sticky={controlMode === 'accessible' || controls.sticky}
+                simplified={controlMode === 'accessible'}
               />
+            ) : null}
+            {soloSlot !== null && controlMode === 'motion' ? (
+              <MotionPanel
+                onRecenter={() => manager?.motion(soloSlot)?.recenter()}
+                onUseTouch={() => setControlMode('touch')}
+              />
+            ) : null}
+            {soloSlot !== null ? <GamepadNotice /> : null}
+            {soloSlot !== null && (started || (online !== null && !inLobby)) ? (
+              <ModeChip
+                caps={caps}
+                mode={controlMode}
+                onChange={setControlMode}
+                cameraReady={cameraReady}
+              />
+            ) : null}
+            {touch ? (
+              <div className="rotate-hint" aria-hidden="true">
+                Rotate your phone for the full arena
+              </div>
             ) : null}
             <button
               className="icon-btn pause-btn"
@@ -496,21 +586,21 @@ export function MatchView({
             mode={mode}
             onStart={start}
             onExit={exit}
-            touch={touch}
-            inputMode={inputMode}
-            onInputMode={setInputMode}
+            caps={caps}
+            controlMode={controlMode}
+            onControlMode={setControlMode}
             cameraReady={cameraReady}
           />
         ) : null}
-        {inputMode === 'camera' && setup.localSlots.length === 1 ? (
+        {controlMode === 'camera' && soloSlot !== null ? (
           <CameraControl
-            slot={setup.localSlots[0]!}
+            slot={soloSlot}
             manager={manager}
-            loadout={seatLoadouts[setup.localSlots[0]!] ?? DEFAULT_LOADOUT}
+            loadout={seatLoadouts[soloSlot] ?? DEFAULT_LOADOUT}
             paused={paused || matchEnd !== null || (online ? inLobby : !started)}
             onFallback={() => {
               setCameraReady(false);
-              setInputMode(fallbackMode);
+              setControlMode(fallbackMode);
             }}
             onReady={setCameraReady}
           />
@@ -519,8 +609,9 @@ export function MatchView({
           <OnlineLobby
             seat={online}
             ready={serverReady}
-            inputMode={inputMode}
-            onInputMode={setInputMode}
+            caps={caps}
+            controlMode={controlMode}
+            onControlMode={setControlMode}
             onReady={setOnlineReady}
             onLeave={exit}
             cameraReady={cameraReady}
@@ -563,11 +654,14 @@ export function MatchView({
 /** Lives inside the Canvas so it can bind to the real canvas element and pump aim per frame. */
 function InputBridge({
   seats,
+  startMode,
   managerRef,
   session,
   onManager,
 }: {
   seats: readonly SeatConfig[];
+  /** The single local player's current control mode (shared-keyboard duel seats have none). */
+  startMode: React.RefObject<ControlMode>;
   managerRef: React.RefObject<InputManager | null>;
   session: React.RefObject<SessionDriver | null>;
   /** Adapters outside the canvas (camera) re-attach when the manager is replaced. */
@@ -576,9 +670,15 @@ function InputBridge({
   const gl = useThree((s) => s.gl);
   const client = useGameClient();
   useEffect(() => {
-    const m = new InputManager(seats, gl.domElement, (slot, intent) =>
-      session.current?.sendIntent(slot, intent),
-    );
+    const configs = seats.length === 1 ? [{ ...seats[0]!, mode: startMode.current }] : seats;
+    const m = new InputManager(configs, gl.domElement, (slot, intent) => {
+      if (intentLog) {
+        const { source, action, phase } = intent;
+        intentLog.push({ n: ++intentCount, slot, source, action, phase });
+        if (intentLog.length > 600) intentLog.shift();
+      }
+      session.current?.sendIntent(slot, intent);
+    });
     managerRef.current = m;
     onManager(m);
     return () => {
@@ -586,7 +686,7 @@ function InputBridge({
       managerRef.current = null;
       onManager(null);
     };
-  }, [gl, seats, managerRef, session, onManager]);
+  }, [gl, seats, startMode, managerRef, session, onManager]);
   useFrame(() => {
     managerRef.current?.update(client.buffer.latest);
   });
@@ -597,23 +697,28 @@ function ReadyGate({
   mode,
   onStart,
   onExit,
-  touch,
-  inputMode,
-  onInputMode,
+  caps,
+  controlMode,
+  onControlMode,
   cameraReady,
 }: {
   mode: MatchMode;
   onStart: () => void;
   onExit: () => void;
-  touch: boolean;
-  inputMode: InputSource;
-  onInputMode: (m: InputSource) => void;
+  caps: Capabilities;
+  controlMode: ControlMode;
+  onControlMode: (m: ControlMode) => void;
   cameraReady: boolean;
 }) {
   const loadout = useSettings((s) => s.loadout);
   const loadoutP2 = useSettings((s) => s.loadoutP2);
   const set = (key: 'loadout' | 'loadoutP2', v: [AdvancedAbilityId, AdvancedAbilityId]) =>
     useSettings.getState().set(key, v);
+  // Focus START without scrolling the panel (on short phone screens that hid the title).
+  const startRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    startRef.current?.focus({ preventScroll: true });
+  }, []);
   return (
     <div className="modal-backdrop soft">
       <div className="panel ready-gate" data-testid="ready-gate">
@@ -621,11 +726,26 @@ function ReadyGate({
           {mode.kind === 'duel' ? 'LOCAL DUEL · SHARED SCREEN' : 'QUICK MATCH · VS BOT'}
         </div>
         <div className="me-title">Drive the Rift Core into the rival gate</div>
-        {touch ? (
+        {mode.kind !== 'duel' && controlMode === 'motion' ? (
           <ul className="hints">
-            <li>Drag on the arena to move your force point</li>
+            <li>Tilt your phone to move your force point · RECENTER re-zeroes it</li>
             <li>PULSE pushes the core away from your force point</li>
-            <li>LIFT (hold) raises it · SWEEP lays a crosswind · GUARD raises a barrier</li>
+            <li>LIFT (hold) raises it · swipe the SWEEP pad for a crosswind · GUARD shields</li>
+            <li>WET soaks the ground · HEAT sets a flame · your two picks below</li>
+          </ul>
+        ) : mode.kind !== 'duel' && (controlMode === 'touch' || controlMode === 'accessible') ? (
+          <ul className="hints">
+            <li>
+              {controlMode === 'accessible'
+                ? 'Tap the arena where your force point should go'
+                : 'Drag on the arena to move your force point'}
+            </li>
+            <li>PULSE pushes the core away from your force point</li>
+            <li>
+              {controlMode === 'accessible'
+                ? 'LIFT toggles on and off · SWEEP blows forward or swipe its pad · GUARD shields'
+                : 'LIFT (hold) raises it · swipe the SWEEP pad for a crosswind · GUARD shields'}
+            </li>
             <li>WET soaks the ground · HEAT sets a flame · your two picks below</li>
           </ul>
         ) : mode.kind === 'duel' ? (
@@ -666,10 +786,10 @@ function ReadyGate({
           <LoadoutPicker value={loadout} onChange={(v) => set('loadout', v)} />
         )}
         {mode.kind === 'bot' ? (
-          <ControlChoice
-            value={inputMode}
-            touch={touch}
-            onChange={onInputMode}
+          <ControlPicker
+            caps={caps}
+            value={controlMode}
+            onChange={onControlMode}
             cameraReady={cameraReady}
           />
         ) : null}
@@ -678,8 +798,8 @@ function ReadyGate({
             className="btn primary big"
             onClick={onStart}
             data-testid="start-match"
-            disabled={inputMode === 'camera' && !cameraReady}
-            autoFocus
+            disabled={mode.kind === 'bot' && controlMode === 'camera' && !cameraReady}
+            ref={startRef}
           >
             Start match
           </button>
@@ -688,43 +808,6 @@ function ReadyGate({
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-/** Keyboard & mouse / touch / camera for the local player (camera opens its own setup). */
-export function ControlChoice({
-  value,
-  touch,
-  onChange,
-  cameraReady,
-  disabled = false,
-}: {
-  value: InputSource;
-  touch: boolean;
-  onChange: (m: InputSource) => void;
-  cameraReady: boolean;
-  disabled?: boolean;
-}) {
-  const options: [InputSource, string][] = [
-    [touch ? 'touch' : 'keyboard', touch ? 'Touch' : 'Keyboard & mouse'],
-    ['camera', cameraReady ? 'Camera ✓' : 'Camera'],
-  ];
-  return (
-    <div className="seg control-choice" role="radiogroup" aria-label="Your controls">
-      {options.map(([m, label]) => (
-        <button
-          key={m}
-          role="radio"
-          aria-checked={value === m}
-          className={value === m ? 'on' : ''}
-          disabled={disabled}
-          onClick={() => onChange(m)}
-          data-testid={`controls-${m}`}
-        >
-          {label}
-        </button>
-      ))}
     </div>
   );
 }

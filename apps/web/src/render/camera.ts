@@ -20,6 +20,8 @@ export function fitBroadcastCamera(
   portraitSlot: 0 | 1 = 0,
   /** Fraction of the viewport height reserved at the bottom for HUD panels (0..0.4). */
   hudBottom = 0,
+  /** Fraction reserved at the bottom for on-screen thumb controls (portrait; 0..0.4). */
+  controlsBottom = 0,
 ): CameraPose {
   const portrait = aspect < 0.9;
   const fov = portrait ? 52 : 38;
@@ -48,7 +50,14 @@ export function fitBroadcastCamera(
   const target = new THREE.Vector3(0, 0, portrait ? 0 : side * 1.2);
   const cam = new THREE.PerspectiveCamera(fov, aspect, 0.5, 1200);
   // NDC bounds the arena must fit inside; the bottom edge rises to keep clear of HUD panels.
-  const margin = { x: 0.95, yTop: 0.84, yBottom: Math.min(-0.5, -0.9 + hudBottom * 2) };
+  const margin = {
+    x: 0.95,
+    yTop: 0.84,
+    yBottom:
+      controlsBottom > 0
+        ? -1 + 2 * Math.min(0.4, controlsBottom) + 0.04
+        : Math.min(-0.5, -0.9 + hudBottom * 2),
+  };
   const fits = (d: number): boolean => {
     cam.position.copy(target).addScaledVector(dir, -d);
     cam.lookAt(target);

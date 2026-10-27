@@ -1,4 +1,4 @@
-import { DEFAULT_ABILITIES, DEFAULT_RULES, MERIDIAN_ARENA } from '@ff/game-data';
+import { DEFAULT_ABILITIES } from '@ff/game-data';
 import {
   Calibrator,
   GestureEngine,
@@ -10,38 +10,14 @@ import {
   type LandmarksFrame,
 } from '@ff/gestures';
 import type { ActionEdge } from '@ff/controls';
-import type { PlayerSlot } from '@ff/protocol';
 import type { SeatInput } from '../manager';
 import { view } from '../../render/view';
 import { useCamera } from './camera-store';
+import { screenAimToArena } from '../screen-aim';
 
 export type CameraControlMode = 'calibrate' | 'practice' | 'play';
 
-/**
- * Screen-space aim ([-1, 1]², x right, y up) → a point on the seat's legal half of the arena, using
- * the current camera's ground axes so "right" and "up" match what the player sees (including the
- * mirrored view of seat 1). The seat clamps it to the legal region like every other input.
- */
-export function screenAimToArena(
-  slot: PlayerSlot,
-  sx: number,
-  sy: number,
-): { x: number; z: number } {
-  const m = DEFAULT_RULES.manipulator;
-  const L = MERIDIAN_ARENA.halfLength - m.wallMargin;
-  const W = MERIDIAN_ARENA.halfWidth - m.wallMargin;
-  const minX = slot === 0 ? -L : -m.midlineReach;
-  const maxX = slot === 0 ? m.midlineReach : L;
-  const cx = (minX + maxX) / 2;
-  const hx = (maxX - minX) / 2;
-  const { right, up } = view.groundAxes();
-  const er = hx * Math.abs(right.x) + W * Math.abs(right.z);
-  const eu = hx * Math.abs(up.x) + W * Math.abs(up.z);
-  return {
-    x: cx + right.x * sx * er + up.x * sy * eu,
-    z: right.z * sx * er + up.z * sy * eu,
-  };
-}
+export { screenAimToArena } from '../screen-aim';
 
 /**
  * Camera input adapter for one local seat. Landmark frames (from the on-device vision worker, or
@@ -183,7 +159,7 @@ export class CameraController {
     if (!seat || this.mode !== 'play') return;
     for (const e of events) {
       const edge = this.toEdge(e, seat);
-      if (edge) seat.edge(edge, now);
+      if (edge) seat.edge(edge, now, 'camera');
     }
   }
 

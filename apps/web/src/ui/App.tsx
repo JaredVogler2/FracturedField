@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { isRoomCode, normalizeRoomCode } from '@ff/protocol';
 import type { BotDifficulty } from '@ff/sim';
 import { MatchView, type MatchMode } from './MatchView';
@@ -7,16 +7,21 @@ import { loadSeat, type StoredSeat } from '../net/seat-store';
 import { useHistory } from '../game/history';
 import { useSettings } from '../game/settings';
 import { sfx } from '../audio/sfx';
-import {
-  keyLabel,
-  P1_BINDINGS,
-  P2_BINDINGS,
-  SOLO_BINDINGS,
-  type KeyBindings,
-} from '../input/bindings';
+import { keyLabel, P1_BINDINGS, P2_BINDINGS, type KeyBindings } from '../input/bindings';
 import { Glyph } from './Glyph';
+import { RebindTable, TouchMotionSettings } from './controls/Rebind';
 
 type Panel = null | 'controls' | 'settings' | 'online';
+
+/**
+ * Focuses a panel's close button on open without scrolling to it: long panels must open at the
+ * top (where the title is), not at the button at the bottom.
+ */
+function useInitialFocus() {
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => ref.current?.focus({ preventScroll: true }), []);
+  return ref;
+}
 
 function initialMode(): { mode: MatchMode; fast: boolean; seed?: number; joinCode?: string } {
   const params = new URLSearchParams(window.location.search);
@@ -207,6 +212,7 @@ function BindingTable({ title, b }: { title: string; b: KeyBindings }) {
 }
 
 function ControlsPanel({ onClose }: { onClose: () => void }) {
+  const closeRef = useInitialFocus();
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
@@ -221,13 +227,19 @@ function ControlsPanel({ onClose }: { onClose: () => void }) {
           Your force point moves at the same top speed for everyone.
         </p>
         <div className="binding-grid">
-          <BindingTable title="SOLO (KEYBOARD + MOUSE)" b={SOLO_BINDINGS} />
+          <RebindTable />
           <BindingTable title="DUEL · PLAYER 1" b={P1_BINDINGS} />
           <BindingTable title="DUEL · PLAYER 2" b={P2_BINDINGS} />
         </div>
         <p className="muted">
           Mouse: point to aim · left click Pulse · right button hold Lift · wheel Sweep · middle
-          click Guard. Esc / P pauses, M toggles sound. Touch: drag to aim, buttons for abilities.
+          click Guard. Esc / P pauses, M toggles sound.
+        </p>
+        <p className="muted">
+          Touch: drag (or tap) on the arena to aim; thumb buttons cast; swipe the SWEEP pad in the
+          wind’s direction. Motion: tilt the phone to aim, RECENTER re-zeroes. Game controller: left
+          stick aims · A / RT Pulse · B Guard · X Wet · Y Heat · LB / RB picks · LT hold Lift ·
+          D-pad Sweep · Start pauses.
         </p>
         <div className="me-eyebrow">ELEMENTS</div>
         <ul className="hints element-rules">
@@ -245,7 +257,7 @@ function ControlsPanel({ onClose }: { onClose: () => void }) {
             steel lodestones.
           </li>
         </ul>
-        <button className="btn primary" onClick={onClose} autoFocus>
+        <button className="btn primary" onClick={onClose} ref={closeRef}>
           Close
         </button>
       </div>
@@ -320,6 +332,7 @@ function CameraSettings() {
 
 function SettingsPanel({ onClose }: { onClose: () => void }) {
   const s = useSettings();
+  const doneRef = useInitialFocus();
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
@@ -384,8 +397,9 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
             onChange={(e) => s.set('devHud', e.target.checked)}
           />
         </label>
+        <TouchMotionSettings />
         <CameraSettings />
-        <button className="btn primary" onClick={onClose} autoFocus>
+        <button className="btn primary" onClick={onClose} ref={doneRef}>
           Done
         </button>
       </div>

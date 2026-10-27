@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { DEFAULT_RULES, type AdvancedAbilityId } from '@ff/game-data';
-import { normalizeRoomCode, type InputSource, type LobbySeat, type PlayerSlot } from '@ff/protocol';
+import { normalizeRoomCode, type LobbySeat, type PlayerSlot } from '@ff/protocol';
 import { useHud } from '../game/store';
 import { checkRoomService, type RoomServiceHealth } from '../net/room-service';
 import { RoomApiError, createRoom, joinRoom } from '../net/room-api';
@@ -8,6 +8,8 @@ import { seatFromGrant, saveSeat, type StoredSeat } from '../net/seat-store';
 import { Glyph } from './Glyph';
 import { LoadoutPicker, loadoutLabel } from './Loadout';
 import { teamOf } from './teams';
+import { ControlPicker } from './controls/ControlPicker';
+import type { Capabilities, ControlMode } from '../input/capabilities';
 
 export function inviteLink(code: string): string {
   return `${window.location.origin}/?room=${encodeURIComponent(code)}`;
@@ -162,8 +164,9 @@ function SeatRow({ slot, you, seat }: { slot: PlayerSlot; you: boolean; seat: Lo
 export function OnlineLobby({
   seat,
   ready,
-  inputMode,
-  onInputMode,
+  caps,
+  controlMode,
+  onControlMode,
   onReady,
   onLeave,
   cameraReady,
@@ -172,8 +175,9 @@ export function OnlineLobby({
 }: {
   seat: StoredSeat;
   ready: boolean;
-  inputMode: InputSource;
-  onInputMode: (m: InputSource) => void;
+  caps: Capabilities;
+  controlMode: ControlMode;
+  onControlMode: (m: ControlMode) => void;
   onReady: (ready: boolean) => void;
   onLeave: () => void;
   /** Camera setup finished (READY needs it when the camera is chosen). */
@@ -241,27 +245,14 @@ export function OnlineLobby({
           <SeatRow slot={mine} you seat={lobby?.seats[mine] ?? null} />
           <SeatRow slot={other} you={false} seat={rival} />
         </div>
-        <div className="seg" role="radiogroup" aria-label="Your controls">
-          {(
-            [
-              ['keyboard', 'Keyboard & mouse'],
-              ['touch', 'Touch'],
-              ['camera', cameraReady ? 'Camera ✓' : 'Camera'],
-            ] as const
-          ).map(([m, label]) => (
-            <button
-              key={m}
-              role="radio"
-              aria-checked={inputMode === m}
-              className={inputMode === m ? 'on' : ''}
-              disabled={ready}
-              onClick={() => onInputMode(m)}
-              data-testid={`controls-${m}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <ControlPicker
+          caps={caps}
+          value={controlMode}
+          onChange={onControlMode}
+          cameraReady={cameraReady}
+          disabled={ready}
+          compact
+        />
         <LoadoutPicker value={loadout} onChange={onLoadout} disabled={ready} />
         <p className="muted" data-testid="lobby-hint" aria-live="polite">
           {hint}
@@ -270,7 +261,7 @@ export function OnlineLobby({
           <button
             className="btn primary big"
             data-testid="ready"
-            disabled={!connected || (!ready && inputMode === 'camera' && !cameraReady)}
+            disabled={!connected || (!ready && controlMode === 'camera' && !cameraReady)}
             onClick={() => onReady(!ready)}
           >
             {ready ? 'Not ready' : 'Ready'}
