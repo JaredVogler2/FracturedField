@@ -28,6 +28,13 @@ test('no camera permission (headless browser cannot prompt) → message, fallbac
   await page.goto('/?mode=bot&difficulty=easy&test=1&quality=low&seed=3');
   await page.getByTestId('controls-camera').click();
   await expect(page.getByTestId('start-match')).toBeDisabled();
+  // Picking the rear camera warns that it faces away from this screen.
+  const lens = page.getByTestId('camera-setup').getByRole('combobox', { name: /^Camera/ });
+  await expect(page.getByTestId('cam-rear-warn')).toBeHidden();
+  await lens.selectOption('environment');
+  await expect(page.getByTestId('cam-rear-warn')).toBeVisible();
+  await lens.selectOption('user');
+  await expect(page.getByTestId('cam-rear-warn')).toBeHidden();
   await page.getByTestId('camera-start').click();
   await expect(page.getByTestId('camera-error')).toBeVisible({ timeout: 20_000 });
   await page.getByTestId('camera-fallback').click();

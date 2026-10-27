@@ -446,6 +446,13 @@ export function CameraControl({
                 </select>
               </label>
             </div>
+            {prefs.facing === 'environment' ? (
+              <p className="muted cam-warn" data-testid="cam-rear-warn">
+                The rear camera points away from this screen, so you won’t see the game on it. Use
+                it only when the game shows on another screen — this device mirrored to a TV or
+                monitor — with the device on a stand facing you.
+              </p>
+            ) : null}
             <div className="row">
               <button
                 className="btn primary big"
