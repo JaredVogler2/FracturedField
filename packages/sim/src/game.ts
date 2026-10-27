@@ -90,6 +90,11 @@ interface PlayerState {
   grasp: { target: EntityId; ticks: number } | null;
   /** Ticks before the hand may grip again after letting go. */
   regrip: number;
+  /**
+   * The hand's velocity (m/s) as a stroke or a carry follows it: the force point's motion,
+   * smoothed so tracking jitter averages out. Zero while no hand is described.
+   */
+  hv: { x: number; z: number };
 }
 
 interface HandReading {
@@ -446,6 +451,7 @@ export class GameWorld {
       hand: { ...NEUTRAL_HAND },
       grasp: null,
       regrip: 0,
+      hv: { x: 0, z: 0 },
     };
   }
 
@@ -543,6 +549,7 @@ export class GameWorld {
       this.releaseHold(p, true);
       this.releaseGrasp(p, true);
       p.hand = { ...NEUTRAL_HAND };
+      p.hv = { x: 0, z: 0 };
       p.tx = p.mx;
       p.tz = p.mz;
     }
@@ -1375,15 +1382,33 @@ export class GameWorld {
     let coreHeld = false;
     for (const p of this.players) {
       const hand = this.handNow(p);
+      // Only a described hand acts: keys, touch and the bot move a force point, never a hand.
+      const present = hand !== NEUTRAL_HAND;
+      this.trackHand(p, present);
       if (!p.grasp && !p.hold && p.regrip === 0 && hand.grip >= H.engageGrip) this.startGrasp(p);
       if (p.grasp) {
         // A gripping hand neither sweeps nor pushes: everything goes into the hold.
         if (this.carry(p, hand) && p.grasp?.target === this.coreId) coreHeld = true;
         continue;
       }
-      this.sweepAndPush(p, hand);
+      if (present) this.sweepAndPush(p, hand);
     }
     return coreHeld;
+  }
+
+  /**
+   * Smooths the force point's motion into the hand's velocity: a jittering tracked hand held
+   * still averages out to rest, while a stroke or a swing comes through (lagging ~0.1 s).
+   */
+  private trackHand(p: PlayerState, present: boolean): void {
+    if (!present) {
+      p.hv.x = p.hv.z = 0;
+      return;
+    }
+    const raw = this.handVel[p.slot];
+    const a = 1 - Math.exp(-this.physics.dt / this.rules.hand.velocitySmoothing);
+    p.hv.x += (raw.x - p.hv.x) * a;
+    p.hv.z += (raw.z - p.hv.z) * a;
   }
 
   /** Closes the hand on the nearest movable body within reach (the core favoured). */
@@ -1435,7 +1460,7 @@ export class GameWorld {
     const firm = smoothstep01((hand.grip - H.releaseGrip) / (1 - H.releaseGrip));
     const k = (H.stiffness[0] + (H.stiffness[1] - H.stiffness[0]) * firm) * ms;
     const c = 2 * H.dampingRatio * Math.sqrt(k);
-    const vm = this.handVel[p.slot];
+    const vm = p.hv;
     let ax = k * (p.mx - t.x) + c * (vm.x - v.x);
     let ay = k * (H.holdHeight - t.y) - c * v.y;
     let az = k * (p.mz - t.z) + c * (vm.z - v.z);
@@ -1478,9 +1503,11 @@ export class GameWorld {
    */
   private sweepAndPush(p: PlayerState, hand: Readonly<HandReading>): void {
     const H = this.rules.hand;
-    const vm = this.handVel[p.slot];
+    const vm = p.hv;
     const speed = length2(vm.x, vm.z);
-    const sweeping = speed >= H.minSweepSpeed;
+    // A stroke fades in above the threshold speed (no kick at it); slower motion drags nothing.
+    const stroke = smoothstep01((speed - H.minSweepSpeed) / H.minSweepSpeed);
+    const sweeping = stroke > 0;
     const push = deadZone(hand.push, H.pushDeadZone);
     if (!sweeping && push === 0) return;
     const ux = sweeping ? vm.x / speed : 0;
@@ -1506,6 +1533,7 @@ export class GameWorld {
           const a =
             Math.min(H.maxSweepAcceleration, H.sweepGain * along) *
             smoothstep01(1 - r / H.sweepRadius) *
+            stroke *
             ms;
           ax += ux * a;
           az += uz * a;
@@ -2593,7 +2621,13 @@ export class GameWorld {
       if (p.grasp) h.str('grasp').int(p.grasp.target).int(p.grasp.ticks);
       if (p.regrip > 0) h.str('regrip').int(p.regrip);
       if (p.hand.tick >= 0)
-        h.str('hand').num(p.hand.grip).num(p.hand.push).num(p.hand.twist).int(p.hand.tick);
+        h.str('hand')
+          .num(p.hand.grip)
+          .num(p.hand.push)
+          .num(p.hand.twist)
+          .int(p.hand.tick)
+          .num(p.hv.x)
+          .num(p.hv.z);
     }
     if (this.coreSpin !== 0) h.str('spin').num(this.coreSpin);
     for (const f of this.effects) h.int(f.id).num(f.x).num(f.z).int(f.ttl).num(f.dx).num(f.dz);
@@ -2689,6 +2723,11 @@ export class GameWorld {
       this.prevCore = { x, y, z };
       this.coreSpin = 0;
     }
+  }
+
+  /** Debug/test-only (and the Hands Lab's task setup): every hand lets go of what it holds. */
+  debugReleaseGrasps(): void {
+    for (const p of this.players) this.releaseGrasp(p, true);
   }
 
   /** Debug/test-only manipulator placement for fixtures. */
@@ -2880,6 +2919,7 @@ function clonePlayer(p: PlayerState): PlayerState {
     hand: { ...(p.hand ?? NEUTRAL_HAND) },
     grasp: p.grasp ? { ...p.grasp } : null,
     regrip: p.regrip ?? 0,
+    hv: { ...(p.hv ?? { x: 0, z: 0 }) },
   };
 }
 

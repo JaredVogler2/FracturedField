@@ -26,28 +26,30 @@ describe('IntentEmitter', () => {
     expect(out.map((i) => `${i.action}:${i.phase}`)).toEqual(['lift:start', 'lift:end']);
   });
 
-  it('carries the hand channel: clamped, sent on change, kept alive while active, rested when open', () => {
+  it('carries the hand channel: clamped, sent on change, kept alive while described, opened once when dropped', () => {
     const out: ActionIntent[] = [];
     const e = new IntentEmitter(0, 'camera', (_s, i) => out.push(i), 15);
     const at = (t: number, grip: number, push = 0, twist = 0) =>
       e.aim([0.2, 0.1], t, false, { grip, push, twist });
-    at(0, Number.NaN, 7, -7); // hostile values clamp; an open hand is still sent once
+    at(0, Number.NaN, 7, -7); // hostile values clamp
     expect(out.at(-1)!.hand).toEqual({ grip: 0, push: 1, twist: -1 });
     at(100, 0.2); // aim still, but the hand changed
     expect(out).toHaveLength(2);
     at(120, 0.21); // within the throttle and below the change threshold: nothing
     expect(out).toHaveLength(2);
-    // A closed, unmoving hand is re-sent every keep-alive interval (never goes stale).
+    // A described hand — closed, or open and still — is re-sent every keep-alive interval, so the
+    // authority never takes it for gone.
     for (let t = 200; t <= 1000; t += 16) at(t, 1);
+    for (let t = 1016; t <= 1800; t += 16) at(t, 0);
     const kept = out.filter((i) => i.clientTime >= 200).map((i) => i.clientTime);
     for (let k = 1; k < kept.length; k++) expect(kept[k]! - kept[k - 1]!).toBeLessThanOrEqual(120);
-    // Opening the hand is sent once; an open, still hand then rests like a plain aim.
-    const n = out.length;
-    for (let t = 1100; t <= 1400; t += 16) at(t, 0);
-    expect(out.length).toBe(n + 1);
     expect(out.at(-1)!.hand).toEqual({ grip: 0, push: 0, twist: 0 });
-    // Inputs without a hand send none.
-    e.aim([0.5, 0.5], 2000);
+    // An input that stops describing a hand opens it once (what it held is let go at once), then
+    // sends plain aims; inputs that never describe one send none.
+    at(2000, 1);
+    e.aim([0.5, 0.5], 2200);
+    expect(out.at(-1)!.hand).toEqual({ grip: 0, push: 0, twist: 0 });
+    e.aim([0.6, 0.5], 2400);
     expect(out.at(-1)!.hand).toBeUndefined();
   });
 

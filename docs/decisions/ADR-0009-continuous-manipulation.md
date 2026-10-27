@@ -65,6 +65,11 @@ speed, so its velocity is known to the authority, never reported by the client):
   away along the view direction; drawing it back pulls them in. PULSE and DRAW become the strong
   and the gentle ends of one continuous motion.
 
+Only a *described* hand acts: a seat whose input reports no hand (keys, touch without hands-on,
+the bot) moves a force point and nothing else, so play without the channel is unchanged. The
+authority follows the hand's velocity smoothed over ~0.1 s, and a stroke fades in from 1.5 to
+3 m/s, so a tracked hand held still (whose tracking jitters by centimetres) drags nothing.
+
 Every force is an acceleration with a per-seat cap, scaled by mass the same way for every body,
 and costs energy in proportion to the work it does (holding still is cheap, flinging is not).
 Nothing is a teleport or a velocity override; two players' forces superpose under the same caps.
@@ -83,10 +88,14 @@ the same force model, so no input method gains power over another.
 | Input | grip | push | twist |
 |---|---|---|---|
 | Camera | finger closure (calibrated open → fist) | palm approach rate (filtered d log size) | knuckle-line roll vs neutral |
-| Mouse | button held (ramped) | wheel | wheel while gripping (shift) |
+| Mouse | left button held (ramped) | wheel with an open hand | wheel while holding |
 | Touch | finger held on the field near a body | — (flick = fast open-hand stroke) | two-finger rotate |
-| Gamepad | right trigger (analog) | left trigger / stick click | right stick x |
+| Gamepad | right trigger (analog) | right stick y (up pushes) | right stick x (right is clockwise) |
 | Handheld motion | thumb held | forward tilt rate | device roll rate |
+
+As built (06M-M2): the camera, mouse, touch and gamepad rows; the handheld-motion row is not yet
+implemented. The gamepad's push moved from the left trigger to the right stick's y axis so LIFT
+keeps its trigger and the hand's three numbers sit under one thumb and one finger.
 
 ### 5. Proving it with people, not with claims
 

@@ -31,8 +31,13 @@ async function bench(x = -6, z = 0, seed = 3) {
     s.send(slot, 'aim', 'hold', { at, hand, source: 'camera' });
     events.push(...w.stepFixed().events);
   };
+  /** One tick of an input that describes no hand (keys, touch, the bot): aim alone. */
+  const aimOnly = (at: readonly [number, number], slot: PlayerSlot = 0) => {
+    s.send(slot, 'aim', 'hold', { at, source: 'keyboard' });
+    events.push(...w.stepFixed().events);
+  };
   const body = () => w.snapshot().entities.find((e) => e.id === core)!;
-  return { w, core, tick, body, events };
+  return { w, core, tick, aimOnly, body, events };
 }
 
 /** Holds the core with a fist, swings the hand from x0 to x1 along z = 0, and lets go. */
@@ -212,6 +217,31 @@ describe('open hand and push', () => {
     expect(fast[2]).toBeGreaterThan(slow[2] * 1.3);
     // The drag never makes the core outrun the hand that dragged it.
     expect(fast[2]).toBeLessThanOrEqual(12.5);
+  });
+
+  it('without a hand channel — keys, touch, the bot — a force point rushing past drags nothing', async () => {
+    const b = await bench(-3, 0);
+    b.w.debugPlaceManipulator(0, -3.6, -4);
+    for (let i = 1; i <= 20; i++) b.aimOnly([-3.6, -4 + (8 * i) / 20]); // 12 m/s, 0.6 m away
+    expect(Math.hypot(b.body().v[0], b.body().v[2])).toBeLessThan(0.05);
+    b.w.dispose();
+  });
+
+  it('an open hand held still — jittering like a tracked camera hand — leaves a resting core alone', async () => {
+    const b = await bench(-3, 0);
+    b.w.debugPlaceManipulator(0, -3.6, 0);
+    // ±6 cm of tracking jitter, a new aim every other tick (a 15 fps camera), for 5 s.
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) * 2 - 1;
+    let aim: [number, number] = [-3.6, 0];
+    for (let i = 0; i < 150; i++) {
+      if (i % 2 === 0) aim = [-3.6 + rnd() * 0.06, rnd() * 0.06];
+      b.tick(aim, OPEN);
+    }
+    const c = b.body();
+    expect(Math.hypot(c.p[0] + 3, c.p[2])).toBeLessThan(0.1);
+    expect(Math.hypot(c.v[0], c.v[2])).toBeLessThan(0.05);
+    b.w.dispose();
   });
 
   it('push presses the core away from the hand, pull draws it in; both cost energy', async () => {

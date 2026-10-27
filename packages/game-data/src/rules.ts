@@ -109,10 +109,18 @@ export interface HandRules {
   readonly staleSeconds: number;
   /** Open hand moving: bodies within this radius (m) are dragged along the hand's motion. */
   readonly sweepRadius: number;
-  /** Drag gain toward the hand's velocity (1/s), its cap (m/s²) and the hand speed it needs (m/s). */
+  /**
+   * Drag gain toward the hand's velocity (1/s), its cap (m/s²) and the hand speed it needs (m/s):
+   * the drag fades in from that speed to twice it.
+   */
   readonly sweepGain: number;
   readonly maxSweepAcceleration: number;
   readonly minSweepSpeed: number;
+  /**
+   * Time constant (s) smoothing the force point's motion into the hand's velocity: tracking
+   * jitter of a hand held still averages out instead of reading as strokes.
+   */
+  readonly velocitySmoothing: number;
   /** Push / pull: radius (m), acceleration at full push (m/s²), dead zone (|push| below it: none). */
   readonly pushRadius: number;
   readonly pushAcceleration: number;
@@ -222,6 +230,7 @@ export const DEFAULT_RULES: GameRules = {
     sweepGain: 6,
     maxSweepAcceleration: 30,
     minSweepSpeed: 1.5,
+    velocitySmoothing: 0.12,
     pushRadius: 4.5,
     pushAcceleration: 40,
     pushDeadZone: 0.15,
@@ -268,6 +277,29 @@ export const FAST_RULES: GameRules = {
     goalPauseSeconds: 1.5,
     roundEndPauseSeconds: 2,
   },
+};
+
+/**
+ * The Hands Lab sandbox (ADR-0009, local only): one endless round, no kickoff nudge and no
+ * anti-stall drift — bodies stay exactly where a task puts them until a hand moves them — and
+ * manipulation costs no energy: the lab measures whether moving things by hand is intuitive, not
+ * resource play (a slow first carry would otherwise run dry and drop). Every force is the
+ * match's own.
+ */
+export const LAB_RULES: GameRules = {
+  ...DEFAULT_RULES,
+  match: {
+    ...DEFAULT_RULES.match,
+    roundSeconds: 36_000,
+    goalsToWinRound: 9_999,
+    roundsToWinMatch: 1,
+    maxRounds: 1,
+    countdownSeconds: 1,
+    goalPauseSeconds: 1,
+    kickoffSpeed: 0,
+  },
+  core: { ...DEFAULT_RULES.core, idleDriftAcceleration: 0 },
+  hand: { ...DEFAULT_RULES.hand, holdCostPerSecond: 0, workCost: 0 },
 };
 
 export const RULESET_IDS = ['standard', 'fast'] as const;

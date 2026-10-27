@@ -10,15 +10,16 @@ function cleanHand(h: HandState): HandState {
   return { grip: clamp01(h.grip), push: clampUnit(h.push), twist: clampUnit(h.twist) };
 }
 
-/** Anything but an open, still hand (it then needs keep-alives to stay valid). */
-const handActive = (h: HandState | null): boolean =>
-  !!h && (h.grip > 0.05 || Math.abs(h.push) > 0.02 || Math.abs(h.twist) > 0.02);
-
 /**
- * An active hand is re-sent at least this often: the authority treats a hand older than 300 ms
- * as open and still (a lost connection or a lost hand must never leave a body gripped).
+ * A described hand is re-sent at least this often — open and still included, so the authority
+ * knows a hand is there (an open hand moving through the field drags bodies; no hand drags
+ * nothing). The authority takes a hand older than 300 ms for gone: a lost connection or a lost
+ * hand never leaves a body gripped.
  */
 export const HAND_KEEPALIVE_MS = 100;
+
+/** Sent once when an input stops describing a hand, so whatever it held is let go at once. */
+const OPEN: HandState = { grip: 0, push: 0, twist: 0 };
 
 /** World metres -> normalized aim, clamped and NaN-safe. */
 export function worldToAim(x: number, z: number, space: AimSpace): Vec2 {
@@ -64,30 +65,33 @@ export class IntentEmitter {
   }
 
   /**
-   * Sends an aim update — with the hand's continuous state when the input has one (ADR-0009) —
-   * if the throttle interval elapsed and the aim moved or the hand changed, or an active hand
-   * needs its keep-alive. A hand that goes open and still is sent once more, then rests.
+   * Sends an aim update — with the hand's continuous state when the input describes one
+   * (ADR-0009) — if the throttle interval elapsed and the aim moved or the hand changed, or a
+   * described hand is due its keep-alive. When the input stops describing a hand, an open hand
+   * is sent once more.
    */
   aim(aim: Vec2, nowMs: number, force = false, hand?: HandState | null): void {
     const a: Vec2 = [clampUnit(aim[0]), clampUnit(aim[1])];
     const h = hand ? cleanHand(hand) : null;
     const moved = Math.abs(a[0] - this.lastAim[0]) + Math.abs(a[1] - this.lastAim[1]);
     const prev = this.lastHand;
+    const dropped = !h && prev !== null;
     const handChanged =
       h && prev
         ? Math.abs(h.grip - prev.grip) > 0.03 ||
           Math.abs(h.push - prev.push) > 0.05 ||
           Math.abs(h.twist - prev.twist) > 0.03
-        : handActive(h) !== handActive(prev);
-    const keepAlive = handActive(h) && nowMs - this.lastAimSent >= HAND_KEEPALIVE_MS;
+        : h !== null || dropped;
+    const keepAlive = h !== null && nowMs - this.lastAimSent >= HAND_KEEPALIVE_MS;
     if (!force && nowMs - this.lastAimSent < 1000 / this.aimHz) return;
     if (!force && moved < 0.0005 && !handChanged && !keepAlive && nowMs - this.lastAimSent < 500)
       return;
     this.lastAim = a;
     this.lastAimSent = nowMs;
     this.lastHand = h;
+    const sent = h ?? (dropped ? OPEN : null);
     this.send(
-      { action: 'aim', phase: 'hold', aim: a, intensity: 1, ...(h ? { hand: h } : {}) },
+      { action: 'aim', phase: 'hold', aim: a, intensity: 1, ...(sent ? { hand: sent } : {}) },
       nowMs,
     );
   }
