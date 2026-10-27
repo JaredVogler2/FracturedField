@@ -201,3 +201,73 @@ describe('screenAimToArena', () => {
     expect(screenAimToArena(0, 0, -1).z).toBeCloseTo(11.7, 5);
   });
 });
+
+describe('CameraController — hands-on (ADR-0009)', () => {
+  it('the camera mapper is tuned against the authority’s own hand thresholds', async () => {
+    const { AUTHORITY_THRESHOLDS } = await import('@ff/gestures');
+    const { DEFAULT_RULES } = await import('@ff/game-data');
+    const h = DEFAULT_RULES.hand;
+    expect(AUTHORITY_THRESHOLDS).toEqual({
+      engageGrip: h.engageGrip,
+      releaseGrip: h.releaseGrip,
+      pushDeadZone: h.pushDeadZone,
+      twistDeadZone: h.twistDeadZone,
+    });
+  });
+
+  it('closing, pushing and turning the hand become the seat’s hand; no LIFT or PULSE fires', () => {
+    const { sent, ctl, seat } = rig();
+    seat.handsOn = true;
+    const seen: { grip: number; push: number; twist: number }[] = [];
+    const frames = clip(
+      [
+        { t: 0, hand: { ...HOME, shape: 'open' } },
+        { t: 0.6, hand: { shape: 'fist' } },
+        { t: 1.0, hand: { size: 0.15 } },
+        { t: 1.3, hand: { size: 0.19 } },
+        { t: 1.6, hand: { roll: 0 } },
+        { t: 2.1, hand: { roll: -0.6 } },
+        { t: 2.6, hand: { shape: 'open' } },
+      ],
+      { seconds: 3.2 },
+    );
+    for (const f of frames) {
+      ctl.feed(f);
+      const h = seat.hand;
+      if (h) seen.push(h);
+    }
+    expect(Math.max(...seen.map((h) => h.grip))).toBeGreaterThan(0.9);
+    expect(Math.max(...seen.map((h) => h.push))).toBeGreaterThan(0.4);
+    expect(Math.max(...seen.map((h) => h.twist))).toBeGreaterThan(0.4);
+    expect(seen.at(-1)!.grip).toBeLessThan(0.35);
+    expect(sent.filter((i) => i.action !== 'aim').map((i) => i.action)).toEqual([]);
+  });
+
+  it('an element sign never grips (thumbs-up is HEAT, not a fist) and still casts', () => {
+    const { sent, ctl, seat } = rig();
+    seat.handsOn = true;
+    let maxGrip = 0;
+    for (const f of clip([
+      { t: 0, hand: { ...HOME, shape: 'open' } },
+      { t: 0.6, hand: { shape: 'thumb', roll: -1.45 } },
+    ])) {
+      ctl.feed(f);
+      maxGrip = Math.max(maxGrip, seat.hand?.grip ?? 0);
+    }
+    expect(maxGrip).toBeLessThan(0.35);
+    expect(sent.map((i) => `${i.action}:${i.phase}`)).toContain('infuse:tap');
+  });
+
+  it('pausing or losing the hand opens it at once', () => {
+    const { ctl, seat } = rig();
+    seat.handsOn = true;
+    for (const f of clip([
+      { t: 0, hand: { ...HOME, shape: 'open' } },
+      { t: 0.5, hand: { shape: 'fist' } },
+    ]))
+      ctl.feed(f);
+    expect(seat.hand?.grip).toBeGreaterThan(0.9);
+    ctl.pause();
+    expect(seat.hand).toEqual({ grip: 0, push: 0, twist: 0 });
+  });
+});

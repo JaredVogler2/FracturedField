@@ -11,7 +11,7 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import { debug, openRoom, project, snapshot, type Snap } from './helpers';
-import { PHONE_LANDSCAPE, touchAutopilot } from './touch';
+import { PHONE_LANDSCAPE, touchAutopilot, touchAutopilotInPage } from './touch';
 
 test('D06 gate: a touch-only phone (no camera, no sensors) completes three rounds online', async ({
   browser,
@@ -215,8 +215,10 @@ test('simplified (one-hand) mode: one tap holds LIFT, another lets go; taps alon
   test.setTimeout(900_000);
   const ctx = await browser.newContext(PHONE_LANDSCAPE);
   const page = await ctx.newPage();
-  // Fast rules: one goal wins a round, two rounds win the match.
-  await page.goto('/?mode=bot&difficulty=easy&fast=1&test=1&quality=low&seed=12');
+  // Fast rules: one goal wins a round, two rounds win the match. The authority runs at half
+  // speed: the scripted player reacts through page round trips on a software-rendered page,
+  // the bot every tick — the race must not depend on the test machine's speed.
+  await page.goto('/?mode=bot&difficulty=easy&fast=1&test=1&quality=low&seed=12&timescale=0.5');
   await page.getByTestId('controls-accessible').tap();
   await page.getByTestId('start-match').tap();
   const playing = () =>
@@ -251,15 +253,11 @@ test('simplified (one-hand) mode: one tap holds LIFT, another lets go; taps alon
     .toBeNull();
   await expect(lift).toHaveAttribute('aria-pressed', 'false');
 
-  // Then play with taps only until a goal; if the bot wins a match first, rematch and go on.
+  // Then play with taps only until a goal; if the bot wins a match first, rematch and go on. The
+  // player decides every rendered frame inside the page (see touchAutopilotInPage).
   let matches = 1;
   for (;;) {
-    const s = await touchAutopilot(
-      page,
-      0,
-      (x) => x.match.score[0] > 0 || x.match.roundWins[0] > 0 || x.match.phase === 'matchEnd',
-      240_000,
-    );
+    const s = await touchAutopilotInPage(page, 0, { playSeconds: 240, wallMs: 480_000 });
     if (s.match.score[0] > 0 || s.match.roundWins[0] > 0) break;
     expect(matches, 'the simplified-mode player did not score in 4 matches').toBeLessThan(4);
     await expect(page.getByTestId('rematch')).toBeVisible({ timeout: 20_000 });

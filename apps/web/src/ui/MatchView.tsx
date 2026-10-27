@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { DEFAULT_LOADOUT, type AdvancedAbilityId } from '@ff/game-data';
+import { DEFAULT_LOADOUT, DEFAULT_RULES, type AdvancedAbilityId } from '@ff/game-data';
 import type { PlayerSlot } from '@ff/protocol';
 import type { BotDifficulty } from '@ff/sim';
 import { GameClient } from '../game/client';
@@ -8,12 +8,15 @@ import { useHud } from '../game/store';
 import { useHistory } from '../game/history';
 import { resolveQuality, useSettings } from '../game/settings';
 import { WorkerSession } from '../net/worker-session';
+import { HandsLabPanel } from '../lab/HandsLabPanel';
+import { LabMarkers } from '../lab/LabMarkers';
+import type { HandsTask } from '../lab/hands-tasks';
 import { RemoteSession } from '../net/remote-session';
 import { roomServiceUrl, roomSocketUrl } from '../net/room-service';
 import { forgetSeat, updateSeatTicket, type StoredSeat } from '../net/seat-store';
 import type { SeatLoadouts, SessionDriver } from '../net/session';
 import { GameClientProvider, useGameClient } from '../render/frame-context';
-import { GameScene } from '../render/Scene';
+import { GameScene, type CameraOverride } from '../render/Scene';
 import { InputManager, isControlActivation, type SeatConfig } from '../input/manager';
 import { P1_BINDINGS, P2_BINDINGS, SOLO_BINDINGS, applyOverride } from '../input/bindings';
 import {
@@ -40,6 +43,10 @@ import { teamOf } from './teams';
 import { DevHud } from '../hud/DevHud';
 import { NetPanel } from '../hud/NetPanel';
 import { view } from '../render/view';
+import { renderStats } from '../render/render-stats';
+import { surfaceStats } from '../render/arena/surfaces';
+import type { TierName } from '../render/adaptive-quality';
+import type { LightVariantName } from '../render/art-tokens';
 
 /**
  * ?test=1 only: what this device sent (source and action, never the aim), numbered so an E2E
@@ -52,11 +59,33 @@ const intentLog:
     : null;
 let intentCount = 0;
 
+/** Named camera poses for the visual review loop (Phase 07, D07/D11): ?test=1&shot=NAME. */
+const REVIEW_SHOTS = {
+  /** Along the field from just above the near wall: both gates, the core, the storm beyond. */
+  hero: { position: [-2, 7.5, 27], target: [2, 1.2, -2], fov: 58 },
+  /** Close on the +X rift gate from the field. */
+  gate: { position: [9, 3.2, 8.5], target: [21.5, 4.2, -0.5], fov: 50 },
+  /** Over the broken rim: slabs, fragments, the underside and the distant formations. */
+  rim: { position: [-14, 8, 44], target: [-16, -3, 20], fov: 50 },
+  /** High and far: the whole platform in its storm. */
+  wide: { position: [-48, 46, 62], target: [0, -4, 0], fov: 42 },
+  /** Zoom crops for material review: wall blocks and slabs at a field corner. */
+  stone: { position: [-16.5, 2.4, 18.5], target: [-19.5, 0.3, 14], fov: 38 },
+  /** Brass and steel on a gate pylon. */
+  brass: { position: [16.8, 2.6, 8.2], target: [21.4, 1.4, 4.6], fov: 34 },
+  /** Under the rim: the stepped mass, the steel ribs, hanging fragments. */
+  under: { position: [-34, -5, 44], target: [-8, -4, 8], fov: 48 },
+  /** Behind the +X gate: the carved channel and its inlay, the gyroscope's hanger and axle. */
+  channel: { position: [37, 7.5, 9], target: [25, 2.5, 0], fov: 50 },
+} as const satisfies Record<string, CameraOverride>;
+
 export type MatchMode =
   | { kind: 'attract' }
   | { kind: 'bot'; difficulty: BotDifficulty }
   | { kind: 'duel' }
-  | { kind: 'online'; seat: StoredSeat };
+  | { kind: 'online'; seat: StoredSeat }
+  /** The Hands Lab sandbox (ADR-0009): no opponent, hands-on control, physical tasks. */
+  | { kind: 'lab' };
 
 interface ModeSetup {
   readonly localSlots: readonly PlayerSlot[];
@@ -104,6 +133,14 @@ function setupFor(mode: MatchMode): ModeSetup {
         ],
         labels: ['PLAYER 1', 'PLAYER 2'],
       };
+    case 'lab':
+      return {
+        localSlots: [0],
+        bots: [],
+        seats: [{ slot: 0, bindings: SOLO_BINDINGS, pointer: true, gamepad: true }],
+        hudSeats: [{ slot: 0, label: 'YOU · HANDS LAB', bindings: SOLO_BINDINGS, local: true }],
+        labels: ['YOU', '—'],
+      };
     case 'online': {
       const me = mode.seat.slot;
       const rival: PlayerSlot = me === 0 ? 1 : 0;
@@ -136,6 +173,25 @@ function startingMode(saved: ControlMode | null, caps: Capabilities): ControlMod
  * One match (or the attract demo behind the menu): owns the GameClient, the local authority
  * worker and the input manager, and renders scene + HUD + overlays.
  */
+/** Puts a Hands Lab task's bodies at its start (the clear task borrows the north boulder). */
+function labPlacer(session: WorkerSession): (task: HandsTask) => void {
+  return (task) =>
+    session.labPlace(task.core, task.lane ? { from: [0, -8.2], to: task.lane.boulder } : undefined);
+}
+
+/**
+ * Test runs only (`?test=1&timescale=0.5`): the local authority's wall-clock speed. A scripted
+ * stand-in whose every reaction goes through a software-rendered page reacts many times slower
+ * than a person on a phone, while the bot reacts every tick; slowing the clock — never the rules
+ * or the physics — keeps such a race about the input path instead of the test machine's speed.
+ */
+function testTimeScale(): number | undefined {
+  const p = new URLSearchParams(window.location.search);
+  if (!p.has('test')) return undefined;
+  const v = Number.parseFloat(p.get('timescale') ?? '');
+  return Number.isFinite(v) ? Math.min(1, Math.max(0.25, v)) : undefined;
+}
+
 export function MatchView({
   mode,
   fast = false,
@@ -154,12 +210,22 @@ export function MatchView({
   const touch = caps.touch;
   const setup = useMemo(() => setupFor(mode), [mode]);
   const online = mode.kind === 'online' ? mode.seat : null;
+  const timeScale = useMemo(() => testTimeScale(), []);
   const client = useMemo(
-    () => new GameClient(online ? { delayTicks: 3, remote: true } : 1),
-    [online],
+    () =>
+      new GameClient(
+        online
+          ? { delayTicks: 3, remote: true }
+          : timeScale
+            ? { delayTicks: 1, tickMs: 1000 / DEFAULT_RULES.match.tickRate / timeScale }
+            : 1,
+      ),
+    [online, timeScale],
   );
   const session = useRef<SessionDriver | null>(null);
   const [remote, setRemote] = useState<RemoteSession | null>(null);
+  /** The Hands Lab's local authority (task setup goes to it). */
+  const [labSession, setLabSession] = useState<WorkerSession | null>(null);
   const input = useRef<InputManager | null>(null);
   const [started, setStarted] = useState(mode.kind === 'attract');
   const [paused, setPaused] = useState(false);
@@ -202,15 +268,60 @@ export function MatchView({
   useEffect(() => {
     if (manager && soloSlot !== null) manager.setBindings(soloSlot, soloBindings);
   }, [manager, soloSlot, soloBindings]);
+  const labPlace = useMemo(() => (labSession ? labPlacer(labSession) : null), [labSession]);
+  // What the Hands Lab's "what the game sees" meters read (stable, so its loop is not restarted).
+  const labHand = useCallback(() => manager?.seats.get(0)?.hand ?? null, [manager]);
+  const labSource = useCallback(() => manager?.seats.get(0)?.source ?? 'keyboard', [manager]);
+  // Hands-on control (ADR-0009): the solo player's input describes a hand. `?hands=1` (any
+  // build) turns it on for this page without changing the saved setting.
+  const handsOn = useMemo(
+    () =>
+      mode.kind === 'lab' ||
+      controls.handsOn ||
+      new URLSearchParams(window.location.search).get('hands') === '1',
+    [mode.kind, controls.handsOn],
+  );
+  useEffect(() => {
+    if (manager && soloSlot !== null) manager.setHandsOn(soloSlot, handsOn);
+  }, [manager, soloSlot, handsOn]);
   const matchEnd = useHud((s) => s.matchEnd);
   const phase = useHud((s) => s.match?.phase);
   const lobby = useHud((s) => s.lobby);
   const netPanel = useMemo(() => new URLSearchParams(window.location.search).has('net'), []);
   const quality = useSettings((s) => s.quality);
+  // ?test=1&shot=NAME: a fixed cinematic camera for golden screenshots (visual review only).
+  const reviewShot = useMemo(() => {
+    const p = new URLSearchParams(window.location.search);
+    const name = p.get('shot');
+    return p.has('test') && name && name in REVIEW_SHOTS
+      ? REVIEW_SHOTS[name as keyof typeof REVIEW_SHOTS]
+      : null;
+  }, []);
   const qualityOverride = useMemo(() => {
     const q = new URLSearchParams(window.location.search).get('quality');
     return q === 'low' || q === 'medium' || q === 'high' ? q : null;
   }, []);
+  // Test-only: the D08 lighting comparison variants, and opting a test run into adaptation
+  // (otherwise test runs keep a fixed tier, so they stay reproducible).
+  const testParams = useMemo((): {
+    test: boolean;
+    adaptive: boolean;
+    light: LightVariantName | undefined;
+  } => {
+    const p = new URLSearchParams(window.location.search);
+    const light = p.get('light');
+    return {
+      test: p.has('test'),
+      adaptive: p.get('adaptive') === '1',
+      light: light === 'flat' || light === 'dark' || light === 'final' ? light : undefined,
+    };
+  }, []);
+  // The adapted tier is remembered with the base tier it started from: a new base starts over.
+  const [adapted, setAdapted] = useState<{ base: string; tier: TierName } | null>(null);
+  const baseQuality = qualityOverride ?? resolveQuality(quality);
+  const adaptive =
+    quality === 'auto' && !qualityOverride && (!testParams.test || testParams.adaptive);
+  const effectiveQuality = adaptive && adapted?.base === baseQuality ? adapted.tier : baseQuality;
   const devHud = useSettings((s) => s.devHud);
   const loadout = useSettings((s) => s.loadout);
   const loadoutP2 = useSettings((s) => s.loadoutP2);
@@ -223,6 +334,7 @@ export function MatchView({
       case 'duel':
         return { 0: loadout, 1: loadoutP2 };
       case 'bot':
+      case 'lab':
         return { 0: loadout };
       case 'online':
         return mode.seat.slot === 0 ? { 0: loadout } : { 1: loadout };
@@ -235,8 +347,9 @@ export function MatchView({
     [setup.seats, seatLoadouts],
   );
 
-  // Read-only test hook (?test=1): lets automated E2E "players" see the same public state a human
-  // sees on screen and project world points to screen coordinates. Grants no authority.
+  // Test hook (?test=1): lets automated E2E "players" see the same public state a human sees on
+  // screen and project world points to screen coordinates. Grants no authority (its one control
+  // re-paces a test run's local authority; rules and physics are untouched).
   useEffect(() => {
     if (!new URLSearchParams(window.location.search).has('test')) return;
     const w = window as unknown as Record<string, unknown>;
@@ -295,6 +408,11 @@ export function MatchView({
       transport: () => useHud.getState().transport.state,
       lobby: () => useHud.getState().lobby,
       matchEnd: () => useHud.getState().matchEnd,
+      // Renderer counters (all passes of the last frame) and texture-generation cost at load.
+      renderStats: () => ({ ...renderStats, surfaces: { ...surfaceStats } }),
+      // Test runs with a time scale only (the worker ignores it otherwise): a scripted player
+      // re-paces the local authority to keep its reactions within a set time of play.
+      timeScale: (v: number) => session.current?.setTimeScale?.(v),
     };
     return () => {
       offAcks();
@@ -319,13 +437,17 @@ export function MatchView({
       setRemote(r);
       s = r;
     } else {
-      s = new WorkerSession(client, {
+      const w = new WorkerSession(client, {
         localSlots: setup.localSlots,
         bots: setup.bots,
         autoStart: mode.kind === 'attract',
         fast,
         ...(seed !== undefined ? { seed } : {}),
+        ...(timeScale !== undefined ? { timeScale } : {}),
+        ...(mode.kind === 'lab' ? { lab: true } : {}),
       });
+      if (mode.kind === 'lab') setLabSession(w);
+      s = w;
     }
     session.current = s;
     client.attach(s);
@@ -335,7 +457,7 @@ export function MatchView({
       session.current = null;
       setRemote(null);
     };
-  }, [client, setup, mode.kind, online, fast, seed]);
+  }, [client, setup, mode.kind, online, fast, seed, timeScale]);
 
   // A rematch (or a resumed connection) restarts the stream: stop showing "waiting".
   useEffect(
@@ -518,11 +640,17 @@ export function MatchView({
     <GameClientProvider client={client}>
       <div className={`stage${touchUi ? ` touch-ui hand-${controls.hand}` : ''}`}>
         <GameScene
-          quality={qualityOverride ?? resolveQuality(quality)}
+          quality={effectiveQuality}
+          textureTier={baseQuality}
+          {...(adaptive
+            ? { onAdapt: (tier: TierName) => setAdapted({ base: baseQuality, tier }) }
+            : {})}
+          {...(testParams.test && testParams.light ? { light: testParams.light } : {})}
           localSlots={setup.localSlots}
           side={mySlot === 1 ? -1 : 1}
           portraitSlot={mySlot}
           controlsSide={touchUi ? controls.hand : null}
+          {...(reviewShot ? { camera: reviewShot } : {})}
         >
           {setup.seats.length > 0 ? (
             <InputBridge
@@ -533,10 +661,19 @@ export function MatchView({
               onManager={setManager}
             />
           ) : null}
+          {mode.kind === 'lab' ? <LabMarkers /> : null}
         </GameScene>
+        {mode.kind === 'lab' && started && manager && labPlace ? (
+          <HandsLabPanel client={client} place={labPlace} hand={labHand} source={labSource} />
+        ) : null}
         {mode.kind !== 'attract' ? (
           <>
-            <Hud seats={hudSeats} denied={denied} mirror={mySlot === 1} />
+            <Hud
+              seats={hudSeats}
+              denied={denied}
+              mirror={mySlot === 1}
+              scoreboard={mode.kind !== 'lab'}
+            />
             <Banners client={client} />
             <DenyToast
               client={client}
@@ -722,6 +859,38 @@ function ReadyGate({
   useEffect(() => {
     startRef.current?.focus({ preventScroll: true });
   }, []);
+  if (mode.kind === 'lab') {
+    // The study protocol (PHASE-06M) gives players one sentence and no demonstration.
+    return (
+      <div className="modal-backdrop soft">
+        <div className="panel ready-gate" data-testid="ready-gate">
+          <div className="me-eyebrow">HANDS LAB</div>
+          <div className="me-title">Use your hand to move things</div>
+          <p className="hints">Try each task. Your results stay on this device.</p>
+          <ControlPicker
+            caps={caps}
+            value={controlMode}
+            onChange={onControlMode}
+            cameraReady={cameraReady}
+          />
+          <div className="row">
+            <button
+              className="btn primary big"
+              onClick={onStart}
+              data-testid="start-match"
+              disabled={controlMode === 'camera' && !cameraReady}
+              ref={startRef}
+            >
+              Start
+            </button>
+            <button className="btn" onClick={onExit}>
+              Back
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="modal-backdrop soft">
       <div className="panel ready-gate" data-testid="ready-gate">

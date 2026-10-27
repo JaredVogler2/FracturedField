@@ -1,0 +1,98 @@
+{
+  "kickoff-high": {
+    "drawCalls": 125,
+    "triangles": 163399,
+    "geometries": 73,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 938
+  },
+  "hero": {
+    "drawCalls": 151,
+    "triangles": 166727,
+    "geometries": 73,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 1213
+  },
+  "gate": {
+    "drawCalls": 86,
+    "triangles": 142129,
+    "geometries": 58,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 980
+  },
+  "rim": {
+    "drawCalls": 112,
+    "triangles": 158861,
+    "geometries": 68,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 1032
+  },
+  "wide": {
+    "drawCalls": 130,
+    "triangles": 152295,
+    "geometries": 69,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 1115
+  },
+  "stone": {
+    "drawCalls": 77,
+    "triangles": 134105,
+    "geometries": 53,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 1015
+  },
+  "brass": {
+    "drawCalls": 76,
+    "triangles": 133273,
+    "geometries": 51,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 1021
+  },
+  "under": {
+    "drawCalls": 114,
+    "triangles": 150247,
+    "geometries": 68,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 968
+  },
+  "channel": {
+    "drawCalls": 138,
+    "triangles": 150191,
+    "geometries": 67,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 903
+  },
+  "phone-landscape-low": {
+    "drawCalls": 78,
+    "triangles": 80425,
+    "geometries": 73,
+    "textures": 18,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 292
+  },
+  "phone-landscape-medium": {
+    "drawCalls": 119,
+    "triangles": 162631,
+    "geometries": 73,
+    "textures": 36,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 1160
+  },
+  "phone-portrait-low": {
+    "drawCalls": 68,
+    "triangles": 73553,
+    "geometries": 67,
+    "textures": 18,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 347
+  }
+}

@@ -102,8 +102,10 @@ test('camera player: gesture input moves the core, scores a goal, and plays on a
   // A small canvas leaves the software-rendered page enough main-thread time to feed the camera
   // controller at a realistic rate (~7–14 Hz here); at 960×540 it starves to ~3 Hz.
   await page.setViewportSize({ width: 640, height: 360 });
-  // Fast rules: one goal wins a round, two rounds win the match.
-  await page.goto('/?mode=bot&difficulty=easy&fast=1&test=1&quality=low&seed=12');
+  // Fast rules: one goal wins a round, two rounds win the match. The authority runs at half
+  // speed: the stand-in's hand goes through a software-rendered page and the camera pipeline,
+  // the bot reacts every tick — the race must not depend on the test machine's speed.
+  await page.goto('/?mode=bot&difficulty=easy&fast=1&test=1&quality=low&seed=12&timescale=0.5');
   await page.getByTestId('controls-camera').click();
   await cameraActive(page);
   await page.getByTestId('start-match').click();

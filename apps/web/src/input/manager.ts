@@ -6,7 +6,7 @@ import {
   type AdvancedAbilityId,
 } from '@ff/game-data';
 import { IntentEmitter, worldToAim, type ActionEdge, type IntentSink } from '@ff/controls';
-import type { InputSource, PlayerSlot, Vec2, WorldSnapshot } from '@ff/protocol';
+import type { HandState, InputSource, PlayerSlot, Vec2, WorldSnapshot } from '@ff/protocol';
 import { view } from '../render/view';
 import { localAim } from '../render/vfx/local-aim';
 import type { KeyBindings, BindingAction } from './bindings';
@@ -33,6 +33,12 @@ export class SeatInput {
   readonly emitter: IntentEmitter;
   /** Locally predicted reticle (cosmetic; the authority decides the real manipulator). */
   readonly reticle = { x: 0, z: 0, initialised: false };
+  /**
+   * Hands-on control (ADR-0009): this seat's inputs describe a hand — grip, push, twist — that
+   * rides on its aim intents; the authority turns it into force.
+   */
+  handsOn = false;
+  private handState: HandState | null = null;
   private activeSource: InputSource;
   private lastActivity = 0;
 
@@ -57,7 +63,19 @@ export class SeatInput {
     if (source !== this.activeSource) {
       this.activeSource = source;
       this.emitter.setSource(source);
+      // A hand described by the previous device does not carry over (nothing stays gripped).
+      this.handState = null;
     }
+  }
+
+  /** The hand the seat's active input describes (hands-on control only). */
+  get hand(): HandState | null {
+    return this.handsOn ? this.handState : null;
+  }
+
+  /** An adapter describes the hand; only the device that owns the aim is listened to. */
+  setHand(hand: HandState | null, source: InputSource): void {
+    if (source === this.activeSource) this.handState = hand;
   }
 
   get idleMs(): number {
@@ -287,12 +305,30 @@ class KeyboardController {
   }
 }
 
-/** Mouse aiming (absolute, raycast onto the arena plane) and mouse-button abilities. */
+/**
+ * A mouse's hand (hands-on): the button closes it (ramped, per second); the wheel pushes (a rate:
+ * it eases back) or, while holding, turns the grip — which stays turned, like a knob, until the
+ * hand opens and it eases back.
+ */
+const MOUSE_GRIP_RATE = 10;
+const MOUSE_PUSH_TAU = 0.15;
+const MOUSE_TWIST_TAU = 0.3;
+
+/**
+ * Mouse aiming (absolute, raycast onto the arena plane) and mouse-button abilities. Hands-on:
+ * hold the left button to grip, swing and release to throw, wheel to twist what you hold (or,
+ * with an open hand, to push / pull); right click PULSE, middle GUARD.
+ */
 class PointerController {
   private readonly el: HTMLElement;
   private lastClient: { x: number; y: number } | null = null;
   private paused = false;
   private liftButtonDown = false;
+  private gripTarget = 0;
+  private grip = 0;
+  private push = 0;
+  private twist = 0;
+  private lastTick = performance.now();
 
   constructor(
     private readonly seat: SeatInput,
@@ -333,6 +369,15 @@ class PointerController {
     const now = performance.now();
     this.lastClient = { x: e.clientX, y: e.clientY };
     this.project(now);
+    if (this.seat.handsOn) {
+      if (e.button === 0) this.gripTarget = 1;
+      else if (e.button === 2) this.fire({ action: 'pulse', phase: 'tap' }, now);
+      else if (e.button === 1) {
+        e.preventDefault();
+        this.fire({ action: 'guard', phase: 'tap' }, now);
+      }
+      return;
+    }
     if (e.button === 0) this.fire({ action: 'pulse', phase: 'tap' }, now);
     else if (e.button === 2) {
       this.liftButtonDown = true;
@@ -345,6 +390,7 @@ class PointerController {
 
   private onUp = (e: PointerEvent): void => {
     if (e.pointerType !== 'mouse') return;
+    if (e.button === 0) this.gripTarget = 0;
     if (e.button === 2 && this.liftButtonDown) {
       this.liftButtonDown = false;
       this.fire({ action: 'lift', phase: 'end' }, performance.now());
@@ -354,6 +400,13 @@ class PointerController {
   private onWheel = (e: WheelEvent): void => {
     if (this.paused) return;
     e.preventDefault();
+    if (this.seat.handsOn) {
+      // Wheel forward = clockwise wrist (holding) or push (open hand); back = the opposite.
+      const notch = Math.max(-1, Math.min(1, -e.deltaY / 100));
+      if (this.grip > 0.5) this.twist = Math.max(-1, Math.min(1, this.twist + notch * 0.4));
+      else this.push = Math.max(-1, Math.min(1, this.push + notch * 0.8));
+      return;
+    }
     const axes = view.groundAxes();
     const up = e.deltaY < 0;
     const now = performance.now();
@@ -372,8 +425,23 @@ class PointerController {
     e.preventDefault();
   };
 
+  /** Hands-on: ramps the grip, lets push and twist ease back, and describes the hand. */
+  tick(now: number): void {
+    const dt = Math.min(0.1, Math.max(0, (now - this.lastTick) / 1000));
+    this.lastTick = now;
+    if (!this.seat.handsOn) return;
+    const step = MOUSE_GRIP_RATE * dt;
+    this.grip += Math.max(-step, Math.min(step, this.gripTarget - this.grip));
+    this.push *= Math.exp(-dt / MOUSE_PUSH_TAU);
+    if (this.grip <= 0.5) this.twist *= Math.exp(-dt / MOUSE_TWIST_TAU);
+    if (Math.abs(this.push) < 0.01) this.push = 0;
+    if (Math.abs(this.twist) < 0.01) this.twist = 0;
+    this.seat.setHand({ grip: this.grip, push: this.push, twist: this.twist }, 'pointer');
+  }
+
   pause(): void {
     this.paused = true;
+    this.gripTarget = this.grip = this.push = this.twist = 0;
   }
 
   resume(): void {
@@ -389,14 +457,29 @@ class PointerController {
   }
 }
 
-/** One-finger drag aiming on the arena; abilities come from on-screen buttons (TouchControls). */
+/** How close (m) to a body a finger must land on the arena to take hold of it (hands-on). */
+const TOUCH_GRAB_RADIUS = 1.8;
+/** A two-finger turn of this much (radians) is a full twist. */
+const TOUCH_TWIST_RANGE = Math.PI / 3;
+
+/**
+ * One-finger drag aiming on the arena; abilities come from on-screen buttons (TouchControls).
+ * Hands-on: a finger that lands on a body holds it (drag, then lift the finger to throw); one
+ * that lands on open floor is an open hand (dragging it sweeps); a second finger turning around
+ * the first twists what is held.
+ */
 class TouchAimController {
   private activeId: number | null = null;
   private paused = false;
+  private holding = false;
+  private primary: { x: number; y: number } | null = null;
+  private second: { id: number; x: number; y: number; angle0: number } | null = null;
+  private twist = 0;
 
   constructor(
     private readonly seat: SeatInput,
     private readonly el: HTMLElement,
+    private readonly nearBody: (x: number, z: number, radius: number) => boolean = () => false,
   ) {
     el.addEventListener('pointerdown', this.onDown);
     el.addEventListener('pointermove', this.onMove);
@@ -405,22 +488,75 @@ class TouchAimController {
   }
 
   private onDown = (e: PointerEvent): void => {
-    if (e.pointerType !== 'touch' || this.paused || this.activeId !== null) return;
+    if (e.pointerType !== 'touch' || this.paused) return;
+    if (this.activeId !== null) {
+      // A second finger: hands-on, it turns around the first to twist.
+      if (this.seat.handsOn && !this.second && this.primary) {
+        this.second = {
+          id: e.pointerId,
+          x: e.clientX,
+          y: e.clientY,
+          angle0: Math.atan2(e.clientY - this.primary.y, e.clientX - this.primary.x),
+        };
+      }
+      return;
+    }
     this.activeId = e.pointerId;
-    this.el.setPointerCapture?.(e.pointerId);
+    try {
+      this.el.setPointerCapture?.(e.pointerId);
+    } catch {
+      // The touch already ended (or is not a live pointer): aim without capturing it.
+    }
     this.aimAt(e);
+    const r = this.seat.reticle;
+    this.holding = this.seat.handsOn && this.nearBody(r.x, r.z, TOUCH_GRAB_RADIUS);
   };
 
   private onMove = (e: PointerEvent): void => {
-    if (e.pointerId !== this.activeId || this.paused) return;
+    if (this.paused) return;
+    if (this.second && e.pointerId === this.second.id) {
+      this.second.x = e.clientX;
+      this.second.y = e.clientY;
+      this.updateTwist();
+      return;
+    }
+    if (e.pointerId !== this.activeId) return;
     this.aimAt(e);
+    this.updateTwist();
   };
 
   private onUp = (e: PointerEvent): void => {
-    if (e.pointerId === this.activeId) this.activeId = null;
+    if (this.second && e.pointerId === this.second.id) {
+      this.second = null;
+      this.twist = 0;
+    }
+    if (e.pointerId === this.activeId) {
+      // Lifting the finger opens the hand: whatever it held flies on with its own velocity.
+      this.activeId = null;
+      this.holding = false;
+      this.primary = null;
+      this.second = null;
+      this.twist = 0;
+    }
   };
 
+  private updateTwist(): void {
+    if (!this.second || !this.primary) return;
+    const a = Math.atan2(this.second.y - this.primary.y, this.second.x - this.primary.x);
+    let d = a - this.second.angle0;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    // Screen y points down: a clockwise turn on screen increases the angle.
+    this.twist = Math.max(-1, Math.min(1, d / TOUCH_TWIST_RANGE));
+  }
+
+  tick(): void {
+    if (!this.seat.handsOn) return;
+    this.seat.setHand({ grip: this.holding ? 1 : 0, push: 0, twist: this.twist }, 'touch');
+  }
+
   private aimAt(e: PointerEvent): void {
+    this.primary = { x: e.clientX, y: e.clientY };
     const p = view.screenToArena(e.clientX, e.clientY, DEFAULT_RULES.manipulator.height);
     if (!p) return;
     this.seat.setReticle(p.x, p.z);
@@ -429,6 +565,9 @@ class TouchAimController {
 
   pause(): void {
     this.paused = true;
+    this.holding = false;
+    this.second = null;
+    this.twist = 0;
   }
 
   resume(): void {
@@ -484,6 +623,19 @@ export class InputManager {
   private readonly modal = new Map<PlayerSlot, { mode: ControlMode; adapters: InputAdapter[] }>();
   private lastFrame = performance.now();
   private paused = false;
+  /** The newest authoritative snapshot (hands-on touch: did the finger land on a body?). */
+  private latest: WorldSnapshot | null = null;
+
+  /** True when a movable body's centre lies within `radius` of (x, z) on the arena. */
+  private readonly nearBody = (x: number, z: number, radius: number): boolean =>
+    this.latest?.entities.some(
+      (e) =>
+        (e.kind === 'core' ||
+          e.kind === 'boulder' ||
+          e.kind === 'lodestone' ||
+          e.kind === 'shard') &&
+        Math.hypot(e.p[0] - x, e.p[2] - z) <= radius,
+    ) ?? false;
 
   constructor(
     configs: readonly SeatConfig[],
@@ -522,7 +674,7 @@ export class InputManager {
     for (const a of current?.adapters ?? []) a.dispose();
     const adapters: InputAdapter[] = [];
     if (mode === 'touch' || mode === 'accessible')
-      adapters.push(new TouchAimController(seat, this.element));
+      adapters.push(new TouchAimController(seat, this.element, this.nearBody));
     if (mode === 'motion') adapters.push(new MotionController(seat, motion));
     if (this.paused) for (const a of adapters) a.pause();
     this.modal.set(slot, { mode, adapters });
@@ -530,6 +682,17 @@ export class InputManager {
 
   mode(slot: PlayerSlot): ControlMode | undefined {
     return this.modal.get(slot)?.mode;
+  }
+
+  /**
+   * Hands-on control for a seat (ADR-0009). Turning it off opens the hand at once, so nothing the
+   * seat held stays gripped.
+   */
+  setHandsOn(slot: PlayerSlot, on: boolean): void {
+    const seat = this.seats.get(slot);
+    if (!seat || seat.handsOn === on) return;
+    seat.handsOn = on;
+    if (!on) seat.setHand(null, seat.source);
   }
 
   /** Applies a changed keyboard layout to a seat without restarting its intent stream. */
@@ -561,6 +724,7 @@ export class InputManager {
   /** Call once per animation frame with the newest authoritative snapshot. */
   update(latest: WorldSnapshot | null): void {
     const now = performance.now();
+    this.latest = latest;
     const dt = (now - this.lastFrame) / 1000;
     this.lastFrame = now;
     for (const seat of this.seats.values()) {
@@ -573,7 +737,7 @@ export class InputManager {
     for (const { adapters } of this.modal.values()) for (const a of adapters) a.tick?.(now);
     if (this.paused) return;
     for (const kb of this.keyboards) kb.update(dt, now);
-    for (const seat of this.seats.values()) seat.emitter.aim(seat.aim(), now);
+    for (const seat of this.seats.values()) seat.emitter.aim(seat.aim(), now, false, seat.hand);
   }
 
   /**
@@ -586,7 +750,7 @@ export class InputManager {
     for (const seat of this.seats.values()) {
       seat.emitter.forgetHeld();
       seat.emitter.resetSequence();
-      if (seat.reticle.initialised) seat.emitter.aim(seat.aim(), now, true);
+      if (seat.reticle.initialised) seat.emitter.aim(seat.aim(), now, true, seat.hand);
     }
   }
 

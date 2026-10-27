@@ -35,6 +35,15 @@ interface DebugHook {
     reason: string;
     roundWins: [number, number];
   } | null;
+  /** Renderer counters of the last frame, the rendering tier and texture-generation cost. */
+  renderStats(): {
+    drawCalls: number;
+    triangles: number;
+    programs: number;
+    tier: 'low' | 'medium' | 'high';
+    adaptive: boolean;
+    surfaces: { generated: number; ms: number };
+  };
 }
 
 type Win = Window & { __ffDebug?: DebugHook };

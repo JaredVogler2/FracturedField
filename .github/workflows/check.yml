@@ -39,9 +39,10 @@ jobs:
     name: e2e browser + live worker
     runs-on: ubuntu-latest
     # Software-rendered browsers: the camera suites (real model inference on CPU, a camera-driven
-    # match to a goal and a rematch) and the Phase 06 phone suites (a three-round online match
-    # with touch alone, a simplified-mode goal vs the bot) add several minutes each.
-    timeout-minutes: 60
+    # match to a goal and a rematch), the Phase 06 phone suites (a three-round online match with
+    # touch alone, a simplified-mode goal vs the bot) and the Hands Lab (every task by mouse and by
+    # a tracked hand) add several minutes each.
+    timeout-minutes: 75
     needs: static
     steps:
       - uses: actions/checkout@v4

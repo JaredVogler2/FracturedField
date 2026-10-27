@@ -5,4 +5,9 @@ export const renderStats = {
   triangles: 0,
   geometries: 0,
   textures: 0,
+  /** Compiled shader programs (each one a compile the player waited for). */
+  programs: 0,
+  /** The tier rendering now, and whether it adapts to the frame rate. */
+  tier: 'high' as 'low' | 'medium' | 'high',
+  adaptive: false,
 };

@@ -2,7 +2,7 @@
  * Local authority worker: runs the shared GameWorld (and any snapshot bots) at a fixed 30 Hz off
  * the render thread, emitting exactly the snapshot/event/ack stream a remote room would.
  */
-import { DEFAULT_RULES, FAST_RULES, type AbilityId } from '@ff/game-data';
+import { DEFAULT_RULES, FAST_RULES, LAB_RULES, type AbilityId } from '@ff/game-data';
 import type { PlayerSlot } from '@ff/protocol';
 import { GameWorld, SnapshotBot, physicsVersion } from '@ff/sim';
 import type { FromSimWorker, ToSimWorker } from './sim-protocol';
@@ -22,6 +22,12 @@ let last = 0;
 let acc = 0;
 let stepMs = 0;
 let seed = 0;
+/** Wall-clock speed of the simulation (test runs only; 1 everywhere else). */
+let timeScale = 1;
+/** Started by a test run (with a time scale): its pace may be changed while it runs. */
+let testPaced = false;
+/** The Hands Lab sandbox (task setup allowed). */
+let lab = false;
 let endAnnounced = false;
 const ready: [boolean, boolean] = [false, false];
 /** Picks that arrived with READY before physics finished loading. */
@@ -34,10 +40,13 @@ function post(msg: FromSimWorker): void {
 
 async function init(msg: Extract<ToSimWorker, { type: 'init' }>): Promise<void> {
   seed = msg.seed;
+  timeScale = Math.min(1, Math.max(0.25, msg.timeScale ?? 1));
+  testPaced = msg.timeScale !== undefined;
+  lab = msg.lab === true;
   world = await GameWorld.create({
     seed,
     autoStart: msg.autoStart,
-    ...(msg.fast ? { rules: FAST_RULES } : {}),
+    ...(lab ? { rules: LAB_RULES } : msg.fast ? { rules: FAST_RULES } : {}),
     ...(msg.loadouts ? { loadouts: msg.loadouts } : {}),
   });
   for (const slot of [0, 1] as const) {
@@ -46,6 +55,7 @@ async function init(msg: Extract<ToSimWorker, { type: 'init' }>): Promise<void> 
   }
   bots = msg.bots.map((b, i) => new SnapshotBot(b.slot, b.difficulty, seed + i + 1));
   for (const b of msg.bots) ready[b.slot] = true;
+  if (lab) ready[1] = true; // the lab's second seat is empty
   endAnnounced = false;
   // READY may have arrived while physics was still loading: start now if everyone is ready.
   if (ready[0] && ready[1]) world.startMatch();
@@ -59,7 +69,7 @@ function pump(): void {
   const w = world;
   if (!w) return;
   const now = performance.now();
-  const dt = 1000 / DEFAULT_RULES.match.tickRate;
+  const dt = 1000 / DEFAULT_RULES.match.tickRate / timeScale;
   acc += Math.min(250, now - last);
   last = now;
   let steps = 0;
@@ -96,6 +106,27 @@ function pump(): void {
   if (steps === 4 && acc > dt * 4) acc = 0; // throttled: drop backlog rather than fast-forward
 }
 
+/**
+ * Hands Lab task setup: lets go of whatever the hand holds and puts the core (and the boulder
+ * nearest `from`) at rest where the task starts. The lab is this device's own sandbox; matches
+ * never accept it.
+ */
+function labPlace(msg: Extract<ToSimWorker, { type: 'labPlace' }>): void {
+  const w = world;
+  if (!w || !lab) return;
+  w.debugReleaseGrasps();
+  w.debugPlaceBody(w.coreEntityId, msg.core[0], LAB_RULES.core.hoverHeight, msg.core[1]);
+  if (msg.boulder) {
+    let best: { id: number; d: number } | null = null;
+    for (const e of w.snapshot().entities) {
+      if (e.kind !== 'boulder') continue;
+      const d = Math.hypot(e.p[0] - msg.boulder.from[0], e.p[2] - msg.boulder.from[1]);
+      if (!best || d < best.d) best = { id: e.id, d };
+    }
+    if (best) w.debugPlaceBody(best.id, msg.boulder.to[0], 0.75, msg.boulder.to[1]);
+  }
+}
+
 function setReady(msg: Extract<ToSimWorker, { type: 'ready' }>): void {
   for (const l of msg.loadouts ?? []) {
     if (world) world.setLoadout(l.slot, l.picks);
@@ -125,6 +156,13 @@ scope.onmessage = (ev: MessageEvent<ToSimWorker>) => {
       break;
     case 'ready':
       setReady(msg);
+      break;
+    case 'labPlace':
+      labPlace(msg);
+      break;
+    case 'timeScale':
+      if (testPaced && Number.isFinite(msg.value))
+        timeScale = Math.min(1, Math.max(0.1, msg.value));
       break;
     case 'rematch':
       requestRematch(msg.slots);

@@ -45,6 +45,11 @@ export interface ControlPrefs {
   motionSensitivity: number;
   /** Hold moves (LIFT, MAGNET) toggle on tap instead of needing a held finger. */
   sticky: boolean;
+  /**
+   * Hands-on control (ADR-0009): the input describes a hand — grip to hold, swing and let go to
+   * throw, twist to curve, an open hand sweeps and pushes — instead of firing discrete moves.
+   */
+  handsOn: boolean;
 }
 
 export const DEFAULT_CONTROLS: ControlPrefs = {
@@ -53,6 +58,7 @@ export const DEFAULT_CONTROLS: ControlPrefs = {
   motionStyle: 'pointer',
   motionSensitivity: 1,
   sticky: false,
+  handsOn: false,
 };
 
 const CONTROL_MODES: readonly ControlMode[] = [
@@ -74,6 +80,7 @@ function validControls(v: unknown): ControlPrefs {
     motionSensitivity:
       typeof sens === 'number' && Number.isFinite(sens) ? Math.min(2, Math.max(0.5, sens)) : 1,
     sticky: c.sticky === true,
+    handsOn: c.handsOn === true,
   };
 }
 

@@ -11,6 +11,10 @@ export interface WorkerSessionOptions {
   readonly autoStart?: boolean;
   readonly fast?: boolean;
   readonly loadouts?: readonly [readonly AbilityId[], readonly AbilityId[]];
+  /** Test runs only: wall-clock speed of the simulation (see ToSimWorker `init`). */
+  readonly timeScale?: number;
+  /** The Hands Lab sandbox (lab rules, no opponent; tasks place their bodies). */
+  readonly lab?: boolean;
 }
 
 /**
@@ -86,8 +90,23 @@ export class WorkerSession implements SessionDriver {
         bots: this.opts.bots ?? [],
         ...(this.opts.fast ? { fast: true } : {}),
         ...(this.opts.loadouts ? { loadouts: this.opts.loadouts } : {}),
+        ...(this.opts.timeScale !== undefined ? { timeScale: this.opts.timeScale } : {}),
+        ...(this.opts.lab ? { lab: true } : {}),
       });
     });
+  }
+
+  /** Test runs only: re-paces the local authority (ignored unless started with a time scale). */
+  setTimeScale(value: number): void {
+    this.post({ type: 'timeScale', value });
+  }
+
+  /** Hands Lab: puts a task's bodies where it starts (ignored outside the lab). */
+  labPlace(
+    core: readonly [number, number],
+    boulder?: { from: readonly [number, number]; to: readonly [number, number] },
+  ): void {
+    this.post({ type: 'labPlace', core, ...(boulder ? { boulder } : {}) });
   }
 
   private post(msg: ToSimWorker): void {

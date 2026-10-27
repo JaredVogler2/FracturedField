@@ -37,6 +37,9 @@ function initialMode(): { mode: MatchMode; fast: boolean; seed?: number; joinCod
   }
   const m = params.get('mode');
   const extra = seed !== undefined ? { seed } : {};
+  // The Hands Lab (ADR-0009): /lab/hands, or ?mode=lab.
+  if (m === 'lab' || window.location.pathname.replace(/\/+$/, '') === '/lab/hands')
+    return { mode: { kind: 'lab' }, fast: false, ...extra };
   if (m === 'duel') return { mode: { kind: 'duel' }, fast, ...extra };
   if (m === 'bot') {
     const d = params.get('difficulty');

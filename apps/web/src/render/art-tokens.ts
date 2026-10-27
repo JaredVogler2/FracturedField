@@ -20,25 +20,92 @@ export const PALETTE = {
 
 export const TEAM_COLORS = [PALETTE.amber, PALETTE.cyan] as const;
 
+/**
+ * Sky and aerial perspective (Phase 07B / D08): one gradient shared by the sky dome and the fog,
+ * so anything far away dissolves into the sky behind it (lighter, bluer, less contrast) instead of
+ * turning into a dark cut-out.
+ */
+export const SKY = {
+  zenith: '#050c16',
+  storm: '#0f2a3d',
+  /** Haze at the horizon — also the fog colour. */
+  horizon: '#2f5a74',
+  /** The cloud sea the platform floats over: just below the horizon, and far below. */
+  sea: '#264861',
+  seaDeep: '#0a1622',
+  /** Storm-break light (sky glow, cloud rims, light shafts). */
+  glow: '#ffbf80',
+} as const;
+
+/**
+ * Fog layering: nothing on the platform is fogged (the field stays crisp from any camera); fog
+ * grows with distance beyond `start` metres from the arena centre, and a haze thickens below the
+ * platform (`hazeTop` → `hazeBottom`, up to `hazeMax`).
+ */
+export const FOG = { start: 36, hazeTop: -6, hazeBottom: -42, hazeMax: 0.85 } as const;
+
+/**
+ * Selected lighting (D08 "final"): a storm-break key raking from the far left at ~31° — it rims
+ * the brass and the columns and throws long shadows toward the camera — a cool fill from the
+ * camera side, a dim cool hemisphere, image-based light from the procedural storm environment.
+ */
 export const LIGHTING = {
-  exposure: 1.05,
-  hemiSky: '#5f7f99',
-  hemiGround: '#1a1f26',
-  hemiIntensity: 0.9,
-  keyColor: '#ffe6c7',
-  keyIntensity: 3.6,
-  /** Storm-break key light direction (from high side). */
-  keyPosition: [-18, 34, 22] as const,
-  fillColor: '#6fa8d8',
-  fillIntensity: 0.8,
-  fillPosition: [26, 14, -18] as const,
+  exposure: 1.1,
+  hemiSky: '#86a9c9',
+  hemiGround: '#20242c',
+  hemiIntensity: 1.0,
+  keyColor: '#ffdfbd',
+  keyIntensity: 3.9,
+  /** Storm-break key direction (from the arena centre toward the light). */
+  keyPosition: [-30, 24, -26] as const,
+  fillColor: '#84bde8',
+  fillIntensity: 0.75,
+  fillPosition: [24, 12, 30] as const,
   coreLightIntensity: 14,
   coreLightDistance: 16,
-  fogColor: '#0c1f2e',
-  fogDensity: 0.0105,
+  fogColor: SKY.horizon,
+  /** Exp² density of the fog beyond FOG.start. */
+  fogDensity: 0.0095,
   /** Image-based lighting strength from the procedural storm environment. */
-  environmentIntensity: 0.65,
+  environmentIntensity: 0.8,
 } as const;
+
+export type LightingVariant = {
+  readonly [K in keyof typeof LIGHTING]: (typeof LIGHTING)[K] extends string
+    ? string
+    : (typeof LIGHTING)[K] extends number
+      ? number
+      : (typeof LIGHTING)[K];
+};
+
+/**
+ * D08 comparison variants (same light directions, different ratios): `final` is the selection;
+ * `flat` has ambient and fill as strong as the key (no shadow story, no depth); `dark` has the key
+ * alone at low exposure (moody, but the field cannot be read).
+ */
+export const LIGHT_VARIANTS = {
+  final: LIGHTING,
+  flat: {
+    ...LIGHTING,
+    exposure: 1.05,
+    keyIntensity: 1.6,
+    hemiIntensity: 1.6,
+    fillIntensity: 1.4,
+    environmentIntensity: 1.1,
+    fogDensity: 0.006,
+  },
+  dark: {
+    ...LIGHTING,
+    exposure: 0.62,
+    keyIntensity: 3.2,
+    hemiIntensity: 0.18,
+    fillIntensity: 0,
+    environmentIntensity: 0.25,
+    fogDensity: 0.014,
+  },
+} as const satisfies Record<string, LightingVariant>;
+
+export type LightVariantName = keyof typeof LIGHT_VARIANTS;
 
 export const MATERIALS = {
   floorRoughness: 0.72,
@@ -54,6 +121,186 @@ export const MATERIALS = {
   guardColor: '#4a4f58',
 } as const;
 
+/**
+ * PBR surface recipes for the arena (Phase 07A / D07). `family` picks the procedural texture set
+ * (arena/surfaces.ts); colours are the albedo range the detail value spans (sRGB hex); roughness
+ * is the range the detail roughness spans; `wear` lightens and roughens bevelled edges;
+ * `tileMetres` is the world size of one texture tile.
+ */
+export interface SurfaceRecipe {
+  readonly family: 'basalt' | 'fractured' | 'rift' | 'brass' | 'steel';
+  readonly colorLo: string;
+  readonly colorHi: string;
+  readonly roughness: readonly [number, number];
+  readonly metalness: number;
+  readonly normalStrength: number;
+  readonly cavity: number;
+  readonly wear: number;
+  readonly wearColor: string;
+  readonly tileMetres: number;
+  readonly envMapIntensity?: number;
+  readonly glowColor?: string;
+  readonly glow?: number;
+}
+
+export const SURFACES = {
+  /** Platform slabs and walls: dark basalt worn to a soft polish, pale chipped edges. */
+  basaltPolished: {
+    family: 'basalt',
+    colorLo: '#14191f',
+    colorHi: '#46505a',
+    roughness: [0.3, 0.72],
+    metalness: 0.04,
+    normalStrength: 0.85,
+    cavity: 0.8,
+    wear: 0.45,
+    wearColor: '#7a838b',
+    tileMetres: 3.2,
+    envMapIntensity: 0.9,
+  },
+  /** Gate pylons, monoliths, the broken rim: rough fractured stone with deep cracks. */
+  basaltFractured: {
+    family: 'fractured',
+    colorLo: '#191c21',
+    colorHi: '#565a60',
+    roughness: [0.62, 0.95],
+    metalness: 0.03,
+    normalStrength: 1.25,
+    cavity: 1,
+    wear: 0.55,
+    wearColor: '#8a8f93',
+    tileMetres: 2.6,
+  },
+  /** Cold, frost-dusted stone (ice reactions, the chilled state of any slab). */
+  basaltChilled: {
+    family: 'fractured',
+    colorLo: '#25333d',
+    colorHi: '#a9c3d1',
+    roughness: [0.45, 0.85],
+    metalness: 0.02,
+    normalStrength: 1.05,
+    cavity: 0.7,
+    wear: 0.3,
+    wearColor: '#d8eef7',
+    tileMetres: 2.6,
+  },
+  /** The underside mass: deep shadowed stone (seen from the elevated camera at the rim). */
+  basaltDeep: {
+    family: 'fractured',
+    colorLo: '#0d1014',
+    colorHi: '#2a2f35',
+    roughness: [0.75, 0.98],
+    metalness: 0.02,
+    normalStrength: 1.4,
+    cavity: 1,
+    wear: 0.2,
+    wearColor: '#40464c',
+    tileMetres: 5,
+  },
+  /** Loose rubble and floating fragments: rough, unworn (rounded rocks carry no chipped edges). */
+  basaltRubble: {
+    family: 'fractured',
+    colorLo: '#15181c',
+    colorHi: '#464b52',
+    roughness: [0.7, 0.96],
+    metalness: 0.02,
+    normalStrength: 1.2,
+    cavity: 0.9,
+    wear: 0.05,
+    wearColor: '#5c6268',
+    tileMetres: 1.8,
+  },
+  /** Distant formations: broad features (large tile) and enough value to read form in the haze. */
+  basaltFar: {
+    family: 'fractured',
+    colorLo: '#1c2026',
+    colorHi: '#5a6068',
+    roughness: [0.75, 0.98],
+    metalness: 0.02,
+    normalStrength: 1.4,
+    cavity: 0.8,
+    wear: 0,
+    wearColor: '#5a6068',
+    tileMetres: 8,
+  },
+  /** Slabs the rift has cracked open: scorched stone, jagged glowing violet fissures. */
+  riftCracked: {
+    family: 'rift',
+    colorLo: '#16141b',
+    colorHi: '#46434f',
+    roughness: [0.55, 0.9],
+    metalness: 0.03,
+    normalStrength: 1.3,
+    cavity: 1,
+    wear: 0.35,
+    wearColor: '#7c7590',
+    tileMetres: 5,
+    glowColor: '#9c7dff',
+    glow: 3,
+  },
+  /**
+   * Hand-forged aged brass: bright worked metal, sparse low-lying oxide (rendered less metallic),
+   * pale where handled. Used as trim and accents, never as a large field of colour.
+   */
+  brassAged: {
+    family: 'brass',
+    colorLo: '#4a2f17',
+    colorHi: '#e6ad6c',
+    roughness: [0.3, 0.75],
+    metalness: 1,
+    normalStrength: 0.4,
+    cavity: 0.55,
+    wear: 0.3,
+    wearColor: '#f6cf98',
+    tileMetres: 2.2,
+    envMapIntensity: 1.15,
+  },
+  /** Cold brushed steel: ribs, frames, rings. */
+  steelCold: {
+    family: 'steel',
+    colorLo: '#3c454e',
+    colorHi: '#a2b0bb',
+    roughness: [0.24, 0.58],
+    metalness: 0.95,
+    normalStrength: 0.35,
+    cavity: 0.6,
+    wear: 0.2,
+    wearColor: '#cfd9e0',
+    tileMetres: 1.8,
+    envMapIntensity: 1.1,
+  },
+} as const satisfies Record<string, SurfaceRecipe>;
+
+/** Arena set-dressing layout (Phase 07A): seeds, sizes and counts for the generators. */
+export const ARENA_ART = {
+  platform: {
+    seed: 7,
+    outerRadius: 32,
+    sectors: 13,
+    maxSlabDepth: 11,
+    thickness: [1.4, 2.6] as const,
+    gap: 0.16,
+    bites: 4,
+    cracked: 3,
+    channel: 0.5,
+  },
+  /** Monumental columns on the rim: angle (radians from +X), radius, height, shaft radius. */
+  monoliths: [
+    { angle: 0.62, radius: 28.6, height: 19, shaft: 1.7, seed: 31 },
+    { angle: Math.PI - 0.62, radius: 28.6, height: 16, shaft: 1.6, seed: 32 },
+    { angle: Math.PI + 0.66, radius: 29, height: 21, shaft: 1.8, seed: 33 },
+    { angle: -0.66, radius: 29, height: 15, shaft: 1.5, seed: 34 },
+  ],
+  /** Floating fragments around the rim (decor only: no collision). */
+  shards: { count: 42, seed: 51 },
+  /** Distant suspended formations (70–320 m) behind the fog. */
+  formations: { count: 34, seed: 61, near: 70, far: 320 },
+  /** The underside tiers' hidden tops: the deep shadow under the slabs and overhangs. */
+  undersideCap: '#06080b',
+  /** Surface texture resolution per quality tier (px per tile). */
+  surfaceTextureSize: { low: 256, medium: 512, high: 512 },
+} as const;
+
 export const POST = {
   bloomThreshold: 0.82,
   bloomIntensity: 0.9,
@@ -61,14 +308,37 @@ export const POST = {
   vignette: 0.42,
 } as const;
 
-/** Rendering quality tiers (D08). Adaptive switching lands in Phase 07B. */
+/**
+ * Rendering quality tiers (D08). Simulation, collision and scoring are identical on every tier —
+ * only rendering cost changes. `auto` picks a tier from the device class and then adapts to the
+ * measured frame rate (render/adaptive-quality.ts); real-time reflections are image-based on all
+ * tiers (no reflection probes or SSR).
+ */
 export interface QualityTier {
   readonly name: 'low' | 'medium' | 'high';
+  /** Device-pixel-ratio cap. */
   readonly dpr: number;
   readonly shadows: boolean;
   readonly shadowMapSize: number;
+  /** Selective (thresholded) bloom on emissives. */
   readonly bloom: boolean;
+  /** Field-floor texture width (px). */
   readonly textureSize: number;
+  /** Drifting cloud sheets below the platform. */
+  readonly cloudLayers: number;
+  /** Storm-break light shafts. */
+  readonly shafts: boolean;
+  /** Floating dust motes in the key light. */
+  readonly dust: number;
+  /**
+   * Sky: `high` adds cirrus and a full-octave cloud sea; `baked` renders the `low` sky once into
+   * a cube map (one texture read per pixel instead of the procedural storm; no slow drift).
+   */
+  readonly sky: 'baked' | 'low' | 'high';
+  /** Element particle density multiplier. */
+  readonly particles: number;
+  /** Dynamic point lights: the core's, plus the two gate lights when ≥ 3. */
+  readonly pointLights: number;
 }
 
 export const QUALITY: Record<QualityTier['name'], QualityTier> = {
@@ -79,6 +349,12 @@ export const QUALITY: Record<QualityTier['name'], QualityTier> = {
     shadowMapSize: 1024,
     bloom: false,
     textureSize: 1024,
+    cloudLayers: 0,
+    shafts: false,
+    dust: 0,
+    sky: 'baked',
+    particles: 0.5,
+    pointLights: 1,
   },
   medium: {
     name: 'medium',
@@ -87,6 +363,12 @@ export const QUALITY: Record<QualityTier['name'], QualityTier> = {
     shadowMapSize: 1024,
     bloom: true,
     textureSize: 2048,
+    cloudLayers: 2,
+    shafts: true,
+    dust: 260,
+    sky: 'low',
+    particles: 0.75,
+    pointLights: 3,
   },
   high: {
     name: 'high',
@@ -95,5 +377,11 @@ export const QUALITY: Record<QualityTier['name'], QualityTier> = {
     shadowMapSize: 2048,
     bloom: true,
     textureSize: 2048,
+    cloudLayers: 2,
+    shafts: true,
+    dust: 560,
+    sky: 'high',
+    particles: 1,
+    pointLights: 3,
   },
 };

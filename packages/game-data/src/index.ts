@@ -8,4 +8,4 @@ export * from './elements.js';
  * Bump whenever simulation behaviour or tuning that affects outcomes changes. Clients and
  * servers exchange this in HELLO/WELCOME so mismatched builds refuse to play together.
  */
-export const SIM_VERSION = 2;
+export const SIM_VERSION = 3;

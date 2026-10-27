@@ -84,7 +84,28 @@ interface PlayerState {
   guards: EntityId[];
   /** Advanced moves picked for this match (base moves are always available). */
   loadout: AdvancedAbilityId[];
+  /** Latest continuous hand state (ADR-0009) and the tick it arrived on (-1: never). */
+  hand: HandReading;
+  /** The body the hand's grip holds, and for how many ticks; null when it holds nothing. */
+  grasp: { target: EntityId; ticks: number } | null;
+  /** Ticks before the hand may grip again after letting go. */
+  regrip: number;
+  /**
+   * The hand's velocity (m/s) as a stroke or a carry follows it: the force point's motion,
+   * smoothed so tracking jitter averages out. Zero while no hand is described.
+   */
+  hv: { x: number; z: number };
 }
+
+interface HandReading {
+  grip: number;
+  push: number;
+  twist: number;
+  tick: number;
+}
+
+/** An open, still hand (also what a stale or disconnected hand counts as). */
+const NEUTRAL_HAND: Readonly<HandReading> = { grip: 0, push: 0, twist: 0, tick: -1 };
 
 interface EffectState {
   id: number;
@@ -228,6 +249,8 @@ interface SerializedState {
   readonly steams: readonly SteamState[];
   readonly flames: readonly FlameState[];
   readonly bodyEl: readonly (readonly [EntityId, BodyElementState])[];
+  /** Deliberate spin of the core (rad/s about +y) that curves its path (ADR-0009). */
+  readonly coreSpin?: number;
 }
 
 export interface WorldCheckpoint {
@@ -285,6 +308,17 @@ export class GameWorld {
   private readonly pull = { x: 0, y: 0, z: 0 };
   /** Velocities of movable bodies just before the physics step (fracture pass-through). */
   private readonly preVel = new Map<EntityId, { x: number; y: number; z: number }>();
+  /** Each manipulator's velocity this tick (m/s), from its capped motion: the hand's velocity. */
+  private readonly handVel: [{ x: number; z: number }, { x: number; z: number }] = [
+    { x: 0, z: 0 },
+    { x: 0, z: 0 },
+  ];
+  /**
+   * The core's deliberate spin (rad/s about +y): set by a twisting grip, decaying, scrubbed by
+   * hard contacts. Only this spin curves the core — collision spin does not, so rebounds stay
+   * predictable and a curve is always a player's act.
+   */
+  private coreSpin = 0;
   private disposed = false;
 
   private constructor(
@@ -312,6 +346,7 @@ export class GameWorld {
       this.steams = s.steams.map((x) => ({ ...x }));
       this.flames = s.flames.map((x) => ({ ...x }));
       for (const [id, st] of s.bodyEl) this.bodyEl.set(id, { ...st });
+      this.coreSpin = s.coreSpin ?? 0;
       return;
     }
     this.physics = new PhysicsWorld(this.rules, this.arena);
@@ -413,6 +448,10 @@ export class GameWorld {
       connected: true,
       guards: [],
       loadout: [...DEFAULT_LOADOUT],
+      hand: { ...NEUTRAL_HAND },
+      grasp: null,
+      regrip: 0,
+      hv: { x: 0, z: 0 },
     };
   }
 
@@ -491,7 +530,10 @@ export class GameWorld {
   setPaused(paused: boolean): void {
     this.match.paused = paused;
     if (paused) {
-      for (const p of this.players) this.releaseHold(p, false);
+      for (const p of this.players) {
+        this.releaseHold(p, false);
+        this.releaseGrasp(p, false);
+      }
     }
   }
 
@@ -505,6 +547,9 @@ export class GameWorld {
     p.connected = connected;
     if (!connected) {
       this.releaseHold(p, true);
+      this.releaseGrasp(p, true);
+      p.hand = { ...NEUTRAL_HAND };
+      p.hv = { x: 0, z: 0 };
       p.tx = p.mx;
       p.tz = p.mz;
     }
@@ -639,6 +684,15 @@ export class GameWorld {
     );
     p.tx = target.x;
     p.tz = target.z;
+    // The continuous hand channel (ADR-0009): a description of the hand, clamped; never a force.
+    if (intent.hand) {
+      p.hand = {
+        grip: clamp(finite(intent.hand.grip), 0, 1),
+        push: clamp(finite(intent.hand.push), -1, 1),
+        twist: clamp(finite(intent.hand.twist), -1, 1),
+        tick,
+      };
+    }
 
     if (intent.action === 'aim') return;
 
@@ -723,8 +777,9 @@ export class GameWorld {
   private castPulse(p: PlayerState, intensity: number): RejectReason | null {
     const def = this.abilities.pulse;
     const oy = this.rules.manipulator.height;
-    // Release into the shot: a pulse ends the caster's own lift so the body can actually fly.
+    // Release into the shot: a pulse ends the caster's own lift or grip so the body can fly.
     if (p.hold?.ability === 'lift') this.releaseHold(p, true);
+    this.releaseGrasp(p, true);
     const loftHeight = this.rules.core.hoverHeight + def.loftThreshold;
     let coreMag = 0;
     for (const e of this.physics.entities.values()) {
@@ -908,6 +963,7 @@ export class GameWorld {
 
   private startLift(p: PlayerState): RejectReason | null {
     if (p.hold) return 'invalid';
+    this.releaseGrasp(p, true);
     const def = this.abilities.lift;
     let best: EntityId = -1;
     let bestD = Infinity;
@@ -1280,8 +1336,11 @@ export class GameWorld {
   }
 
   private moveManipulators(): void {
-    const maxStep = this.rules.manipulator.maxSpeed / this.rules.match.tickRate;
+    const rate = this.rules.match.tickRate;
+    const maxStep = this.rules.manipulator.maxSpeed / rate;
     for (const p of this.players) {
+      const x0 = p.mx;
+      const z0 = p.mz;
       const dx = p.tx - p.mx;
       const dz = p.tz - p.mz;
       const d = length2(dx, dz);
@@ -1292,7 +1351,258 @@ export class GameWorld {
         p.mx += (dx / d) * maxStep;
         p.mz += (dz / d) * maxStep;
       }
+      const v = this.handVel[p.slot];
+      v.x = (p.mx - x0) * rate;
+      v.z = (p.mz - z0) * rate;
     }
+  }
+
+  /* ---------------------------------------------------------------------------------------- */
+  /* Continuous manipulation (ADR-0009)                                                        */
+  /* ---------------------------------------------------------------------------------------- */
+
+  /** The hand state in force this tick: an open, still hand once it has gone stale. */
+  private handNow(p: PlayerState): Readonly<HandReading> {
+    const stale = this.tickNo - p.hand.tick > this.ticks(this.rules.hand.staleSeconds);
+    return stale || !p.connected ? NEUTRAL_HAND : p.hand;
+  }
+
+  /** Hand forces scale with mass like a force would, within limits (the core's mass is 1). */
+  private handMassScale(mass: number): number {
+    return clamp(this.rules.core.mass / mass, 0.25, 1.25);
+  }
+
+  /** Grips, carries, sweeps and pushes for both seats. Returns true while the core is gripped. */
+  private applyHands(): boolean {
+    if (this.match.phase !== 'playing') {
+      for (const p of this.players) this.releaseGrasp(p, true);
+      return false;
+    }
+    const H = this.rules.hand;
+    let coreHeld = false;
+    for (const p of this.players) {
+      const hand = this.handNow(p);
+      // Only a described hand acts: keys, touch and the bot move a force point, never a hand.
+      const present = hand !== NEUTRAL_HAND;
+      this.trackHand(p, present);
+      if (!p.grasp && !p.hold && p.regrip === 0 && hand.grip >= H.engageGrip) this.startGrasp(p);
+      if (p.grasp) {
+        // A gripping hand neither sweeps nor pushes: everything goes into the hold.
+        if (this.carry(p, hand) && p.grasp?.target === this.coreId) coreHeld = true;
+        continue;
+      }
+      if (present) this.sweepAndPush(p, hand);
+    }
+    return coreHeld;
+  }
+
+  /**
+   * Smooths the force point's motion into the hand's velocity: a jittering tracked hand held
+   * still averages out to rest, while a stroke or a swing comes through (lagging ~0.1 s).
+   */
+  private trackHand(p: PlayerState, present: boolean): void {
+    if (!present) {
+      p.hv.x = p.hv.z = 0;
+      return;
+    }
+    const raw = this.handVel[p.slot];
+    const a = 1 - Math.exp(-this.physics.dt / this.rules.hand.velocitySmoothing);
+    p.hv.x += (raw.x - p.hv.x) * a;
+    p.hv.z += (raw.z - p.hv.z) * a;
+  }
+
+  /** Closes the hand on the nearest movable body within reach (the core favoured). */
+  private startGrasp(p: PlayerState): void {
+    const H = this.rules.hand;
+    // Not without the energy for a moment of holding (no grip that lets go the next tick).
+    if (p.energy < H.holdCostPerSecond * 0.25) return;
+    let best: EntityId = -1;
+    let bestD = Infinity;
+    for (const e of this.physics.entities.values()) {
+      if (!MOVABLE.has(e.kind)) continue;
+      if (e.kind === 'core' && this.match.kickoffShield > 0) continue;
+      const b = this.physics.body(e.id);
+      if (!b) continue;
+      const t = b.translation();
+      const d = length2(t.x - p.mx, t.z - p.mz) - (e.kind === 'core' ? H.coreBias : 0);
+      if (d < bestD) {
+        bestD = d;
+        best = e.id;
+      }
+    }
+    if (best < 0 || bestD > H.reach) return;
+    p.grasp = { target: best, ticks: 0 };
+    this.emitGrip(p, 'start', best);
+  }
+
+  /**
+   * One tick of a hold: a spring–damper from the body to the hand that also matches the hand's
+   * velocity, stiffer the more the hand is closed, with gravity support. Twisting spins the body
+   * (and gives the core a curving spin). Returns false when the hand let go.
+   */
+  private carry(p: PlayerState, hand: Readonly<HandReading>): boolean {
+    const H = this.rules.hand;
+    const grasp = p.grasp!;
+    const body = this.physics.body(grasp.target);
+    if (!body || hand.grip <= H.releaseGrip) {
+      this.releaseGrasp(p, true);
+      return false;
+    }
+    const t = body.translation();
+    const v = body.linvel();
+    if (length2(t.x - p.mx, t.z - p.mz) > H.breakDistance) {
+      this.releaseGrasp(p, true);
+      return false;
+    }
+    const dt = this.physics.dt;
+    const mass = body.mass();
+    const ms = this.handMassScale(mass);
+    const firm = smoothstep01((hand.grip - H.releaseGrip) / (1 - H.releaseGrip));
+    const k = (H.stiffness[0] + (H.stiffness[1] - H.stiffness[0]) * firm) * ms;
+    const c = 2 * H.dampingRatio * Math.sqrt(k);
+    const vm = p.hv;
+    let ax = k * (p.mx - t.x) + c * (vm.x - v.x);
+    let ay = k * (H.holdHeight - t.y) - c * v.y;
+    let az = k * (p.mz - t.z) + c * (vm.z - v.z);
+    const mag = Math.sqrt(ax * ax + ay * ay + az * az);
+    const cap = H.maxHoldAcceleration * ms;
+    if (mag > cap) {
+      const sc = cap / mag;
+      ax *= sc;
+      ay *= sc;
+      az *= sc;
+    }
+    const work = Math.min(mag, cap) * (mass / this.rules.core.mass);
+    const cost = (H.holdCostPerSecond + H.workCost * work) * dt;
+    if (p.energy < cost) {
+      this.releaseGrasp(p, true);
+      return false;
+    }
+    this.spend(p, cost);
+    this.accumulate(grasp.target, ax, ay + this.rules.gravity, az);
+    // A clockwise wrist turn (positive twist, as the player sees it) spins the body clockwise
+    // seen from above (−y), so a thrown core bends to the right of its motion.
+    const twist = deadZone(hand.twist, H.twistDeadZone);
+    if (twist !== 0) {
+      const spin = -twist * H.maxSpin;
+      const w = body.angvel();
+      const dw = (spin - w.y) * Math.min(1, H.spinGain * dt);
+      body.applyTorqueImpulse({ x: 0, y: body.principalInertia().y * dw, z: 0 }, true);
+      if (grasp.target === this.coreId) {
+        this.coreSpin += (spin - this.coreSpin) * Math.min(1, H.spinGain * dt);
+      }
+    }
+    grasp.ticks++;
+    return true;
+  }
+
+  /**
+   * An open hand: moving, it drags nearby bodies along its motion (only where it moves faster
+   * than they do — a still hand brakes nothing); pushing toward the screen presses bodies away
+   * from it, drawing back pulls them in.
+   */
+  private sweepAndPush(p: PlayerState, hand: Readonly<HandReading>): void {
+    const H = this.rules.hand;
+    const vm = p.hv;
+    const speed = length2(vm.x, vm.z);
+    // A stroke fades in above the threshold speed (no kick at it); slower motion drags nothing.
+    const stroke = smoothstep01((speed - H.minSweepSpeed) / H.minSweepSpeed);
+    const sweeping = stroke > 0;
+    const push = deadZone(hand.push, H.pushDeadZone);
+    if (!sweeping && push === 0) return;
+    const ux = sweeping ? vm.x / speed : 0;
+    const uz = sweeping ? vm.z / speed : 0;
+    const dt = this.physics.dt;
+    for (const e of this.physics.entities.values()) {
+      if (!MOVABLE.has(e.kind)) continue;
+      if (e.kind === 'core' && this.match.kickoffShield > 0) continue;
+      const body = this.physics.body(e.id);
+      if (!body) continue;
+      const t = body.translation();
+      const dx = t.x - p.mx;
+      const dz = t.z - p.mz;
+      const r = length2(dx, dz);
+      const mass = body.mass();
+      const ms = this.handMassScale(mass);
+      let ax = 0;
+      let az = 0;
+      if (sweeping && r < H.sweepRadius) {
+        const v = body.linvel();
+        const along = (vm.x - v.x) * ux + (vm.z - v.z) * uz;
+        if (along > 0) {
+          const a =
+            Math.min(H.maxSweepAcceleration, H.sweepGain * along) *
+            smoothstep01(1 - r / H.sweepRadius) *
+            stroke *
+            ms;
+          ax += ux * a;
+          az += uz * a;
+        }
+      }
+      if (push !== 0 && r < H.pushRadius) {
+        // Away from the hand (toward it when pulling); at the hand itself, at the rival goal.
+        const nx = r > 0.3 ? dx / r : p.slot === 0 ? 1 : -1;
+        const nz = r > 0.3 ? dz / r : 0;
+        const ease = push < 0 ? Math.min(1, r / 1.5) : 1;
+        const a = H.pushAcceleration * push * smoothstep01(1 - r / H.pushRadius) * ms * ease;
+        ax += nx * a;
+        az += nz * a;
+      }
+      if (ax === 0 && az === 0) continue;
+      const cost = H.workCost * length2(ax, az) * (mass / this.rules.core.mass) * dt;
+      if (p.energy < cost) return;
+      this.spend(p, cost);
+      this.accumulate(e.id, ax, 0, az);
+    }
+  }
+
+  /**
+   * The core's curve: a Magnus-like side force from its deliberate spin, a = k · ω × v (ω about
+   * +y), capped; the spin decays like the core's own angular damping. Not while it is held.
+   */
+  private applyCurve(coreHeld: boolean): void {
+    if (this.coreSpin === 0) return;
+    const H = this.rules.hand;
+    const decay = Math.exp(-this.rules.core.angularDamping * this.physics.dt);
+    if (!coreHeld) {
+      const core = this.physics.body(this.coreId);
+      if (core && this.match.phase === 'playing') {
+        const v = core.linvel();
+        let ax = H.magnus * this.coreSpin * v.z;
+        let az = -H.magnus * this.coreSpin * v.x;
+        const mag = length2(ax, az);
+        if (mag > H.maxMagnusAcceleration) {
+          ax *= H.maxMagnusAcceleration / mag;
+          az *= H.maxMagnusAcceleration / mag;
+        }
+        this.accumulate(this.coreId, ax, 0, az);
+      }
+      this.coreSpin *= decay;
+    }
+    if (Math.abs(this.coreSpin) < 0.05) this.coreSpin = 0;
+  }
+
+  /** Opens the hand: the body keeps whatever velocity it has (letting go is how you throw). */
+  private releaseGrasp(p: PlayerState, announce: boolean): void {
+    if (!p.grasp) return;
+    const target = p.grasp.target;
+    p.grasp = null;
+    p.regrip = this.ticks(this.rules.hand.regripSeconds);
+    if (announce) this.emitGrip(p, 'end', target);
+  }
+
+  private emitGrip(p: PlayerState, phase: 'start' | 'end', entity: EntityId): void {
+    const b = this.physics.body(entity);
+    const t = b ? b.translation() : { x: p.mx, y: this.rules.manipulator.height, z: p.mz };
+    const v = b ? b.linvel() : { x: 0, y: 0, z: 0 };
+    this.emit({
+      type: 'grip',
+      slot: p.slot,
+      phase,
+      entity,
+      p: [q3(t.x), q3(t.y), q3(t.z)],
+      v: [q3(v.x), q3(v.y), q3(v.z)],
+    });
   }
 
   private accumulate(id: EntityId, ax: number, ay: number, az: number): void {
@@ -1341,6 +1651,10 @@ export class GameWorld {
       this.accumulate(h.target, ax, ay, az);
       if (h.target === this.coreId) coreLifted = true;
     }
+
+    // Continuous manipulation: grips, open-hand sweeps, push / pull; then the core's curve.
+    if (this.applyHands()) coreLifted = true;
+    this.applyCurve(coreLifted);
 
     // Sweeps (crosswind fields): smooth radial falloff, fade in/out, force-like mass scaling.
     if (this.effects.length > 0) {
@@ -1426,6 +1740,9 @@ export class GameWorld {
   private onImpact(id: EntityId, impulse: number, striker: EntityId): void {
     const e = this.physics.entities.get(id);
     if (!e) return;
+    // A hard contact scrubs most of the core's deliberate spin (its curve).
+    if (id === this.coreId && impulse >= this.rules.hand.spinScrubImpulse)
+      this.coreSpin *= this.rules.hand.spinKeptOnImpact;
     if (e.kind === 'guard') {
       e.damage += impulse;
       if (e.damage >= this.abilities.guard.breakImpulse) this.despawn(id, 'broken');
@@ -1933,6 +2250,7 @@ export class GameWorld {
       core.setAngvel({ x: 0, y: 0, z: 0 }, true);
       core.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
     }
+    this.coreSpin = 0;
     this.prevCore = { x: 0, y: c.hoverHeight, z: 0 };
     for (const b of this.boulders) {
       if (b.id < 0 || !this.physics.body(b.id)) this.spawnObstacle(b); // rebuilt after a fracture
@@ -1945,6 +2263,7 @@ export class GameWorld {
     }
     for (const p of this.players) {
       this.releaseHold(p, false);
+      this.releaseGrasp(p, false);
       const fresh = this.freshPlayer(p.slot);
       p.mx = fresh.mx;
       p.mz = fresh.mz;
@@ -1994,7 +2313,10 @@ export class GameWorld {
       p: [q3(at.x), q3(at.y), q3(at.z)],
       speed: q3(Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z)),
     });
-    for (const p of this.players) this.releaseHold(p, true);
+    for (const p of this.players) {
+      this.releaseHold(p, true);
+      this.releaseGrasp(p, true);
+    }
     if (m.golden || m.score[scorer] >= this.rules.match.goalsToWinRound) {
       this.decideRound(scorer, m.golden ? 'golden' : 'goals');
     }
@@ -2072,8 +2394,9 @@ export class GameWorld {
         else p.cooldowns[k] = left;
       }
       if (p.lockout > 0) p.lockout--;
+      if (p.regrip > 0) p.regrip--;
       if (p.regenDelay > 0) p.regenDelay--;
-      else if (!p.hold) p.energy = Math.min(this.rules.energy.max, p.energy + regen);
+      else if (!p.hold && !p.grasp) p.energy = Math.min(this.rules.energy.max, p.energy + regen);
     }
 
     const m = this.match;
@@ -2141,6 +2464,7 @@ export class GameWorld {
         v: [q3(v.x), q3(v.y), q3(v.z)],
         ttl: e.ttl,
         ...this.elementFields(e.id),
+        ...(e.id === this.coreId && this.coreSpin !== 0 ? { s: q3(this.coreSpin) } : {}),
       });
     }
     const effects: EffectSnapshot[] = this.effects.map((f) => ({
@@ -2268,6 +2592,7 @@ export class GameWorld {
       cd,
       hold: p.hold ? p.hold.ability : null,
       holdTarget: p.hold ? p.hold.target : -1,
+      grasp: p.grasp ? p.grasp.target : -1,
       connected: p.connected,
     };
   }
@@ -2292,7 +2617,19 @@ export class GameWorld {
         .num(p.energy)
         .int(p.lockout)
         .int(p.hold ? p.hold.target : -1);
+      // Hand state only when present, so play without a hand channel hashes exactly as before.
+      if (p.grasp) h.str('grasp').int(p.grasp.target).int(p.grasp.ticks);
+      if (p.regrip > 0) h.str('regrip').int(p.regrip);
+      if (p.hand.tick >= 0)
+        h.str('hand')
+          .num(p.hand.grip)
+          .num(p.hand.push)
+          .num(p.hand.twist)
+          .int(p.hand.tick)
+          .num(p.hv.x)
+          .num(p.hv.z);
     }
+    if (this.coreSpin !== 0) h.str('spin').num(this.coreSpin);
     for (const f of this.effects) h.int(f.id).num(f.x).num(f.z).int(f.ttl).num(f.dx).num(f.dz);
     for (const q of this.pools) {
       h.int(q.id).num(q.x).num(q.z).num(q.r).num(q.depth).num(q.temp);
@@ -2365,6 +2702,7 @@ export class GameWorld {
       steams: this.steams.map((x) => ({ ...x })),
       flames: this.flames.map((x) => ({ ...x })),
       bodyEl: [...this.bodyEl].map(([id, st]) => [id, { ...st }] as const),
+      coreSpin: this.coreSpin,
     };
     return { version: 1, rapier: this.physics.takeSnapshot(), state: JSON.stringify(state) };
   }
@@ -2381,7 +2719,15 @@ export class GameWorld {
     b.setTranslation({ x, y, z }, true);
     b.setLinvel({ x: vx, y: vy, z: vz }, true);
     b.setAngvel({ x: 0, y: 0, z: 0 }, true);
-    if (id === this.coreId) this.prevCore = { x, y, z };
+    if (id === this.coreId) {
+      this.prevCore = { x, y, z };
+      this.coreSpin = 0;
+    }
+  }
+
+  /** Debug/test-only (and the Hands Lab's task setup): every hand lets go of what it holds. */
+  debugReleaseGrasps(): void {
+    for (const p of this.players) this.releaseGrasp(p, true);
   }
 
   /** Debug/test-only manipulator placement for fixtures. */
@@ -2412,6 +2758,8 @@ export class GameWorld {
     lockout: number;
     cooldowns: Partial<Record<AbilityId, number>>;
     guards: readonly EntityId[];
+    grasp: EntityId;
+    regrip: number;
   } {
     const p = this.players[slot];
     return {
@@ -2419,7 +2767,14 @@ export class GameWorld {
       lockout: p.lockout,
       cooldowns: { ...p.cooldowns },
       guards: [...p.guards],
+      grasp: p.grasp ? p.grasp.target : -1,
+      regrip: p.regrip,
     };
+  }
+
+  /** Debug/test-only: the core's deliberate (curving) spin, rad/s about +y. */
+  debugCoreSpin(): number {
+    return this.coreSpin;
   }
 
   /** Physics budget counters for HUD/diagnostics. */
@@ -2533,6 +2888,18 @@ function finite(n: number): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Smooth 0 → 1 over [0, 1] (clamped). */
+function smoothstep01(x: number): number {
+  const t = clamp(x, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+/** Zero inside ±dead, rescaled to keep the full range outside it. */
+function deadZone(x: number, dead: number): number {
+  const a = Math.abs(x);
+  return a <= dead ? 0 : (Math.sign(x) * (a - dead)) / (1 - dead);
+}
+
 /** Zero-padded id so string keys sort numerically (deterministic discharge order). */
 function pad(n: number): string {
   return String(n).padStart(7, '0');
@@ -2549,6 +2916,10 @@ function clonePlayer(p: PlayerState): PlayerState {
     hold: p.hold ? { ...p.hold } : null,
     guards: [...p.guards],
     loadout: [...(p.loadout ?? DEFAULT_LOADOUT)],
+    hand: { ...(p.hand ?? NEUTRAL_HAND) },
+    grasp: p.grasp ? { ...p.grasp } : null,
+    regrip: p.regrip ?? 0,
+    hv: { ...(p.hv ?? { x: 0, z: 0 }) },
   };
 }
 

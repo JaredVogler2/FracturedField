@@ -9,6 +9,10 @@
  *   LB / RB     first / second pick (held for hold moves)
  *   LT          LIFT (held)      D-pad  SWEEP in that screen direction
  *   Start       pause menu
+ *
+ * Hands-on (ADR-0009) the pad describes a hand: RT closes it (analog — squeeze to hold, ease off
+ * to let go and throw), the right stick turns it (x: right is clockwise) and pushes or pulls
+ * (y: up pushes away). A still PULSEs; the rest is unchanged.
  */
 import { create } from 'zustand';
 import {
@@ -18,6 +22,7 @@ import {
   type AdvancedAbilityId,
 } from '@ff/game-data';
 import type { ActionEdge } from '@ff/controls';
+import type { HandState } from '@ff/protocol';
 import type { SeatInput } from './manager';
 import { view } from '../render/view';
 
@@ -37,9 +42,13 @@ export interface PadFrame {
   readonly edges: readonly PadEdge[];
   /** Start was pressed this frame. */
   readonly menu: boolean;
+  /** Hands-on: the hand the pad describes (null when hands-on is off). */
+  readonly hand: HandState | null;
 }
 
 const DEAD = 0.18;
+/** A trigger resting under this is open (worn triggers rarely rest at exactly 0). */
+const TRIGGER_REST = 0.05;
 const B = {
   A: 0,
   B: 1,
@@ -77,7 +86,7 @@ export class GamepadMapper {
     this.loadout = loadout;
   }
 
-  update(pad: PadState): PadFrame {
+  update(pad: PadState, handsOn = false): PadFrame {
     const edges: PadEdge[] = [];
     const down = (i: number) => pad.buttons[i]?.pressed === true;
     const value = (i: number) => {
@@ -85,7 +94,8 @@ export class GamepadMapper {
       return b ? (Number.isFinite(b.value) ? b.value : b.pressed ? 1 : 0) : 0;
     };
     const pressed = (i: number) => down(i) && !this.prev[i];
-    if (pressed(B.A) || pressed(B.RT)) edges.push({ action: 'pulse', phase: 'tap' });
+    // Hands-on, RT is the hand's grip and no longer fires PULSE.
+    if (pressed(B.A) || (!handsOn && pressed(B.RT))) edges.push({ action: 'pulse', phase: 'tap' });
     if (pressed(B.B)) edges.push({ action: 'guard', phase: 'tap' });
     if (pressed(B.X)) edges.push({ action: 'infuse', phase: 'tap', modifier: 0 });
     if (pressed(B.Y)) edges.push({ action: 'infuse', phase: 'tap', modifier: 1 });
@@ -118,7 +128,12 @@ export class GamepadMapper {
     this.prev = pad.buttons.map((b) => b.pressed);
     const [lx, ly] = stick(pad.axes[0] ?? 0, pad.axes[1] ?? 0);
     const [rx, ry] = stick(pad.axes[2] ?? 0, pad.axes[3] ?? 0);
-    return { move: [lx + rx * 0.4, ly + ry * 0.4], edges, menu };
+    if (handsOn) {
+      const rt = Math.min(1, Math.max(0, value(B.RT)));
+      const grip = rt <= TRIGGER_REST ? 0 : (rt - TRIGGER_REST) / (1 - TRIGGER_REST);
+      return { move: [lx, ly], edges, menu, hand: { grip, push: ry, twist: rx } };
+    }
+    return { move: [lx + rx * 0.4, ly + ry * 0.4], edges, menu, hand: null };
   }
 
   /**
@@ -194,6 +209,7 @@ export class GamepadController {
     if (e.gamepad.index !== this.index) return;
     this.index = null;
     this.apply(this.mapper.reset(), performance.now());
+    this.seat.setHand(null, 'gamepad'); // a pad that is gone holds nothing
     useGamepad.setState({
       connected: null,
       notice: { text: 'Controller disconnected — other controls still work', at: Date.now() },
@@ -232,7 +248,7 @@ export class GamepadController {
     }
     if (!pad) return;
     this.mapper.setLoadout(this.seat.loadout);
-    const frame = this.mapper.update(pad);
+    const frame = this.mapper.update(pad, this.seat.handsOn);
     // Start opens and closes the menu even while paused (a controller-only player must be able
     // to resume); nothing else acts until play resumes.
     if (frame.menu) window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape' }));
@@ -247,6 +263,12 @@ export class GamepadController {
       );
       this.seat.claim('gamepad', now);
     }
+    const hand = frame.hand;
+    if (hand) {
+      // A squeezed trigger or a deflected right stick takes the seat over, as the sticks do.
+      if (hand.grip > 0.5 || hand.push !== 0 || hand.twist !== 0) this.seat.claim('gamepad', now);
+      this.seat.setHand(hand, 'gamepad');
+    }
     // Buttons tag their own intents; only the sticks take over the aim.
     if (frame.edges.length > 0) this.apply(frame.edges, now);
   }
@@ -254,6 +276,7 @@ export class GamepadController {
   pause(): void {
     this.paused = true;
     this.apply(this.mapper.release(), performance.now());
+    this.seat.setHand(null, 'gamepad');
   }
 
   resume(): void {
@@ -262,6 +285,7 @@ export class GamepadController {
 
   dispose(): void {
     this.apply(this.mapper.reset(), performance.now());
+    this.seat.setHand(null, 'gamepad');
     window.removeEventListener('gamepadconnected', this.onConnect);
     window.removeEventListener('gamepaddisconnected', this.onDisconnect);
   }

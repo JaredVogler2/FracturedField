@@ -18,8 +18,32 @@ export type ToSimWorker =
       readonly bots: readonly { readonly slot: PlayerSlot; readonly difficulty: BotDifficulty }[];
       /** Optional rule overrides (fast test rounds). Local play only. */
       readonly fast?: boolean;
+      /**
+       * Test runs only: wall-clock speed of the simulation (0.25–1). Rules, physics and every
+       * tick are unchanged; only the time between ticks grows.
+       */
+      readonly timeScale?: number;
       /** Advanced-move picks per seat. */
       readonly loadouts?: readonly [readonly AbilityId[], readonly AbilityId[]];
+      /** The Hands Lab sandbox: lab rules; the empty second seat counts as ready. */
+      readonly lab?: boolean;
+    }
+  | {
+      /**
+       * Test runs only (a worker started with `timeScale`): re-paces the simulation, 0.1–1. A
+       * scripted test player keeps its reactions within a set time of play on any machine.
+       */
+      readonly type: 'timeScale';
+      readonly value: number;
+    }
+  | {
+      /** Hands Lab only: set up a task (the core, and a boulder moved into place). */
+      readonly type: 'labPlace';
+      readonly core: readonly [number, number];
+      readonly boulder?: {
+        readonly from: readonly [number, number];
+        readonly to: readonly [number, number];
+      };
     }
   | { readonly type: 'intent'; readonly slot: PlayerSlot; readonly intent: ActionIntent }
   | {

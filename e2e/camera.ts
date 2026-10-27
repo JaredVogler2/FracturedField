@@ -58,6 +58,8 @@ export interface HandPose {
   cy?: number;
   size?: number;
   shape?: 'open' | 'fist' | 'point' | 'vee' | 'thumb' | 'ok' | 'relaxed' | 'three';
+  /** In-plane rotation (radians, clockwise in the camera image). */
+  roll?: number;
 }
 
 /** Moves the page's live synthetic hand (`null` = out of frame, 'stop' = camera feed off). */

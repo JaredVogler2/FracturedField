@@ -7,7 +7,7 @@
     "dev": "node ../../scripts/prepare-vision-assets.mjs && vite",
     "build": "node ../../scripts/prepare-vision-assets.mjs && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json && tsc -p bench/tsconfig.json",
     "vision-assets": "node ../../scripts/prepare-vision-assets.mjs"
   },
   "dependencies": {

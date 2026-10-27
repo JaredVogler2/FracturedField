@@ -24,6 +24,7 @@
     "benchmark:elements": "tsx packages/sim/bench/bench-elements.ts",
     "benchmark:gestures": "tsx packages/gestures/bench/detection.ts",
     "benchmark:worker": "pnpm --filter @ff/room-worker bench:live",
+    "preview:surfaces": "tsx apps/web/bench/preview-surfaces.ts",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build"
   },
   "devDependencies": {

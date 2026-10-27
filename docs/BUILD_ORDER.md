@@ -17,6 +17,7 @@ This file is the actionable sequence for Claude Code. Execute the top-level phas
 |---|---|---|---|
 | 5 | prompts/05-CAMERA-GESTURES.md | deep-dives/D05-GESTURE-STATE-MACHINES.md | Reliable calibrated local hand/pose control |
 | 6 | prompts/06-MOBILE-CONTROLS.md | deep-dives/D06-SENSOR-FUSION.md | iOS/Android touch/motion/stand modes, no permission dead ends |
+| 6M | docs/decisions/ADR-0009-continuous-manipulation.md (owner directive, Oct 2026) | docs/progress/PHASE-06M.md (milestones M1–M4, people-study protocol) | Continuous physical manipulation (grip, swing, throw, spin, sweep, push) from every input, a Hands Lab, proof with people before the rest of Phase 07 |
 | 7A | prompts/07-AAA-VISUALS.md | deep-dives/D07-ENVIRONMENT-ART.md | Production environment topology, models, PBR materials |
 | 7B | prompts/07-AAA-VISUALS.md | deep-dives/D08-LIGHTING-ATMOSPHERE.md | Filmic lighting, cloud horizon, shadows and effects tiers |
 | 7C | prompts/07-AAA-VISUALS.md | deep-dives/D09-CORE-ELEMENTAL-VFX.md | Eight causal elemental shaders and collision-linked feedback |

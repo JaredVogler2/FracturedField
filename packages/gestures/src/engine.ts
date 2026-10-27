@@ -1,5 +1,6 @@
 import { defaultCalibration, type Calibration } from './calibration.js';
-import { handFeatures, type HandFeatures } from './features.js';
+import { aspectCorrect, handFeatures, type HandFeatures } from './features.js';
+import { knuckleRoll } from './continuous.js';
 import { OneEuro, clamp, dist2 } from './math.js';
 import { ShapeClassifier } from './shapes.js';
 import {
@@ -729,6 +730,8 @@ export class GestureEngine {
               speed,
               normalZ: f.normal.z,
               handedness: main.handedness,
+              features: f,
+              roll: knuckleRoll(aspectCorrect(main.landmarks, aspect), main.handedness),
             }
           : null,
       status: {

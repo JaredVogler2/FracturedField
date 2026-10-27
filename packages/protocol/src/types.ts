@@ -36,6 +36,20 @@ export type IntentPhase = (typeof INTENT_PHASES)[number];
 export type IntentAction = AbilityId | 'aim';
 
 /**
+ * Continuous hand state (ADR-0009): what the player's hand is doing, sent with every `aim`
+ * intent by every input method. It describes a hand, never a force — the authority alone turns
+ * it into (capped) forces, the same way for every input.
+ */
+export interface HandState {
+  /** Closure: 0 = open palm … 1 = fist. */
+  readonly grip: number;
+  /** Moving toward the screen (+) or back (−), −1 … 1. */
+  readonly push: number;
+  /** Wrist roll from the neutral pose, −1 … 1. */
+  readonly twist: number;
+}
+
+/**
  * Canonical, input-agnostic player intention. Clients describe WHAT they want; the authority
  * decides whether it is legal and what force it produces. Never carries positions, forces,
  * energy, cooldowns or scores as truth.
@@ -56,6 +70,8 @@ export interface ActionIntent {
   /** Small signed modifier (sweep chirality ±1, element index for infuse). */
   readonly modifier?: number;
   readonly source: InputSource;
+  /** The hand's continuous state (on `aim` intents; inputs without one omit it). */
+  readonly hand?: HandState;
 }
 
 export const ENTITY_KINDS = ['core', 'boulder', 'guard', 'shard', 'ice', 'lodestone'] as const;
@@ -84,6 +100,8 @@ export interface EntitySnapshot {
   readonly sh?: 1;
   /** Remaining energized ticks of an electromagnet (lodestone). */
   readonly en?: number;
+  /** The core's deliberate spin (rad/s about +y) that curves its path; only while non-zero. */
+  readonly s?: number;
 }
 
 export interface PlayerSnapshot {
@@ -97,6 +115,8 @@ export interface PlayerSnapshot {
   readonly hold: AbilityId | null;
   /** Body the held ability is acting on (lift target), -1 if none. */
   readonly holdTarget: EntityId;
+  /** Body the hand's grip is holding (ADR-0009), -1 if none. */
+  readonly grasp: EntityId;
   readonly connected: boolean;
 }
 
@@ -216,6 +236,15 @@ export type GameEvent =
       readonly reason: 'goals' | 'clock' | 'golden' | 'territory' | 'draw';
     })
   | (EventBase & { readonly type: 'matchEnd'; readonly winner: PlayerSlot | -1 })
+  | (EventBase & {
+      readonly type: 'grip';
+      readonly slot: PlayerSlot;
+      /** start: the hand closed on `entity`; end: it let go (`v` = the body's velocity then). */
+      readonly phase: 'start' | 'end';
+      readonly entity: EntityId;
+      readonly p: Vec3;
+      readonly v: Vec3;
+    })
   | (EventBase & {
       readonly type: 'reaction';
       readonly kind: ReactionKind;
