@@ -33,4 +33,4 @@ Stress scenario: low-end phone with bot strategy computation cannot destabilize 
 Demonstrate one bot attack and one player save on screen with event log; avoid bot acting purely by fake predetermined keyframes.
 
 ## Acceptance
-G19 (solo), G03 G08, stable across 10 offline rematches. The bot is a genuine game opponent inside the same rules.
+S19 (solo), G03 G08, stable across 10 offline rematches. The bot is a genuine game opponent inside the same rules.
