@@ -484,6 +484,7 @@ export function wallBlocks(
   length: number,
   thickness: number,
   height: number,
+  lod: Lod = 'high',
 ): THREE.BufferGeometry {
   const rand = mulberry32(seed);
   const parts: THREE.BufferGeometry[] = [];
@@ -491,9 +492,11 @@ export function wallBlocks(
   const count = Math.max(1, Math.round(length / 2.6));
   const unit = length / count;
   const gap = 0.05;
+  // Bevel segments: a 6 cm bevel is a pixel or two on a phone — one segment reads the same there.
+  const bevel = lod === 'high' ? 2 : 1;
   for (let i = 0; i < count; i++) {
     const h = body * (0.985 + rand() * 0.03);
-    const b = new RoundedBoxGeometry(unit - gap, h, thickness, 2, 0.06);
+    const b = new RoundedBoxGeometry(unit - gap, h, thickness, bevel, 0.06);
     b.translate(-length / 2 + unit * (i + 0.5), h / 2, (rand() - 0.5) * 0.03);
     tint(b, 0.82 + rand() * 0.2);
     parts.push(b);
@@ -501,7 +504,7 @@ export function wallBlocks(
   const caps = Math.max(1, Math.round(length / 3.4));
   const capLen = length / caps;
   for (let i = 0; i < caps; i++) {
-    const c = new RoundedBoxGeometry(capLen - 0.04, COPING, thickness + 0.14, 2, 0.05);
+    const c = new RoundedBoxGeometry(capLen - 0.04, COPING, thickness + 0.14, bevel, 0.05);
     c.translate(-length / 2 + capLen * (i + 0.5), body + COPING / 2, 0);
     tint(c, 0.95 + rand() * 0.12);
     parts.push(c);
@@ -514,7 +517,12 @@ export function wallBlocks(
  * wall's): a thin bright line that marks the field boundary from any camera, rivet heads every
  * ~0.8 m. Brass is an accent here, never a broad field of colour.
  */
-export function capRail(length: number, thickness: number, y: number): THREE.BufferGeometry {
+export function capRail(
+  length: number,
+  thickness: number,
+  y: number,
+  lod: Lod = 'high',
+): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   const edge = (thickness + 0.14) / 2 - 0.065;
   for (const s of [-1, 1]) {
@@ -522,6 +530,8 @@ export function capRail(length: number, thickness: number, y: number): THREE.Buf
     strip.translate(0, y + 0.02, s * edge);
     parts.push(strip);
   }
+  // Rivets are sub-pixel at phone resolution: the low detail level keeps only the strips.
+  if (lod === 'low') return merge(parts);
   const n = Math.max(2, Math.round(length / 0.8));
   for (let i = 0; i <= n; i++) {
     const x = -length / 2 + (length * i) / n;
@@ -840,20 +850,35 @@ export function underside(
   lod: Lod,
 ): {
   stone: THREE.BufferGeometry;
+  /**
+   * The tiers' upward-facing tops: hidden under the slabs (or, from the side, in the deep shadow
+   * under the tier above), so they take an unlit dark material — a software rasteriser shades
+   * hidden pixels too, and the first is as wide as the platform.
+   */
+  caps: THREE.BufferGeometry;
   steel: THREE.BufferGeometry;
   ember: THREE.BufferGeometry;
 } {
+  // Even, so the caps' rim vertices (CircleGeometry from θ = π/2) meet the walls' exactly.
   const sides = lod === 'high' ? 40 : 18;
   const stone: THREE.BufferGeometry[] = [];
+  const caps: THREE.BufferGeometry[] = [];
   const tiers = [
     { top: radius * 0.97, bottom: radius * 0.82, h: 2.2, y: -2.0 },
     { top: radius * 0.8, bottom: radius * 0.55, h: 3.0, y: -4.4 },
     { top: radius * 0.52, bottom: radius * 0.2, h: 5.5, y: -8.4 },
   ];
   for (const t of tiers) {
-    const c = new THREE.CylinderGeometry(t.top, t.bottom, t.h, sides, 2);
-    c.translate(0, t.y - t.h / 2 + 1.1, 0);
-    stone.push(tint(c, 0.62));
+    const y = t.y - t.h / 2 + 1.1;
+    const wall = new THREE.CylinderGeometry(t.top, t.bottom, t.h, sides, 2, true);
+    wall.translate(0, y, 0);
+    stone.push(tint(wall, 0.62));
+    const bottom = new THREE.CircleGeometry(t.bottom, sides, Math.PI / 2).rotateX(Math.PI / 2);
+    bottom.translate(0, y - t.h / 2, 0);
+    stone.push(tint(bottom, 0.62));
+    const top = new THREE.CircleGeometry(t.top, sides, Math.PI / 2).rotateX(-Math.PI / 2);
+    top.translate(0, y + t.h / 2, 0);
+    caps.push(top);
   }
   const steel: THREE.BufferGeometry[] = [];
   for (const [r, y] of [
@@ -895,7 +920,7 @@ export function underside(
       steel.push(clamp);
     }
   }
-  return { stone: merge(stone), steel: merge(steel), ember: merge(ember) };
+  return { stone: merge(stone), caps: merge(caps), steel: merge(steel), ember: merge(ember) };
 }
 
 /**

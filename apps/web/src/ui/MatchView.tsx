@@ -42,6 +42,8 @@ import { NetPanel } from '../hud/NetPanel';
 import { view } from '../render/view';
 import { renderStats } from '../render/render-stats';
 import { surfaceStats } from '../render/arena/surfaces';
+import type { TierName } from '../render/adaptive-quality';
+import type { LightVariantName } from '../render/art-tokens';
 
 /**
  * ?test=1 only: what this device sent (source and action, never the aim), numbered so an E2E
@@ -241,6 +243,27 @@ export function MatchView({
     const q = new URLSearchParams(window.location.search).get('quality');
     return q === 'low' || q === 'medium' || q === 'high' ? q : null;
   }, []);
+  // Test-only: the D08 lighting comparison variants, and opting a test run into adaptation
+  // (otherwise test runs keep a fixed tier, so they stay reproducible).
+  const testParams = useMemo((): {
+    test: boolean;
+    adaptive: boolean;
+    light: LightVariantName | undefined;
+  } => {
+    const p = new URLSearchParams(window.location.search);
+    const light = p.get('light');
+    return {
+      test: p.has('test'),
+      adaptive: p.get('adaptive') === '1',
+      light: light === 'flat' || light === 'dark' || light === 'final' ? light : undefined,
+    };
+  }, []);
+  // The adapted tier is remembered with the base tier it started from: a new base starts over.
+  const [adapted, setAdapted] = useState<{ base: string; tier: TierName } | null>(null);
+  const baseQuality = qualityOverride ?? resolveQuality(quality);
+  const adaptive =
+    quality === 'auto' && !qualityOverride && (!testParams.test || testParams.adaptive);
+  const effectiveQuality = adaptive && adapted?.base === baseQuality ? adapted.tier : baseQuality;
   const devHud = useSettings((s) => s.devHud);
   const loadout = useSettings((s) => s.loadout);
   const loadoutP2 = useSettings((s) => s.loadoutP2);
@@ -550,7 +573,12 @@ export function MatchView({
     <GameClientProvider client={client}>
       <div className={`stage${touchUi ? ` touch-ui hand-${controls.hand}` : ''}`}>
         <GameScene
-          quality={qualityOverride ?? resolveQuality(quality)}
+          quality={effectiveQuality}
+          textureTier={baseQuality}
+          {...(adaptive
+            ? { onAdapt: (tier: TierName) => setAdapted({ base: baseQuality, tier }) }
+            : {})}
+          {...(testParams.test && testParams.light ? { light: testParams.light } : {})}
           localSlots={setup.localSlots}
           side={mySlot === 1 ? -1 : 1}
           portraitSlot={mySlot}

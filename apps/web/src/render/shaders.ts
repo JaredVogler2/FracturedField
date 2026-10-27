@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { SKY_GLSL } from './atmosphere';
+import { SKY } from './art-tokens';
 
 /**
  * Original GLSL materials. Each factory returns a material with typed uniforms; callers update
@@ -251,16 +253,20 @@ export function createRiftGlassMaterial(
   }) as THREE.ShaderMaterial & { uniforms: RiftGlassUniforms };
 }
 
-/** Storm sky dome: abyss zenith, storm horizon, warm break glow toward the key light. */
-export function createSkyMaterial(): THREE.ShaderMaterial {
+/**
+ * Storm sky dome (Phase 07B): the shared aerial-perspective gradient (atmosphere.ts → ffSky, the
+ * same colours the fog fades to), an eye-wall of towering storm clouds ringing the horizon with
+ * ragged tops and edges lit toward the storm break, drifting cirrus above it (high detail) and the
+ * billowing cloud sea below, lit toward the break and dissolving into the horizon haze.
+ * Drawn after the opaque scene at the far plane, so pixels the arena covers cost nothing.
+ */
+export function createSkyMaterial(detail: 'low' | 'high' = 'high'): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     uniforms: {
-      uTop: { value: new THREE.Color('#050d16') },
-      uHorizon: { value: new THREE.Color('#16405a') },
-      uGlow: { value: new THREE.Color('#d9a066') },
-      uSunDir: { value: new THREE.Vector3(-0.45, 0.35, 0.55).normalize() },
+      uHorizon: { value: new THREE.Color(SKY.horizon) },
       uTime: { value: 0 },
     },
+    defines: detail === 'high' ? { FF_SKY_HIGH: '' } : {},
     side: THREE.BackSide,
     depthWrite: false,
     vertexShader: /* glsl */ `
@@ -272,23 +278,50 @@ export function createSkyMaterial(): THREE.ShaderMaterial {
       }
     `,
     fragmentShader: /* glsl */ `
-      uniform vec3 uTop;
       uniform vec3 uHorizon;
-      uniform vec3 uGlow;
-      uniform vec3 uSunDir;
       uniform float uTime;
       varying vec3 vDir;
       ${NOISE_GLSL}
+      ${SKY_GLSL}
+      float fbmLo(vec3 p) {
+        float s = 0.0;
+        float a = 0.5;
+        for (int i = 0; i < 3; i++) { s += a * noise3(p); p *= 2.07; a *= 0.5; }
+        return s;
+      }
       void main() {
-        float h = vDir.y;
-        vec3 col = mix(uHorizon, uTop, smoothstep(-0.05, 0.6, h));
-        col = mix(col, uHorizon * 0.35, smoothstep(0.0, -0.4, h));
-        float sun = max(dot(vDir, uSunDir), 0.0);
-        col += uGlow * pow(sun, 6.0) * 0.55 + uGlow * pow(sun, 40.0) * 0.6;
-        float clouds = fbm3(vec3(vDir.xz / max(0.18, abs(h) + 0.25) * 2.2, uTime * 0.01));
-        float band = smoothstep(0.42, 0.0, abs(h - 0.06));
-        col = mix(col, col * 0.55 + uHorizon * 0.2, smoothstep(0.45, 0.75, clouds) * band);
-        col += uGlow * smoothstep(0.55, 0.8, clouds) * band * pow(sun, 2.0) * 0.35;
+        vec3 dir = normalize(vDir);
+        float h = dir.y;
+        vec3 col = ffSky(dir, uHorizon, 1.0);
+        vec2 ring = normalize(dir.xz + vec2(1e-4));
+        float sunAz = max(dot(ring, normalize(FF_SUN.xz)), 0.0);
+        // Eye-wall: storm towers around the horizon, ragged tops, edges lit toward the break.
+        float tops = 0.13 + 0.24 * fbmLo(vec3(ring * 2.2, uTime * 0.004));
+        float wall = smoothstep(tops, tops - 0.08, h) * smoothstep(-0.22, -0.03, h);
+        float billow = fbmLo(vec3(ring * 6.0, h * 10.0 + uTime * 0.012));
+        vec3 tower = mix(FF_STORM * 0.55, uHorizon * 0.95, billow);
+        float rim = smoothstep(tops - 0.06, tops, h + billow * 0.05);
+        tower += FF_GLOW * (rim * 0.75 * pow(sunAz, 2.0) + pow(sunAz, 8.0) * billow * 0.3);
+        col = mix(col, tower, wall * 0.85);
+        #ifdef FF_SKY_HIGH
+          // Drifting cirrus above the eye-wall.
+          float cir = fbmLo(vec3(dir.xz / max(h, 0.08) * 0.7 + vec2(uTime * 0.006, 0.0), 3.1));
+          float sun = max(dot(dir, FF_SUN), 0.0);
+          col += (FF_GLOW * pow(sun, 3.0) * 0.45 + FF_STORM * 0.3)
+            * smoothstep(0.55, 0.82, cir) * smoothstep(0.22, 0.55, h);
+        #endif
+        // The cloud sea below: billows in perspective, lit toward the break, hazing at the horizon.
+        if (h < 0.0) {
+          vec2 sea = dir.xz / max(-h, 0.04);
+          #ifdef FF_SKY_HIGH
+            float b = fbm3(vec3(sea * 0.5 + vec2(uTime * 0.01, 0.0), 1.7));
+          #else
+            float b = fbmLo(vec3(sea * 0.5 + vec2(uTime * 0.01, 0.0), 1.7));
+          #endif
+          vec3 seaCol = mix(FF_SEA_DEEP, FF_SEA * 1.2, smoothstep(0.32, 0.78, b));
+          seaCol += FF_GLOW * 0.32 * pow(sunAz, 3.0) * smoothstep(0.55, 0.85, b);
+          col = mix(col, seaCol, smoothstep(-0.02, -0.28, h) * 0.8);
+        }
         gl_FragColor = vec4(col, 1.0);
       }
     `,

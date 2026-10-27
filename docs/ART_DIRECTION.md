@@ -96,11 +96,53 @@ to a worker with a cache is a Phase 11 item). Render counters per view and tier:
 Tools: `node scripts/capture-arena.mjs <url> <dir> <round>` (golden frames + counters),
 `pnpm preview:surfaces <png>` (texture sheet).
 
+## Lighting and atmosphere (7B, `render/Scene.tsx`, `render/atmosphere.ts`, `render/storm.tsx`)
+
+- **Key:** one storm-break directional light raking from the far left at ~31° (`LIGHTING.keyPosition`
+  `[-30, 24, -26]`, warm `#FFDFBD`): long shadows fall toward the camera, the columns and brass
+  edges catch a rim, the shadow map covers only the arena (±34 × ±26 m). **Fill:** a cool
+  directional from the camera side (`#84BDE8`) and a cool hemisphere (`#86A9C9` / `#20242C`) so
+  shadows read blue, not brown. **Image-based light:** the procedural storm sky prefiltered with
+  an emissive storm-break panel exactly where the key is, so metal reflects a motivated highlight.
+  **Local light:** the core's point light, plus the two gate lights from medium up.
+- **Exposure and tone:** ACES filmic (postprocessing) at `exposure` 1.1; thresholded bloom on
+  emissives (medium/high).
+- **Aerial perspective:** the sky gradient (`SKY`) is written once in GLSL (`ffSky`) and used by
+  the sky dome and by the fog of every material (three's fog chunks replaced): distant forms fade
+  into the sky behind them — lighter, bluer, lower contrast. The fog starts 36 m from the centre
+  (the field and platform are never fogged); a height haze below the platform sinks the underside
+  and the lower formations into the cloud sea.
+- **Storm layers:** the sky dome (eye-wall of storm towers lit toward the break, cirrus on high,
+  a billowing cloud sea below; on low baked once into a cube map), drifting cloud sheets below the
+  platform (medium/high), light shafts from the
+  break onto the far side, dust motes rising in the key light. **Grounding:** contact shadows
+  under every dynamic body (all tiers; the only grounding on low) and contact occlusion baked into
+  the floor where it meets walls, pillars and posts.
+- **Comparison variants:** `?test=1&light=flat|dark` (same light directions, different ratios).
+
+| Tier | DPR cap | Shadows | Bloom | Floor tex | Cloud sheets | Shafts | Dust | Sky | Particles | Point lights |
+|---|---|---|---|---|---|---|---|---|---|---|
+| low | 0.8 | off (contact shadows) | off | 1024, no normal map | 0 | off | 0 | baked (256² cube) | × 0.5 | 1 |
+| medium | 1.25 | 1024 | on | 2048 | 2 | on | 260 | low | × 0.75 | 3 |
+| high | 2 | 2048 | on | 2048 | 2 | on | 560 | high | × 1 | 3 |
+
+Reflections are image-based on every tier (no probes or SSR); environment meshes use the low LOD
+on the low tier. The low tier is built for weak GPUs and software rasterisers, which shade every
+pixel a triangle covers even where nearer geometry hides it: surfaces use the dominant-axis
+shader variant (one texture read, geometric normals), the backdrop (underside, monoliths, far
+formations) a diffuse-only material, walls one bevel segment and no rivets, and the underside's
+hidden tops an unlit near-black material on every tier. No canvas MSAA: every tier renders
+through the post-processing composer. With quality "auto" the device class picks the starting tier (a ceiling) and
+`render/adaptive-quality.ts` steps down after ≥ 5 s below 40 fps (smoothed), back up after 12 s
+above 57 fps, with an 8 s cooldown; long single frames are ignored. The surface textures keep the
+starting tier's size (no regeneration hitch). The dev HUD (Settings → developer) shows the tier,
+draw calls, triangles, shader programs, geometries, textures and texture-generation cost.
+
 ## Open problems (next)
 
-- **7B:** exposure and contrast are low; distant formations are flat dark silhouettes because the
-  fog colour is darker than the sky behind them; no cloud layers; no ambient occlusion or contact
-  shadows beyond shadow maps (high/medium) and the baked cavity/facing terms.
+- **7B (paused for 06M):** the light rig, aerial perspective, storm layers, contact shadows and
+  quality tiers above are built; still owed are final-settings captures, the D08 comparison set
+  and a critique with two revision rounds (docs/progress/PHASE-07.md §7B).
 - **7C:** world element state does not yet drive the surfaces (`applyRecipe`, `uWet`, crack glow);
   no "impact near gate" frame without impact VFX.
 - **7E:** normal-based edge wear also marks curved surfaces; the field floor's veins can read as

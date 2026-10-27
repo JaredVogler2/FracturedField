@@ -11,7 +11,8 @@
  * - metalness: lowered where the cavity channel marks oxide or dirt (both are dielectrics);
  * - normal: world-space triplanar normal mapping (whiteout blend);
  * - wet: darker and glossier (world material state can drive it);
- * - glowing cracks: emissive along the crack mask (fresh fractures, rift-charged stone).
+ * - glowing cracks: emissive along the crack mask (fresh fractures, rift-charged stone);
+ * - a firefly clamp on the outgoing radiance (metal glints stay bright without flooding bloom).
  *
  * Everything is tuned in art-tokens (SURFACES); nothing per-frame allocates.
  *
@@ -85,15 +86,24 @@ vec4 triSample( sampler2D t, vec3 p, vec3 w ) {
 `;
 
 const MAP = /* glsl */ `
-vec3 triW = triBlend( vTriNormal );
 vec3 triP = vTriPos * uScale;
-vec4 triD = triSample( uDetail, triP, triW );
+#ifdef FF_SURFACE_LOW
+  // Low tier: the dominant axis only — one detail fetch instead of three.
+  vec3 triAn = abs( vTriNormal );
+  vec2 triUv = triAn.x > triAn.y && triAn.x > triAn.z ? triP.zy : ( triAn.y > triAn.z ? triP.xz : triP.xy );
+  vec4 triD = texture2D( uDetail, triUv );
+#else
+  vec3 triW = triBlend( vTriNormal );
+  vec4 triD = triSample( uDetail, triP, triW );
+#endif
 float triNy = abs( normalize( vTriNormal ).y );
 // Bevels sit between the floor-facing and wall-facing normals: worn, chipped, lighter.
 float triEdge = smoothstep( 0.12, 0.35, triNy ) * ( 1.0 - smoothstep( 0.8, 0.96, triNy ) );
 vec3 triAlbedo = mix( uColorLo, uColorHi, triD.r );
-// Macro variation (one fetch, top projection, heavily mipmapped): breaks up the tile repeat.
-triAlbedo *= mix( 0.8, 1.14, texture2D( uDetail, vTriPos.xz * uScale * 0.11 ).r );
+#ifndef FF_SURFACE_LOW
+  // Macro variation (one fetch, top projection, heavily mipmapped): breaks up the tile repeat.
+  triAlbedo *= mix( 0.8, 1.14, texture2D( uDetail, vTriPos.xz * uScale * 0.11 ).r );
+#endif
 triAlbedo *= mix( 1.0, 0.5, triD.b * uCavity );
 triAlbedo = mix( triAlbedo, uWearColor, triEdge * uWear );
 triAlbedo *= mix( 1.0, 0.55, uWet );
@@ -111,6 +121,7 @@ float metalnessFactor = metalness * ( 1.0 - triD.b * uCavity );
 `;
 
 const NORMAL = /* glsl */ `
+#ifndef FF_SURFACE_LOW
 {
   vec3 nW = normalize( vTriNormal );
   vec3 tX = texture2D( uNormal, triP.zy ).xyz * 2.0 - 1.0;
@@ -125,6 +136,17 @@ const NORMAL = /* glsl */ `
   vec3 nPert = normalize( tX.zyx * triW.x + tY.xzy * triW.y + tZ.xyz * triW.z );
   normal = normalize( ( viewMatrix * vec4( nPert, 0.0 ) ).xyz );
 }
+#endif
+`;
+
+/**
+ * Firefly clamp: a raking sun on polished metal makes HDR glints of 20–30 that the thresholded
+ * bloom smears into white bars. Capping the outgoing radiance keeps a glint bright (it still tone
+ * maps to near white) while true emissives — the core, glyphs, VFX — remain what blooms.
+ */
+const CLAMP = /* glsl */ `
+outgoingLight = min( outgoingLight, vec3( 4.0 ) );
+#include <opaque_fragment>
 `;
 
 const EMISSIVE = /* glsl */ `
@@ -135,8 +157,13 @@ totalEmissiveRadiance += uGlowColor * uGlow * smoothstep( 0.35, 0.9, triD.a );
 export class SurfaceMaterial extends THREE.MeshStandardMaterial {
   readonly tri: TriplanarUniforms;
 
-  constructor(recipe: SurfaceRecipe, textureSize: number) {
+  /**
+   * `low`: the low-tier variant (dominant-axis sampling, geometric normals, no macro sample) —
+   * about a seventh of the texture fetches, for weak GPUs. A separate, equally shared program.
+   */
+  constructor(recipe: SurfaceRecipe, textureSize: number, low = false) {
     super({ color: '#ffffff', roughness: 1, vertexColors: true });
+    if (low) this.defines = { FF_SURFACE_LOW: '' };
     const tex = surfaceTextures(recipe.family, textureSize);
     this.tri = {
       uDetail: { value: tex.detail },
@@ -165,10 +192,11 @@ export class SurfaceMaterial extends THREE.MeshStandardMaterial {
         .replace('#include <roughnessmap_fragment>', ROUGHNESS)
         .replace('#include <metalnessmap_fragment>', METALNESS)
         .replace('#include <normal_fragment_maps>', NORMAL)
-        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${EMISSIVE}`);
+        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${EMISSIVE}`)
+        .replace('#include <opaque_fragment>', CLAMP);
     };
-    // Every SurfaceMaterial compiles the same program; only uniforms differ.
-    this.customProgramCacheKey = () => 'ff-surface-v2';
+    // Every SurfaceMaterial of a detail level compiles the same program; only uniforms differ.
+    this.customProgramCacheKey = () => (low ? 'ff-surface-v3-low' : 'ff-surface-v3');
     if (import.meta.env.DEV) {
       this.onBeforeRender = (_r, _s, _c, geometry, object) => {
         if (geometry.hasAttribute('color') || uncoloured.has(geometry)) return;
@@ -208,7 +236,27 @@ export class SurfaceMaterial extends THREE.MeshStandardMaterial {
 
 const uncoloured = new WeakSet<THREE.BufferGeometry>();
 
-/** Builds the named surface from its art-token recipe. */
-export function surfaceMaterial(name: SurfaceName, textureSize: number): SurfaceMaterial {
-  return new SurfaceMaterial(SURFACES[name], textureSize);
+/**
+ * The low tier's backdrop material for large geometry that is distant or mostly hidden (the
+ * underside, the monoliths, the far formations): diffuse only, in the recipe's mid tone, over the
+ * generator's vertex tint. Software renderers — and many weak GPUs — shade every pixel a triangle
+ * covers even where the platform hides it, so the backdrop has to cost next to nothing per pixel.
+ */
+export function backdropMaterial(name: SurfaceName): THREE.MeshLambertMaterial {
+  const r = SURFACES[name];
+  // Metals have no diffuse of their own; their darker tone stands in for the missing reflections.
+  const tone = new THREE.Color(r.colorLo).lerp(
+    new THREE.Color(r.colorHi),
+    r.metalness > 0.5 ? 0.3 : 0.45,
+  );
+  return new THREE.MeshLambertMaterial({ color: tone, vertexColors: true });
+}
+
+/** Builds the named surface from its art-token recipe (`low`: the low-tier variant). */
+export function surfaceMaterial(
+  name: SurfaceName,
+  textureSize: number,
+  low = false,
+): SurfaceMaterial {
+  return new SurfaceMaterial(SURFACES[name], textureSize, low);
 }

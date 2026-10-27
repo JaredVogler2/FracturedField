@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useHud } from '../game/store';
 import { renderStats } from '../render/render-stats';
+import { surfaceStats } from '../render/arena/surfaces';
 import type { GameClient } from '../game/client';
 
 /** Developer diagnostics: sim tick, bodies, frame time, transport and renderer counters. */
@@ -32,6 +33,9 @@ export function DevHud({ client, extra }: { client: GameClient; extra?: Record<s
     ['draw calls', String(renderStats.drawCalls)],
     ['triangles', renderStats.triangles.toLocaleString()],
     ['gpu mem', `${renderStats.geometries} geo · ${renderStats.textures} tex`],
+    ['quality', `${renderStats.tier}${renderStats.adaptive ? ' · adaptive' : ''}`],
+    ['shaders', `${renderStats.programs} programs`],
+    ['textures gen', `${surfaceStats.generated} sets · ${surfaceStats.ms.toFixed(0)} ms`],
     ...Object.entries(extra ?? {}),
   ];
   return (

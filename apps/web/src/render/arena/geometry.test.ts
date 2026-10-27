@@ -288,6 +288,49 @@ describe('rocks, walls, monoliths, underside', () => {
     expect(b.max.y).toBeLessThan(1.32);
     expect(b.min.y).toBeGreaterThanOrEqual(-1e-6);
   });
+
+  it('the low detail level keeps the walls and rails in place with far fewer triangles', () => {
+    const tris = (g: THREE.BufferGeometry) => g.attributes.position!.count / 3;
+    for (const [high, low] of [
+      [wallBlocks(5, 34, 1, 1.25), wallBlocks(5, 34, 1, 1.25, 'low')],
+      [capRail(34, 1, 1.25), capRail(34, 1, 1.25, 'low')],
+    ] as const) {
+      expectSane(low, 20_000);
+      expect(tris(low)).toBeLessThan(tris(high) * 0.45);
+      high.computeBoundingBox();
+      low.computeBoundingBox();
+      // Same footprint up to the rivet heads (≤ 3.4 cm), which only the high level has.
+      const [h, l] = [high.boundingBox!, low.boundingBox!];
+      expect(l.min.distanceTo(h.min)).toBeLessThan(0.04);
+      expect(l.max.distanceTo(h.max)).toBeLessThan(0.05);
+    }
+  });
+
+  it('splits the underside tiers’ hidden tops from the lit stone, which never faces up', () => {
+    for (const lod of ['high', 'low'] as const) {
+      const u = underside(28.8, lod);
+      expectSane(u.caps, 400);
+      const up = (g: THREE.BufferGeometry) => {
+        const n = g.attributes.normal!.array as Float32Array;
+        const ys: number[] = [];
+        for (let i = 1; i < n.length; i += 3) ys.push(n[i]!);
+        return ys;
+      };
+      // Every cap faces straight up; the widest is the first tier's, just inside the slabs.
+      expect(Math.min(...up(u.caps))).toBeGreaterThan(0.999);
+      const p = u.caps.attributes.position!.array as Float32Array;
+      let rMax = 0;
+      let yMax = -Infinity;
+      for (let i = 0; i < p.length; i += 3) {
+        rMax = Math.max(rMax, Math.hypot(p[i]!, p[i + 2]!));
+        yMax = Math.max(yMax, p[i + 1]!);
+      }
+      expect(rMax).toBeCloseTo(28.8 * 0.97, 3);
+      expect(yMax).toBeLessThan(-0.5);
+      // The lit stone (tier walls and bottoms) has no upward-facing surface left to shade.
+      expect(Math.max(...up(u.stone))).toBeLessThan(0.5);
+    }
+  });
 });
 
 describe('the surface-material contract', () => {

@@ -20,25 +20,92 @@ export const PALETTE = {
 
 export const TEAM_COLORS = [PALETTE.amber, PALETTE.cyan] as const;
 
+/**
+ * Sky and aerial perspective (Phase 07B / D08): one gradient shared by the sky dome and the fog,
+ * so anything far away dissolves into the sky behind it (lighter, bluer, less contrast) instead of
+ * turning into a dark cut-out.
+ */
+export const SKY = {
+  zenith: '#050c16',
+  storm: '#0f2a3d',
+  /** Haze at the horizon — also the fog colour. */
+  horizon: '#2f5a74',
+  /** The cloud sea the platform floats over: just below the horizon, and far below. */
+  sea: '#264861',
+  seaDeep: '#0a1622',
+  /** Storm-break light (sky glow, cloud rims, light shafts). */
+  glow: '#ffbf80',
+} as const;
+
+/**
+ * Fog layering: nothing on the platform is fogged (the field stays crisp from any camera); fog
+ * grows with distance beyond `start` metres from the arena centre, and a haze thickens below the
+ * platform (`hazeTop` → `hazeBottom`, up to `hazeMax`).
+ */
+export const FOG = { start: 36, hazeTop: -6, hazeBottom: -42, hazeMax: 0.85 } as const;
+
+/**
+ * Selected lighting (D08 "final"): a storm-break key raking from the far left at ~31° — it rims
+ * the brass and the columns and throws long shadows toward the camera — a cool fill from the
+ * camera side, a dim cool hemisphere, image-based light from the procedural storm environment.
+ */
 export const LIGHTING = {
-  exposure: 1.05,
-  hemiSky: '#5f7f99',
-  hemiGround: '#1a1f26',
-  hemiIntensity: 0.9,
-  keyColor: '#ffe6c7',
-  keyIntensity: 3.6,
-  /** Storm-break key light direction (from high side). */
-  keyPosition: [-18, 34, 22] as const,
-  fillColor: '#6fa8d8',
-  fillIntensity: 0.8,
-  fillPosition: [26, 14, -18] as const,
+  exposure: 1.1,
+  hemiSky: '#86a9c9',
+  hemiGround: '#20242c',
+  hemiIntensity: 1.0,
+  keyColor: '#ffdfbd',
+  keyIntensity: 3.9,
+  /** Storm-break key direction (from the arena centre toward the light). */
+  keyPosition: [-30, 24, -26] as const,
+  fillColor: '#84bde8',
+  fillIntensity: 0.75,
+  fillPosition: [24, 12, 30] as const,
   coreLightIntensity: 14,
   coreLightDistance: 16,
-  fogColor: '#0c1f2e',
-  fogDensity: 0.0105,
+  fogColor: SKY.horizon,
+  /** Exp² density of the fog beyond FOG.start. */
+  fogDensity: 0.0095,
   /** Image-based lighting strength from the procedural storm environment. */
-  environmentIntensity: 0.65,
+  environmentIntensity: 0.8,
 } as const;
+
+export type LightingVariant = {
+  readonly [K in keyof typeof LIGHTING]: (typeof LIGHTING)[K] extends string
+    ? string
+    : (typeof LIGHTING)[K] extends number
+      ? number
+      : (typeof LIGHTING)[K];
+};
+
+/**
+ * D08 comparison variants (same light directions, different ratios): `final` is the selection;
+ * `flat` has ambient and fill as strong as the key (no shadow story, no depth); `dark` has the key
+ * alone at low exposure (moody, but the field cannot be read).
+ */
+export const LIGHT_VARIANTS = {
+  final: LIGHTING,
+  flat: {
+    ...LIGHTING,
+    exposure: 1.05,
+    keyIntensity: 1.6,
+    hemiIntensity: 1.6,
+    fillIntensity: 1.4,
+    environmentIntensity: 1.1,
+    fogDensity: 0.006,
+  },
+  dark: {
+    ...LIGHTING,
+    exposure: 0.62,
+    keyIntensity: 3.2,
+    hemiIntensity: 0.18,
+    fillIntensity: 0,
+    environmentIntensity: 0.25,
+    fogDensity: 0.014,
+  },
+} as const satisfies Record<string, LightingVariant>;
+
+export type LightVariantName = keyof typeof LIGHT_VARIANTS;
 
 export const MATERIALS = {
   floorRoughness: 0.72,
@@ -179,14 +246,14 @@ export const SURFACES = {
     family: 'brass',
     colorLo: '#4a2f17',
     colorHi: '#e6ad6c',
-    roughness: [0.16, 0.7],
+    roughness: [0.3, 0.75],
     metalness: 1,
     normalStrength: 0.4,
     cavity: 0.55,
     wear: 0.3,
     wearColor: '#f6cf98',
     tileMetres: 2.2,
-    envMapIntensity: 1.35,
+    envMapIntensity: 1.15,
   },
   /** Cold brushed steel: ribs, frames, rings. */
   steelCold: {
@@ -228,6 +295,8 @@ export const ARENA_ART = {
   shards: { count: 42, seed: 51 },
   /** Distant suspended formations (70–320 m) behind the fog. */
   formations: { count: 34, seed: 61, near: 70, far: 320 },
+  /** The underside tiers' hidden tops: the deep shadow under the slabs and overhangs. */
+  undersideCap: '#06080b',
   /** Surface texture resolution per quality tier (px per tile). */
   surfaceTextureSize: { low: 256, medium: 512, high: 512 },
 } as const;
@@ -239,14 +308,37 @@ export const POST = {
   vignette: 0.42,
 } as const;
 
-/** Rendering quality tiers (D08). Adaptive switching lands in Phase 07B. */
+/**
+ * Rendering quality tiers (D08). Simulation, collision and scoring are identical on every tier —
+ * only rendering cost changes. `auto` picks a tier from the device class and then adapts to the
+ * measured frame rate (render/adaptive-quality.ts); real-time reflections are image-based on all
+ * tiers (no reflection probes or SSR).
+ */
 export interface QualityTier {
   readonly name: 'low' | 'medium' | 'high';
+  /** Device-pixel-ratio cap. */
   readonly dpr: number;
   readonly shadows: boolean;
   readonly shadowMapSize: number;
+  /** Selective (thresholded) bloom on emissives. */
   readonly bloom: boolean;
+  /** Field-floor texture width (px). */
   readonly textureSize: number;
+  /** Drifting cloud sheets below the platform. */
+  readonly cloudLayers: number;
+  /** Storm-break light shafts. */
+  readonly shafts: boolean;
+  /** Floating dust motes in the key light. */
+  readonly dust: number;
+  /**
+   * Sky: `high` adds cirrus and a full-octave cloud sea; `baked` renders the `low` sky once into
+   * a cube map (one texture read per pixel instead of the procedural storm; no slow drift).
+   */
+  readonly sky: 'baked' | 'low' | 'high';
+  /** Element particle density multiplier. */
+  readonly particles: number;
+  /** Dynamic point lights: the core's, plus the two gate lights when ≥ 3. */
+  readonly pointLights: number;
 }
 
 export const QUALITY: Record<QualityTier['name'], QualityTier> = {
@@ -257,6 +349,12 @@ export const QUALITY: Record<QualityTier['name'], QualityTier> = {
     shadowMapSize: 1024,
     bloom: false,
     textureSize: 1024,
+    cloudLayers: 0,
+    shafts: false,
+    dust: 0,
+    sky: 'baked',
+    particles: 0.5,
+    pointLights: 1,
   },
   medium: {
     name: 'medium',
@@ -265,6 +363,12 @@ export const QUALITY: Record<QualityTier['name'], QualityTier> = {
     shadowMapSize: 1024,
     bloom: true,
     textureSize: 2048,
+    cloudLayers: 2,
+    shafts: true,
+    dust: 260,
+    sky: 'low',
+    particles: 0.75,
+    pointLights: 3,
   },
   high: {
     name: 'high',
@@ -273,5 +377,11 @@ export const QUALITY: Record<QualityTier['name'], QualityTier> = {
     shadowMapSize: 2048,
     bloom: true,
     textureSize: 2048,
+    cloudLayers: 2,
+    shafts: true,
+    dust: 560,
+    sky: 'high',
+    particles: 1,
+    pointLights: 3,
   },
 };

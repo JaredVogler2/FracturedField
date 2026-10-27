@@ -164,16 +164,96 @@ they say nothing about a GPU.
   tests, evidence).
 - This report and the build status: the commit that follows `99fad61`.
 
-## 7B — Lighting and atmosphere (D08) — NOT STARTED
+## 7B — Lighting and atmosphere (D08) — IN PROGRESS (paused for milestone 06M)
+
+The owner redirected development (ADR-0009): continuous physical manipulation — milestone **06M**
+— comes before further art. 7B's code below is committed and tested; its gate (final-settings
+captures, the D08 comparison set, a critique and two revisions) is **not** passed and resumes
+after 06M.
+
+### What was built
+
+| Area | Implementation |
+|---|---|
+| Light rig | `render/Scene.tsx → Lights`: one storm-break key raking from the far left at ~31° (long shadows toward the camera, rims on columns and brass), a constrained shadow area (±34 × ±26 m), a cool camera-side fill and a cool hemisphere so shadows read blue; the core's point light and the gate lights (medium/high). Lighting comes from art tokens (`LIGHTING`) and three D08 comparison variants (`LIGHT_VARIANTS`: final, flat, dark; `?test=1&light=`). |
+| Exposure and tone | ACES filmic with the variant's exposure (`renderer.toneMappingExposure`, which the post-processing tone-mapping pass reads); thresholded bloom on medium/high; a firefly clamp in the surface material so a raking sun on polished brass does not bloom into white bars. |
+| Aerial perspective | `render/atmosphere.ts`: one sky gradient in GLSL (`ffSky`) used by the sky dome and by the fog of every material (three's fog chunks replaced): distant forms fade into the sky behind them; fog starts 36 m from the centre (field and platform never fogged); a height haze below the platform. |
+| Sky | `render/shaders.ts → createSkyMaterial`: eye-wall storm towers ringing the horizon lit toward the break, cirrus (high), a billowing cloud sea below; drawn after the opaque scene at the far plane. The low tier renders it once into a 256² half-float cube map shown as the background (one texture read per pixel; no slow drift). |
+| Storm layers | `render/storm.tsx`: cloud sheets drifting below the platform (two heights and speeds; medium/high), storm-break light shafts (instanced billboards), dust motes rising in the updraft (capped point size). |
+| Grounding | `render/contact-shadows.tsx`: a soft disc under every dynamic body that fades and widens with height (all tiers; the only grounding on low); contact occlusion baked into the floor at walls, pillars and posts. |
+| Quality tiers | `art-tokens → QUALITY` (DPR, shadows, bloom, floor texture, cloud sheets, shafts, dust, sky, particles, point lights; table in docs/ART_DIRECTION.md); `render/adaptive-quality.ts` (auto: steps down after ≥ 5 s below 40 fps smoothed, up after 12 s above 57 fps, 8 s cooldown, hitches ignored, never above the device-class tier); the dev HUD shows tier, draw calls, triangles, shader programs, geometries, textures and texture-generation cost. |
+
+### Low-tier frame cost: a regression 7A introduced, found by CI
+
+PR #2's browser suite failed: the simplified-mode player did not score against the bot in four
+matches. The game was not broken, but the 7A arena had made the **low** tier — the tier every
+phone test uses — about twice as expensive to draw, so the test's player reacted more slowly.
+Measured the same way for every build: SwiftShader (software) in this container, iPhone 13
+landscape (844 × 390, DPR 3 → canvas 675 × 312), low tier, a paused match (a static scene, so
+runs are comparable), mean `requestAnimationFrame` interval over 5 s. These numbers compare
+builds; they are not device or GPU benchmarks.
+
+| Build | Frame interval | Triangles |
+|---|---|---|
+| Before 7A (`9cebdf1`) | 114–120 ms | — |
+| 7A as merged into PR #2 | ~250 ms | 80.7 k |
+| 7A + the fixes below | 114–125 ms | 56.2 k |
+
+A test-only bisection switch (`?test=1&off=sky,clouds,floor,platform,walls,underside,…`) dropped
+one layer at a time. What it showed and what changed:
+
+- **Hidden pixels are not free.** The underside cost ~45 ms although the platform hides it: the
+  software rasteriser shaded its top cap — a disc as wide as the platform — before depth hid it,
+  whatever the draw order. The tiers' upward-facing tops are now split off and drawn with an
+  unlit near-black material (they are always hidden or in deep shadow under an overhang); the
+  underside, monoliths and far formations also draw after the near arena.
+- **The low surface shader was never wired.** The dominant-axis, no-normal-map variant of the
+  surface material existed but `<Arena>` never received `lowSurfaces`; it does now, and the low
+  tier's backdrop (underside, monoliths, far formations) uses a diffuse-only material.
+- **Full-screen procedural sky.** Baked once into a cube map on the low tier (above).
+- **Walls had no low detail level.** 31 k triangles of bevelled blocks and 3 cm rivets; the low
+  level uses one bevel segment and no rivets (sub-pixel on a phone): −24 k triangles.
+- **Unused MSAA.** Every tier renders through the post-processing composer, so the canvas'
+  multisampling only antialiased the final full-screen copy; it is off.
+- Also on the low tier: no cloud sheets (the baked sky carries the cloud sea) and no floor
+  normal map (its tile bevels are a pixel wide at that resolution).
+
+The test failure was not only the regression: the same two score-vs-bot tests had already failed
+on `main` itself (run 16, the PR #1 merge, all pre-7A code). Their scripted players race a bot
+that runs at simulation speed while their own reactions are paced by page round trips, each
+waiting for a software-rendered frame. The touch player now reads everything one step needs in a
+single round trip, taps PULSE at the button's position (a locator tap waited for two stable
+animation frames first), and leads the core by its own measured step time — no assertion changed.
+
+### Tests so far
+
+- `atmosphere.test.ts` (5): the field, walls, gates and platform are never fogged; distant
+  formations fade progressively; the underside hazes lightly and the depths heavily; the fog
+  chunks install once with the shared sky; quality tiers only add cost from low to high (low: no
+  shadow maps, bloom, shafts, dust or cloud sheets; a baked sky; one point light).
+- `adaptive-quality.test.ts` (5): holds at 60 fps; steps down once after ≥ 5 s at 25 fps, then
+  waits for cooldown plus a full hold; ignores a 2 s dip and 2 s hitches; steps back up after a
+  long comfortable stretch, never above the start; no oscillation at 48 fps.
+- `geometry.test.ts` (+2): the low wall/rail level keeps the footprint with < 45 % of the
+  triangles; the underside's tops are split out (all facing up, the widest just inside the slabs)
+  and the lit stone has no upward-facing surface left.
+- `e2e/phase07.spec.ts`: adaptive quality steps down under load and never on a fixed tier.
+
+### Remaining for the 7B gate
+
+Final-settings captures (all review shots, phone tiers, the D08 flat/dark comparison set) with
+the firefly clamp, fog start and baked low sky; a written critique against CREATIVE_TARGET with
+two revision rounds; the ART_DIRECTION tier table re-checked against the code.
+
 ## 7C — Rift Core and elemental VFX (D09) — NOT STARTED
 ## 7D — Wielder characters and IK (D10) — NOT STARTED
 ## 7E — Golden screenshots and art critique (D11) — NOT STARTED
 
 ## Next instruction
 
-Continue Phase 07 with art gate **7B** (prompts/deep-dives/D08-LIGHTING-ATMOSPHERE.md, after
-docs/BUILD_ORDER.md and docs/CREATIVE_TARGET.md): filmic key/fill/rim lighting and exposure, fog
-whose colour follows the sky so distant formations blend into the storm, layered cloud meshes and
-height fog, contact shadows / ambient occlusion where the tier allows, and adaptive quality tiers.
-Capture with `node scripts/capture-arena.mjs <url> <dir> <round>` and critique against the round-5
-frames.
+First milestone **06M — continuous physical manipulation** (ADR-0009,
+docs/progress/PHASE-06M.md): the owner wants real people to show they can intuitively bend
+physical objects with their hands before the arena's visual transformation continues. Then resume
+**7B** (prompts/deep-dives/D08-LIGHTING-ATMOSPHERE.md) at "Remaining for the 7B gate" above:
+capture with `node scripts/capture-arena.mjs <url> <dir> <round>` and critique against the
+round-5 frames.

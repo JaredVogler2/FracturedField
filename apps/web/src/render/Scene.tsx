@@ -13,11 +13,26 @@ import { EventEffects } from './vfx/EventEffects';
 import { AimPreview, CoreTrail, LiftTethers, Reticles, SweepFields } from './vfx/FieldEffects';
 import { ChargeBolts, ElementRegions, MagnetFields, WaterAndIce } from './vfx/ElementEffects';
 import type { PlayerSlot } from '@ff/protocol';
-import { LIGHTING, POST, QUALITY, type QualityTier } from './art-tokens';
+import {
+  LIGHT_VARIANTS,
+  POST,
+  QUALITY,
+  SKY,
+  type LightingVariant,
+  type LightVariantName,
+  type QualityTier,
+} from './art-tokens';
 import { fitBroadcastCamera } from './camera';
 import { createSkyMaterial } from './shaders';
-import { useDisposable } from './hooks';
 import { renderStats } from './render-stats';
+import { installAtmosphericFog, SUN_DIR } from './atmosphere';
+import { CloudSheets, DustMotes, LightShafts } from './storm';
+import { ContactShadows } from './contact-shadows';
+import { AdaptiveQuality, type TierName } from './adaptive-quality';
+import { renders } from './bisect';
+
+// Aerial-perspective fog for every material: must precede the first shader compile.
+installAtmosphericFog();
 
 export interface SceneProps {
   readonly quality?: QualityTier['name'];
@@ -32,6 +47,12 @@ export interface SceneProps {
    * so controls never cover a goal (a side strip in landscape, a bottom band in portrait).
    */
   readonly controlsSide?: 'left' | 'right' | null;
+  /** Lighting variant (D08 comparison captures); the selected lighting by default. */
+  readonly light?: LightVariantName;
+  /** Tier whose texture sizes the arena keeps when the quality adapts (no regeneration hitch). */
+  readonly textureTier?: QualityTier['name'];
+  /** Adapt the tier to the measured frame rate, starting at (and never above) `quality`. */
+  readonly onAdapt?: (tier: TierName) => void;
   readonly children?: ReactNode;
 }
 
@@ -49,15 +70,20 @@ export function GameScene({
   localSlots = [],
   camera,
   controlsSide = null,
+  light = 'final',
+  textureTier,
+  onAdapt,
   children,
 }: SceneProps) {
   const tier = QUALITY[quality];
+  const textures = QUALITY[textureTier ?? quality];
+  const variant: LightingVariant = LIGHT_VARIANTS[light];
   return (
     <Canvas
       shadows={tier.shadows ? { type: THREE.PCFSoftShadowMap } : false}
       dpr={[1, tier.dpr]}
       gl={{
-        antialias: !tier.bloom,
+        antialias: false,
         powerPreference: 'high-performance',
         toneMapping: THREE.NoToneMapping,
         stencil: false,
@@ -76,24 +102,40 @@ export function GameScene({
         override={camera}
         controlsSide={controlsSide}
       />
-      <Atmosphere />
-      <Lights tier={tier} />
-      <Arena textureSize={tier.textureSize} tier={tier.name} />
-      <Entities />
+      <Atmosphere variant={variant} sky={tier.sky} />
+      <Lights tier={tier} variant={variant} />
+      {renders('arena') && (
+        <Arena
+          textureSize={textures.textureSize}
+          tier={textures.name}
+          gateLights={tier.pointLights >= 3}
+          lowSurfaces={tier.name === 'low'}
+        />
+      )}
+      {renders('clouds') && <CloudSheets count={tier.cloudLayers} />}
+      {tier.shafts && renders('shafts') && <LightShafts />}
+      {tier.dust > 0 && renders('dust') && <DustMotes count={tier.dust} />}
+      {renders('contact') && <ContactShadows strength={tier.shadows ? 0.38 : 0.62} />}
+      {renders('entities') && <Entities />}
       <Manipulators />
-      <WaterAndIce />
-      <CoreTrail />
-      <SweepFields />
-      <ElementRegions density={tier.name === 'low' ? 0.5 : tier.name === 'medium' ? 0.75 : 1} />
-      <MagnetFields />
-      <ChargeBolts />
-      <LiftTethers />
+      {renders('vfx') && (
+        <>
+          <WaterAndIce />
+          <CoreTrail />
+          <SweepFields />
+          <ElementRegions density={tier.particles} />
+          <MagnetFields />
+          <ChargeBolts />
+          <LiftTethers />
+        </>
+      )}
       <AimPreview slots={localSlots} />
       <Reticles slots={localSlots} />
-      <EventEffects />
+      {renders('vfx') && <EventEffects />}
       {children}
-      <StatsProbe />
-      {tier.bloom ? (
+      <StatsProbe tier={tier.name} adaptive={!!onAdapt} />
+      {onAdapt && <AdaptiveProbe start={textureTier ?? quality} onAdapt={onAdapt} />}
+      {!renders('post') ? null : tier.bloom ? (
         <EffectComposer multisampling={0}>
           <Bloom
             luminanceThreshold={POST.bloomThreshold}
@@ -217,88 +259,129 @@ function CameraRig({
   return null;
 }
 
-function Atmosphere() {
+function Atmosphere({ variant, sky: mode }: { variant: LightingVariant; sky: QualityTier['sky'] }) {
   const scene = useThree((s) => s.scene);
   const gl = useThree((s) => s.gl);
-  const sky = useDisposable(() => createSkyMaterial(), []);
+  const sky = useMemo(() => createSkyMaterial(mode === 'high' ? 'high' : 'low'), [mode]);
+  useEffect(() => () => sky.dispose(), [sky]);
+  // Baked sky: the storm rendered once into a cube map and shown as the background.
   useEffect(() => {
-    scene.fog = new THREE.FogExp2(LIGHTING.fogColor, LIGHTING.fogDensity);
+    if (mode !== 'baked' || !renders('sky')) return;
+    const baked = bakeSky(gl, sky);
+    scene.background = baked.texture;
+    return () => {
+      scene.background = null;
+      baked.dispose();
+    };
+  }, [mode, gl, scene, sky]);
+  useEffect(() => {
+    scene.fog = !renders('fog') ? null : new THREE.FogExp2(SKY.horizon, variant.fogDensity);
+    gl.toneMappingExposure = variant.exposure;
     return () => {
       scene.fog = null;
     };
-  }, [scene]);
-  // Image-based lighting: prefilter a procedural storm environment once so metals reflect sky
-  // and storm-break highlights instead of rendering black.
+  }, [scene, gl, variant]);
+  // Image-based lighting: prefilter the storm sky (with the storm break where the key light is)
+  // once, so metals reflect the sky and the break instead of rendering black.
   useEffect(() => {
     const env = buildStormEnvironment(gl);
     scene.environment = env;
-    scene.environmentIntensity = LIGHTING.environmentIntensity;
     return () => {
       scene.environment = null;
       env.dispose();
     };
   }, [gl, scene]);
+  useEffect(() => {
+    scene.environmentIntensity = variant.environmentIntensity;
+  }, [scene, variant]);
   useFrame((_, dt) => {
     (sky.uniforms.uTime as { value: number }).value += dt;
   });
+  // Drawn after the opaque scene, at the far plane: covered pixels skip the sky's noise.
+  if (!renders('sky') || mode === 'baked') return null;
   return (
-    <mesh material={sky} frustumCulled={false} renderOrder={-1}>
+    <mesh material={sky} frustumCulled={false} renderOrder={1000}>
       <sphereGeometry args={[600, 48, 24]} />
     </mesh>
   );
 }
 
-function Lights({ tier }: { tier: QualityTier }) {
+function Lights({ tier, variant }: { tier: QualityTier; variant: LightingVariant }) {
   const key = useRef<THREE.DirectionalLight>(null);
   const target = useMemo(() => new THREE.Object3D(), []);
   useEffect(() => {
     const l = key.current;
     if (!l) return;
     l.target = target;
+    // Constrained shadow area: the field, walls, pillars and gates seen from the raking key.
     const cam = l.shadow.camera;
-    cam.left = -30;
-    cam.right = 30;
-    cam.top = 22;
-    cam.bottom = -22;
-    cam.near = 5;
-    cam.far = 90;
+    cam.left = -34;
+    cam.right = 34;
+    cam.top = 26;
+    cam.bottom = -26;
+    cam.near = 8;
+    cam.far = 110;
     cam.updateProjectionMatrix();
     l.shadow.bias = -0.0004;
-    l.shadow.normalBias = 0.03;
+    l.shadow.normalBias = 0.035;
   }, [target]);
   return (
     <>
-      <hemisphereLight args={[LIGHTING.hemiSky, LIGHTING.hemiGround, LIGHTING.hemiIntensity]} />
+      <hemisphereLight args={[variant.hemiSky, variant.hemiGround, variant.hemiIntensity]} />
       <primitive object={target} position={[0, 0, 0]} />
       <directionalLight
         ref={key}
-        position={[...LIGHTING.keyPosition]}
-        color={LIGHTING.keyColor}
-        intensity={LIGHTING.keyIntensity}
+        position={[...variant.keyPosition]}
+        color={variant.keyColor}
+        intensity={variant.keyIntensity}
         castShadow={tier.shadows}
         shadow-mapSize-width={tier.shadowMapSize}
         shadow-mapSize-height={tier.shadowMapSize}
       />
-      <directionalLight
-        position={[...LIGHTING.fillPosition]}
-        color={LIGHTING.fillColor}
-        intensity={LIGHTING.fillIntensity}
-      />
+      {variant.fillIntensity > 0 && (
+        <directionalLight
+          position={[...variant.fillPosition]}
+          color={variant.fillColor}
+          intensity={variant.fillIntensity}
+        />
+      )}
     </>
   );
 }
 
-/** Builds a prefiltered (PMREM) environment map from the storm sky plus emissive break panels. */
+/** Cube face size of the baked sky (half float: ~3 MB for all six faces). */
+const SKY_BAKE_SIZE = 256;
+
+/**
+ * Renders the sky once into a cube map (the low tier's sky: a single texture read per pixel, where
+ * the procedural storm costs several noise octaves per pixel — and a software rasteriser shades
+ * the whole dome, covered or not).
+ */
+function bakeSky(gl: THREE.WebGLRenderer, material: THREE.Material): THREE.WebGLCubeRenderTarget {
+  const target = new THREE.WebGLCubeRenderTarget(SKY_BAKE_SIZE, { type: THREE.HalfFloatType });
+  const scene = new THREE.Scene();
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(100, 48, 24), material);
+  scene.add(dome);
+  new THREE.CubeCamera(1, 1000, target).update(gl, scene);
+  dome.geometry.dispose();
+  return target;
+}
+
+/**
+ * Builds a prefiltered (PMREM) environment map from the storm sky plus emissive panels: the storm
+ * break exactly where the key light is (so brass catches a warm rim), the overcast zenith and a
+ * cool horizon on the fill side.
+ */
 function buildStormEnvironment(gl: THREE.WebGLRenderer): THREE.Texture {
   const envScene = new THREE.Scene();
-  const skyMat = createSkyMaterial();
+  const skyMat = createSkyMaterial('low');
   const dome = new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), skyMat);
   envScene.add(dome);
   const panels: THREE.Mesh[] = [];
   const addPanel = (
     color: string,
     intensity: number,
-    pos: [number, number, number],
+    pos: THREE.Vector3,
     size: [number, number],
   ) => {
     const m = new THREE.Mesh(
@@ -306,16 +389,17 @@ function buildStormEnvironment(gl: THREE.WebGLRenderer): THREE.Texture {
       new THREE.MeshBasicMaterial({
         color: new THREE.Color(color).multiplyScalar(intensity),
         side: THREE.DoubleSide,
+        fog: false,
       }),
     );
-    m.position.set(...pos);
+    m.position.copy(pos);
     m.lookAt(0, 0, 0);
     envScene.add(m);
     panels.push(m);
   };
-  addPanel('#ffd9a8', 6, [-18, 26, 20], [16, 9]); // storm break (key)
-  addPanel('#7fb8e6', 1.6, [0, 40, 0], [60, 60]); // overcast zenith
-  addPanel('#3b6f93', 1.2, [30, 8, -20], [30, 10]); // cool horizon fill
+  addPanel(SKY.glow, 6, SUN_DIR.clone().multiplyScalar(32), [18, 9]); // storm break (key)
+  addPanel('#7fb0d8', 1.4, new THREE.Vector3(0, 40, 0), [60, 60]); // overcast zenith
+  addPanel('#3b6f93', 1.2, new THREE.Vector3(30, 6, 22), [34, 10]); // cool horizon (fill side)
   const pmrem = new THREE.PMREMGenerator(gl);
   const rt = pmrem.fromScene(envScene, 0.02);
   pmrem.dispose();
@@ -328,9 +412,26 @@ function buildStormEnvironment(gl: THREE.WebGLRenderer): THREE.Texture {
   return rt.texture;
 }
 
+/**
+ * Feeds frame times to the adaptive-quality controller; reports a tier change (rare) upward.
+ * The controller lives as long as its starting tier.
+ */
+function AdaptiveProbe({ start, onAdapt }: { start: TierName; onAdapt: (t: TierName) => void }) {
+  const controller = useMemo(() => new AdaptiveQuality(start), [start]);
+  useFrame((_, dt) => {
+    const changed = controller.sample(dt * 1000, performance.now());
+    if (changed) onAdapt(changed);
+  });
+  return null;
+}
+
 /** Publishes frame time and renderer counters for the dev HUD (no React updates per frame). */
-function StatsProbe() {
+function StatsProbe({ tier, adaptive }: { tier: TierName; adaptive: boolean }) {
   const gl = useThree((s) => s.gl);
+  useEffect(() => {
+    renderStats.tier = tier;
+    renderStats.adaptive = adaptive;
+  }, [tier, adaptive]);
   useEffect(() => {
     // The composer renders several passes per frame; count them all and reset once per frame.
     gl.info.autoReset = false;
@@ -345,6 +446,7 @@ function StatsProbe() {
     renderStats.triangles = gl.info.render.triangles;
     renderStats.geometries = gl.info.memory.geometries;
     renderStats.textures = gl.info.memory.textures;
+    renderStats.programs = gl.info.programs?.length ?? 0;
     gl.info.reset();
   }, -3);
   return null;

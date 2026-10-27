@@ -6,7 +6,7 @@
  * and materials from art-token recipes (arena/materials); nothing here touches physics — every
  * collider is defined in shared data, and decor stays outside the playable volume (tested).
  */
-import { useEffect, useMemo, useRef } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -16,6 +16,7 @@ import { generateFloorTextures } from './floor-texture';
 import { ARENA_ART, LIGHTING, PALETTE, TEAM_COLORS } from './art-tokens';
 import { createMembraneMaterial, createRiftGlassMaterial } from './shaders';
 import { mulberry32 } from './procedural';
+import { renders } from './bisect';
 import { useGameClient } from './frame-context';
 import {
   capRail,
@@ -33,15 +34,43 @@ import {
   wallBlocks,
   type Lod,
 } from './arena/geometry';
-import { surfaceMaterial, type SurfaceMaterial, type SurfaceName } from './arena/materials';
+import {
+  backdropMaterial,
+  surfaceMaterial,
+  type SurfaceMaterial,
+  type SurfaceName,
+} from './arena/materials';
 
 const WALL_VISUAL_HEIGHT = 1.25;
 
 type TextureTier = keyof typeof ARENA_ART.surfaceTextureSize;
 
+/** Whether the arena's surfaces use the low-tier shader variant (follows the rendering tier). */
+const LowSurfaces = createContext(false);
+
+/**
+ * Opaque draw layers. three sorts opaque objects by material before depth, so large background
+ * geometry could be shaded first and then painted over: drawn after the near arena, the depth
+ * test rejects every pixel the platform hides (most of the underside, much of the far rock).
+ */
+const BEHIND_PLATFORM = 1;
+const FAR_SCENERY = 2;
+
 /** A surface material for the component's lifetime. */
 function useSurface(name: SurfaceName, size: number): SurfaceMaterial {
-  const m = useMemo(() => surfaceMaterial(name, size), [name, size]);
+  const low = useContext(LowSurfaces);
+  const m = useMemo(() => surfaceMaterial(name, size, low), [name, size, low]);
+  useEffect(() => () => m.dispose(), [m]);
+  return m;
+}
+
+/** Background geometry's material: the full surface, or the cheap backdrop on the low tier. */
+function useBackdrop(name: SurfaceName, size: number): THREE.Material {
+  const low = useContext(LowSurfaces);
+  const m = useMemo(
+    () => (low ? backdropMaterial(name) : surfaceMaterial(name, size)),
+    [name, size, low],
+  );
   useEffect(() => () => m.dispose(), [m]);
   return m;
 }
@@ -66,37 +95,49 @@ export function Arena({
   textureSize,
   arena = MERIDIAN_ARENA,
   tier = 'high',
+  gateLights = true,
+  lowSurfaces = false,
 }: {
   textureSize: number;
   arena?: ArenaLayout;
   tier?: TextureTier;
+  /** The gates' team point lights (dropped on the low tier: the membranes still glow). */
+  gateLights?: boolean;
+  /** The low-tier surface shader (dominant-axis sampling, no normal maps). */
+  lowSurfaces?: boolean;
 }) {
   const shapes = useMemo(() => arenaStaticShapes(arena), [arena]);
   const surfaceSize = ARENA_ART.surfaceTextureSize[tier];
   const lod: Lod = tier === 'low' ? 'low' : 'high';
   return (
-    <group>
-      <Floor arena={arena} textureSize={textureSize} />
-      <PlatformRing arena={arena} size={surfaceSize} lod={lod} />
-      <WallRuns shapes={shapes} size={surfaceSize} />
-      <Pillars shapes={shapes} size={surfaceSize} lod={lod} />
-      <Gate end={-1} arena={arena} size={surfaceSize} lod={lod} />
-      <Gate end={1} arena={arena} size={surfaceSize} lod={lod} />
-      <Plinths arena={arena} size={surfaceSize} />
-      <Monoliths size={surfaceSize} lod={lod} />
-      <Underside size={surfaceSize} lod={lod} />
-      <DistantFormations size={surfaceSize} />
-    </group>
+    <LowSurfaces.Provider value={lowSurfaces}>
+      {renders('floor') && <Floor arena={arena} textureSize={textureSize} />}
+      {renders('platform') && <PlatformRing arena={arena} size={surfaceSize} lod={lod} />}
+      {renders('walls') && <WallRuns shapes={shapes} size={surfaceSize} lod={lod} />}
+      {renders('pillars') && <Pillars shapes={shapes} size={surfaceSize} lod={lod} />}
+      {renders('gates') && (
+        <>
+          <Gate end={-1} arena={arena} size={surfaceSize} lod={lod} light={gateLights} />
+          <Gate end={1} arena={arena} size={surfaceSize} lod={lod} light={gateLights} />
+        </>
+      )}
+      {renders('plinths') && <Plinths arena={arena} size={surfaceSize} />}
+      {renders('monoliths') && <Monoliths size={surfaceSize} lod={lod} />}
+      {renders('underside') && <Underside size={surfaceSize} lod={lod} />}
+      {renders('formations') && <DistantFormations size={surfaceSize} lod={lod} />}
+    </LowSurfaces.Provider>
   );
 }
 
 function Floor({ arena, textureSize }: { arena: ArenaLayout; textureSize: number }) {
+  const low = useContext(LowSurfaces);
   const tex = useMemo(() => generateFloorTextures(arena, textureSize), [arena, textureSize]);
   const material = useMemo(
     () =>
       new THREE.MeshStandardMaterial({
         map: tex.map,
-        normalMap: tex.normalMap,
+        // Low tier: the tile bevels are a pixel wide there; skip the normal-map pass.
+        normalMap: low ? null : tex.normalMap,
         normalScale: new THREE.Vector2(1.2, 1.2),
         roughnessMap: tex.ormMap,
         metalnessMap: tex.ormMap,
@@ -105,7 +146,7 @@ function Floor({ arena, textureSize }: { arena: ArenaLayout; textureSize: number
         roughness: 1,
         metalness: 1,
       }),
-    [tex],
+    [tex, low],
   );
   useEffect(
     () => () => {
@@ -287,7 +328,15 @@ function PlatformRing({ arena, size, lod }: { arena: ArenaLayout; size: number; 
 }
 
 /** Low perimeter walls: stone blocks under capstones edged in riveted brass, merged per material. */
-function WallRuns({ shapes, size }: { shapes: readonly StaticShape[]; size: number }) {
+function WallRuns({
+  shapes,
+  size,
+  lod,
+}: {
+  shapes: readonly StaticShape[];
+  size: number;
+  lod: Lod;
+}) {
   const merged = useMemo(() => {
     const walls = shapes.filter(
       (s): s is Extract<StaticShape, { kind: 'cuboid' }> =>
@@ -303,13 +352,13 @@ function WallRuns({ shapes, size }: { shapes: readonly StaticShape[]; size: numb
         new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), s.yaw),
         new THREE.Vector3(1, 1, 1),
       );
-      stone.push(wallBlocks(100 + i, length, thick, WALL_VISUAL_HEIGHT).applyMatrix4(place));
-      brass.push(capRail(length, thick, WALL_VISUAL_HEIGHT).applyMatrix4(place));
+      stone.push(wallBlocks(100 + i, length, thick, WALL_VISUAL_HEIGHT, lod).applyMatrix4(place));
+      brass.push(capRail(length, thick, WALL_VISUAL_HEIGHT, lod).applyMatrix4(place));
     });
     const out = { stone: mergeGeometries(stone), brass: mergeGeometries(brass) };
     for (const g of [...stone, ...brass]) g.dispose();
     return out;
-  }, [shapes]);
+  }, [shapes, lod]);
   useDisposeAll(useMemo(() => [merged.stone, merged.brass], [merged]));
   const stone = useSurface('basaltPolished', size);
   const brass = useSurface('brassAged', size);
@@ -374,11 +423,13 @@ function Gate({
   arena,
   size,
   lod,
+  light,
 }: {
   end: 1 | -1;
   arena: ArenaLayout;
   size: number;
   lod: Lod;
+  light: boolean;
 }) {
   const client = useGameClient();
   const g = arena.goal;
@@ -466,7 +517,9 @@ function Gate({
       <mesh position={[1.1, g.mouthHeight / 2, 0]} rotation-y={Math.PI / 2} material={membrane}>
         <planeGeometry args={[g.mouthHalfWidth * 2, g.mouthHeight]} />
       </mesh>
-      <pointLight position={[1.6, 2.2, 0]} color={team} intensity={6} distance={9} decay={2} />
+      {light && (
+        <pointLight position={[1.6, 2.2, 0]} color={team} intensity={6} distance={9} decay={2} />
+      )}
     </group>
   );
 }
@@ -524,8 +577,8 @@ function Monoliths({ size, lod }: { size: number; lod: Lod }) {
     [lod],
   );
   useDisposeAll(useMemo(() => built.flatMap((b) => [b.geo.stone, b.geo.brass]), [built]));
-  const stone = useSurface('basaltFractured', size);
-  const brass = useSurface('brassAged', size);
+  const stone = useBackdrop('basaltFractured', size);
+  const brass = useBackdrop('brassAged', size);
   const refs = useRef<(THREE.Group | null)[]>([]);
   useFrame(({ camera }) => {
     const cx = camera.position.x;
@@ -548,8 +601,14 @@ function Monoliths({ size, lod }: { size: number; lod: Lod }) {
           }}
           position={[b.x, 0, b.z]}
         >
-          <mesh geometry={b.geo.stone} material={stone} castShadow receiveShadow />
-          <mesh geometry={b.geo.brass} material={brass} castShadow />
+          <mesh
+            geometry={b.geo.stone}
+            material={stone}
+            castShadow
+            receiveShadow
+            renderOrder={FAR_SCENERY}
+          />
+          <mesh geometry={b.geo.brass} material={brass} castShadow renderOrder={FAR_SCENERY} />
         </group>
       ))}
     </group>
@@ -558,9 +617,11 @@ function Monoliths({ size, lod }: { size: number; lod: Lod }) {
 
 function Underside({ size, lod }: { size: number; lod: Lod }) {
   const geo = useMemo(() => underside(ARENA_ART.platform.outerRadius * 0.9, lod), [lod]);
-  useDisposeAll(useMemo(() => [geo.stone, geo.steel, geo.ember], [geo]));
-  const stone = useSurface('basaltDeep', size);
-  const steel = useSurface('steelCold', size);
+  useDisposeAll(useMemo(() => [geo.stone, geo.caps, geo.steel, geo.ember], [geo]));
+  const cap = useMemo(() => new THREE.MeshBasicMaterial({ color: ARENA_ART.undersideCap }), []);
+  useEffect(() => () => cap.dispose(), [cap]);
+  const stone = useBackdrop('basaltDeep', size);
+  const steel = useBackdrop('steelCold', size);
   // Bright enough to bloom (medium/high tiers) — the conduits glow, they are not painted lines.
   const ember = useStandard({
     color: '#140c08',
@@ -570,19 +631,21 @@ function Underside({ size, lod }: { size: number; lod: Lod }) {
   });
   return (
     <group>
-      <mesh geometry={geo.stone} material={stone} />
-      <mesh geometry={geo.steel} material={steel} />
-      <mesh geometry={geo.ember} material={ember} />
+      <mesh geometry={geo.stone} material={stone} renderOrder={BEHIND_PLATFORM} />
+      <mesh geometry={geo.caps} material={cap} renderOrder={BEHIND_PLATFORM} />
+      <mesh geometry={geo.steel} material={steel} renderOrder={BEHIND_PLATFORM} />
+      <mesh geometry={geo.ember} material={ember} renderOrder={BEHIND_PLATFORM} />
     </group>
   );
 }
 
 /** Suspended rock formations far out in the storm, faded by the atmospheric fog. */
-function DistantFormations({ size }: { size: number }) {
+function DistantFormations({ size, lod }: { size: number; lod: Lod }) {
   const { count, seed, near, far } = ARENA_ART.formations;
-  const geometry = useMemo(() => rock(seed, 2, 5), [seed]);
+  // Lit and hazed rather than black, their facets show: finer on the high detail level.
+  const geometry = useMemo(() => rock(seed, lod === 'high' ? 3 : 2, 7), [seed, lod]);
   useEffect(() => () => geometry.dispose(), [geometry]);
-  const material = useSurface('basaltFar', size);
+  const material = useBackdrop('basaltFar', size);
   const ref = useRef<THREE.InstancedMesh>(null);
   useEffect(() => {
     const mesh = ref.current;
@@ -596,7 +659,8 @@ function DistantFormations({ size }: { size: number }) {
       const a = (i / count) * Math.PI * 2 + rand() * 0.25;
       const r = near + rand() * (far - near);
       const w = 8 + rand() * 30 * (r / far + 0.4);
-      const h = w * (0.5 + rand() * 1.6);
+      // Spires and mesas more than boulders: they read as rock formations, not balloons.
+      const h = w * (1.1 + rand() * 1.6);
       pos.set(Math.cos(a) * r, -30 + rand() * 60 - h * 0.2, Math.sin(a) * r);
       q.setFromEuler(new THREE.Euler((rand() - 0.5) * 0.4, rand() * Math.PI, (rand() - 0.5) * 0.4));
       s.set(w, h, w * (0.6 + rand() * 0.6));
@@ -605,7 +669,14 @@ function DistantFormations({ size }: { size: number }) {
     }
     mesh.instanceMatrix.needsUpdate = true;
   }, [count, seed, near, far]);
-  return <instancedMesh ref={ref} args={[geometry, material, count]} frustumCulled={false} />;
+  return (
+    <instancedMesh
+      ref={ref}
+      args={[geometry, material, count]}
+      frustumCulled={false}
+      renderOrder={FAR_SCENERY}
+    />
+  );
 }
 
 export { LIGHTING };

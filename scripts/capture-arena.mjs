@@ -22,6 +22,10 @@ async function open(options, query) {
   const ctx = await browser.newContext(options);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(e.message));
+  // A shader that fails to compile only logs: treat it as an error too.
+  page.on('console', (m) => {
+    if (m.type() === 'error' && /shader|webgl|THREE/i.test(m.text())) errors.push(m.text());
+  });
   await page.goto(`${base}/?mode=bot&difficulty=easy&test=1&seed=5&${query}`);
   return { ctx, page };
 }
@@ -85,6 +89,15 @@ for (const name of ['hero', 'gate', 'rim', 'wide', 'stone', 'brass', 'under', 'c
   await ctx.close();
 }
 
+// D08 lighting comparison: the rejected variants (the selected one is every other frame).
+for (const light of ['flat', 'dark']) {
+  const { ctx, page } = await open(desktop, `quality=high&light=${light}`);
+  await startMatch(page);
+  await page.waitForTimeout(2500);
+  await shot(page, `light-${light}-kickoff`);
+  await ctx.close();
+}
+
 // Phones: landscape on the low and medium tiers, portrait on low.
 const landscape = {
   ...devices['iPhone 13'],
@@ -96,6 +109,13 @@ for (const q of ['low', 'medium']) {
   await startMatch(page, true);
   await page.waitForTimeout(2500);
   await shot(page, `phone-landscape-${q}`);
+  await ctx.close();
+}
+for (const light of ['flat', 'dark']) {
+  const { ctx, page } = await open(landscape, `quality=medium&light=${light}`);
+  await startMatch(page, true);
+  await page.waitForTimeout(2500);
+  await shot(page, `light-${light}-phone`);
   await ctx.close();
 }
 {
