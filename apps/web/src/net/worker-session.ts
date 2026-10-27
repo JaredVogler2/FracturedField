@@ -11,6 +11,8 @@ export interface WorkerSessionOptions {
   readonly autoStart?: boolean;
   readonly fast?: boolean;
   readonly loadouts?: readonly [readonly AbilityId[], readonly AbilityId[]];
+  /** Test runs only: wall-clock speed of the simulation (see ToSimWorker `init`). */
+  readonly timeScale?: number;
 }
 
 /**
@@ -86,6 +88,7 @@ export class WorkerSession implements SessionDriver {
         bots: this.opts.bots ?? [],
         ...(this.opts.fast ? { fast: true } : {}),
         ...(this.opts.loadouts ? { loadouts: this.opts.loadouts } : {}),
+        ...(this.opts.timeScale !== undefined ? { timeScale: this.opts.timeScale } : {}),
       });
     });
   }

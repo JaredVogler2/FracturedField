@@ -18,6 +18,11 @@ export type ToSimWorker =
       readonly bots: readonly { readonly slot: PlayerSlot; readonly difficulty: BotDifficulty }[];
       /** Optional rule overrides (fast test rounds). Local play only. */
       readonly fast?: boolean;
+      /**
+       * Test runs only: wall-clock speed of the simulation (0.25–1). Rules, physics and every
+       * tick are unchanged; only the time between ticks grows.
+       */
+      readonly timeScale?: number;
       /** Advanced-move picks per seat. */
       readonly loadouts?: readonly [readonly AbilityId[], readonly AbilityId[]];
     }

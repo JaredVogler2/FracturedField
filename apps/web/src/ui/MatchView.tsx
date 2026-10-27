@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { DEFAULT_LOADOUT, type AdvancedAbilityId } from '@ff/game-data';
+import { DEFAULT_LOADOUT, DEFAULT_RULES, type AdvancedAbilityId } from '@ff/game-data';
 import type { PlayerSlot } from '@ff/protocol';
 import type { BotDifficulty } from '@ff/sim';
 import { GameClient } from '../game/client';
@@ -160,6 +160,19 @@ function startingMode(saved: ControlMode | null, caps: Capabilities): ControlMod
  * One match (or the attract demo behind the menu): owns the GameClient, the local authority
  * worker and the input manager, and renders scene + HUD + overlays.
  */
+/**
+ * Test runs only (`?test=1&timescale=0.5`): the local authority's wall-clock speed. A scripted
+ * stand-in whose every reaction goes through a software-rendered page reacts many times slower
+ * than a person on a phone, while the bot reacts every tick; slowing the clock — never the rules
+ * or the physics — keeps such a race about the input path instead of the test machine's speed.
+ */
+function testTimeScale(): number | undefined {
+  const p = new URLSearchParams(window.location.search);
+  if (!p.has('test')) return undefined;
+  const v = Number.parseFloat(p.get('timescale') ?? '');
+  return Number.isFinite(v) ? Math.min(1, Math.max(0.25, v)) : undefined;
+}
+
 export function MatchView({
   mode,
   fast = false,
@@ -178,9 +191,17 @@ export function MatchView({
   const touch = caps.touch;
   const setup = useMemo(() => setupFor(mode), [mode]);
   const online = mode.kind === 'online' ? mode.seat : null;
+  const timeScale = useMemo(() => testTimeScale(), []);
   const client = useMemo(
-    () => new GameClient(online ? { delayTicks: 3, remote: true } : 1),
-    [online],
+    () =>
+      new GameClient(
+        online
+          ? { delayTicks: 3, remote: true }
+          : timeScale
+            ? { delayTicks: 1, tickMs: 1000 / DEFAULT_RULES.match.tickRate / timeScale }
+            : 1,
+      ),
+    [online, timeScale],
   );
   const session = useRef<SessionDriver | null>(null);
   const [remote, setRemote] = useState<RemoteSession | null>(null);
@@ -380,6 +401,7 @@ export function MatchView({
         autoStart: mode.kind === 'attract',
         fast,
         ...(seed !== undefined ? { seed } : {}),
+        ...(timeScale !== undefined ? { timeScale } : {}),
       });
     }
     session.current = s;
@@ -390,7 +412,7 @@ export function MatchView({
       session.current = null;
       setRemote(null);
     };
-  }, [client, setup, mode.kind, online, fast, seed]);
+  }, [client, setup, mode.kind, online, fast, seed, timeScale]);
 
   // A rematch (or a resumed connection) restarts the stream: stop showing "waiting".
   useEffect(

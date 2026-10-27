@@ -32,6 +32,8 @@ export interface GameClientOptions {
   readonly delayTicks: number;
   /** Remote play: adapt the delay to measured jitter and release events on the render timeline. */
   readonly remote?: boolean;
+  /** Wall-clock ms per tick (a slowed test authority); 1000 / tickRate by default. */
+  readonly tickMs?: number;
 }
 
 /** Events older than this are released even if no frame has been rendered (hidden tab). */
@@ -60,7 +62,7 @@ export class GameClient implements SessionCallbacks {
   constructor(opts: GameClientOptions | number) {
     const o = typeof opts === 'number' ? { delayTicks: opts } : opts;
     this.remote = o.remote ?? false;
-    this.buffer = new SnapshotBuffer(1000 / DEFAULT_RULES.match.tickRate, o.delayTicks);
+    this.buffer = new SnapshotBuffer(o.tickMs ?? 1000 / DEFAULT_RULES.match.tickRate, o.delayTicks);
     if (this.remote) {
       const spacing = DEFAULT_RULES.match.tickRate / DEFAULT_RULES.match.snapshotRate;
       this.buffer.adaptive = { min: spacing + 1, max: 9, base: spacing + 1.5 };

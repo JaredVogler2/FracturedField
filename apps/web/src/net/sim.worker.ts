@@ -22,6 +22,8 @@ let last = 0;
 let acc = 0;
 let stepMs = 0;
 let seed = 0;
+/** Wall-clock speed of the simulation (test runs only; 1 everywhere else). */
+let timeScale = 1;
 let endAnnounced = false;
 const ready: [boolean, boolean] = [false, false];
 /** Picks that arrived with READY before physics finished loading. */
@@ -34,6 +36,7 @@ function post(msg: FromSimWorker): void {
 
 async function init(msg: Extract<ToSimWorker, { type: 'init' }>): Promise<void> {
   seed = msg.seed;
+  timeScale = Math.min(1, Math.max(0.25, msg.timeScale ?? 1));
   world = await GameWorld.create({
     seed,
     autoStart: msg.autoStart,
@@ -59,7 +62,7 @@ function pump(): void {
   const w = world;
   if (!w) return;
   const now = performance.now();
-  const dt = 1000 / DEFAULT_RULES.match.tickRate;
+  const dt = 1000 / DEFAULT_RULES.match.tickRate / timeScale;
   acc += Math.min(250, now - last);
   last = now;
   let steps = 0;

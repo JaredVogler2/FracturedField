@@ -41,15 +41,32 @@ describe('AdaptiveQuality', () => {
     expect(run(q, 10, 30, c.t).changes).toEqual([]);
   });
 
-  it('ignores a short dip and single hitches', () => {
+  it('ignores a short dip and isolated hitches', () => {
     const q = new AdaptiveQuality('high');
     let t = run(q, 60, 5, 0).t;
     t = run(q, 20, 2, t).t; // a 2 s dip
     const after = run(q, 60, 10, t);
     expect(after.changes).toEqual([]);
-    // Hitches (a 2 s frame, e.g. a tab switch) are not load.
-    for (let i = 0; i < 20; i++) expect(q.sample(2000, after.t + i * 2000)).toBeNull();
+    // Hitches (a 2 s frame — a tab switch — or a pair of GC pauses) between normal frames are
+    // not load, however often they come.
+    t = after.t;
+    for (let i = 0; i < 20; i++) {
+      t += 2000;
+      expect(q.sample(2000, t)).toBeNull();
+      if (i % 2) {
+        t += 400;
+        expect(q.sample(400, t)).toBeNull();
+      }
+      t = run(q, 60, 2, t).t;
+    }
     expect(q.tier).toBe('high');
+  });
+
+  it('steps down from a renderer that is slow on every frame, however slow (≈ 3 fps)', () => {
+    const q = new AdaptiveQuality('high');
+    const a = run(q, 3, 12, run(q, 60, 1, 0).t);
+    expect(a.changes.map((c) => c.tier)).toEqual(['medium']);
+    expect(run(q, 3, 30, a.t).changes.map((c) => c.tier)).toEqual(['low']);
   });
 
   it('steps back up after a long comfortable stretch, never above the starting tier', () => {

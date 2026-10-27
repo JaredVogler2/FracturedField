@@ -3,8 +3,9 @@
  * device class is a ceiling; this controller steps down when the smoothed frame rate stays low and
  * back up when it stays comfortably high. Hysteresis keeps it from oscillating: separate down/up
  * thresholds, a hold time before any change (≥ 5 s down, longer up), a cooldown after a change,
- * and single long frames (a tab switch, a GC pause) are ignored. Only rendering changes — the
- * simulation is identical on every tier. Pure: frame times and timestamps are passed in.
+ * and isolated long frames (a tab switch, a GC pause) are ignored — but a renderer that is slow
+ * on every frame is load, however slow. Only rendering changes — the simulation is identical on
+ * every tier. Pure: frame times and timestamps are passed in.
  */
 import type { QualityTier } from './art-tokens';
 
@@ -23,9 +24,14 @@ export interface AdaptiveOptions {
   readonly upHoldMs: number;
   /** No decision for this long after a change (ms): let the new tier settle first. */
   readonly cooldownMs: number;
-  /** Frames longer than this (ms) are hitches, not load: ignored. */
+  /** A frame or two longer than this (ms) is a hitch, not load: ignored. */
   readonly hitchMs: number;
 }
+
+/** This many long frames in a row are load, not hitches. */
+const SUSTAINED = 3;
+/** A long frame counts as at most this long (ms), so one stall cannot swamp the average. */
+const MAX_FRAME_MS = 1000;
 
 export const ADAPTIVE_DEFAULTS: AdaptiveOptions = {
   downFps: 40,
@@ -43,6 +49,7 @@ export class AdaptiveQuality {
   private belowSince: number | null = null;
   private aboveSince: number | null = null;
   private changedAt = -Infinity;
+  private longRun = 0;
 
   constructor(
     start: TierName,
@@ -63,8 +70,12 @@ export class AdaptiveQuality {
 
   /** Feeds one frame's duration (ms) at time `now` (ms); returns the new tier when it changes. */
   sample(frameMs: number, now: number): TierName | null {
-    if (!(frameMs > 0) || frameMs > this.opts.hitchMs) return null;
-    this.emaMs += (frameMs - this.emaMs) * 0.05;
+    if (!(frameMs > 0)) return null;
+    if (frameMs > this.opts.hitchMs) {
+      // A tab switch or a GC pause is a frame or two; a slow renderer is slow every frame.
+      if (++this.longRun < SUSTAINED) return null;
+    } else this.longRun = 0;
+    this.emaMs += (Math.min(frameMs, MAX_FRAME_MS) - this.emaMs) * 0.05;
     if (now - this.changedAt < this.opts.cooldownMs) {
       this.belowSince = this.aboveSince = null;
       return null;

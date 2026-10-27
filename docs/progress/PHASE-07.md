@@ -218,12 +218,29 @@ one layer at a time. What it showed and what changed:
 - Also on the low tier: no cloud sheets (the baked sky carries the cloud sea) and no floor
   normal map (its tile bevels are a pixel wide at that resolution).
 
-The test failure was not only the regression: the same two score-vs-bot tests had already failed
-on `main` itself (run 16, the PR #1 merge, all pre-7A code). Their scripted players race a bot
-that runs at simulation speed while their own reactions are paced by page round trips, each
-waiting for a software-rendered frame. The touch player now reads everything one step needs in a
-single round trip, taps PULSE at the button's position (a locator tap waited for two stable
-animation frames first), and leads the core by its own measured step time — no assertion changed.
+The test failure was not only the regression: the same two score-vs-bot tests (simplified-mode
+taps and the Phase 05 camera player) had already failed on `main` itself (run 16, the PR #1
+merge, all pre-7A code). Their scripted players race a bot that acts every simulation tick, while
+their own reactions are paced by page round trips that each wait for a software-rendered frame —
+so the outcome depended on the test machine's speed (one local run scored in the last allowed
+match, another in none). Two changes, no assertion weakened:
+
+- The touch player reads everything one step needs in a single round trip, taps PULSE at the
+  button's position (a locator tap first waited for two stable animation frames) and leads the
+  core by its own measured step time.
+- Both race tests run the local authority at half wall-clock speed (`?test=1&timescale=0.5`,
+  test runs only): rules, physics and every tick are unchanged, only the time between ticks
+  grows, giving back the reaction time the software-rendered harness takes from the stand-in.
+
+### A bug the new browser test found
+
+`e2e/phase07.spec.ts` (adaptive quality steps down under a slow renderer) failed on its first run:
+the controller ignored every frame longer than 250 ms as a hitch — so a renderer slower than
+4 fps, which is exactly when stepping down matters most, never adapted. One or two long frames in
+a row (a tab switch, a GC pause) are still ignored; three or more are load (each counted as at
+most 1 s). The unit test that had modelled twenty consecutive 2 s frames as hitches encoded the
+bug; it now models isolated hitches between normal frames, and a new case checks that a 3 fps
+renderer steps down to medium, then low.
 
 ### Tests so far
 
@@ -231,9 +248,10 @@ animation frames first), and leads the core by its own measured step time — no
   formations fade progressively; the underside hazes lightly and the depths heavily; the fog
   chunks install once with the shared sky; quality tiers only add cost from low to high (low: no
   shadow maps, bloom, shafts, dust or cloud sheets; a baked sky; one point light).
-- `adaptive-quality.test.ts` (5): holds at 60 fps; steps down once after ≥ 5 s at 25 fps, then
-  waits for cooldown plus a full hold; ignores a 2 s dip and 2 s hitches; steps back up after a
-  long comfortable stretch, never above the start; no oscillation at 48 fps.
+- `adaptive-quality.test.ts` (6): holds at 60 fps; steps down once after ≥ 5 s at 25 fps, then
+  waits for cooldown plus a full hold; ignores a 2 s dip and isolated hitches; steps down from a
+  renderer slow on every frame (3 fps); steps back up after a long comfortable stretch, never
+  above the start; no oscillation at 48 fps.
 - `geometry.test.ts` (+2): the low wall/rail level keeps the footprint with < 45 % of the
   triangles; the underside's tops are split out (all facing up, the widest just inside the slabs)
   and the lit stone has no upward-facing surface left.

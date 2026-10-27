@@ -215,8 +215,10 @@ test('simplified (one-hand) mode: one tap holds LIFT, another lets go; taps alon
   test.setTimeout(900_000);
   const ctx = await browser.newContext(PHONE_LANDSCAPE);
   const page = await ctx.newPage();
-  // Fast rules: one goal wins a round, two rounds win the match.
-  await page.goto('/?mode=bot&difficulty=easy&fast=1&test=1&quality=low&seed=12');
+  // Fast rules: one goal wins a round, two rounds win the match. The authority runs at half
+  // speed: the scripted player reacts through page round trips on a software-rendered page,
+  // the bot every tick — the race must not depend on the test machine's speed.
+  await page.goto('/?mode=bot&difficulty=easy&fast=1&test=1&quality=low&seed=12&timescale=0.5');
   await page.getByTestId('controls-accessible').tap();
   await page.getByTestId('start-match').tap();
   const playing = () =>
