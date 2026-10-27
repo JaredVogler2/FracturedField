@@ -182,7 +182,7 @@ pnpm vitest run packages/room-core               # integration + room unit tests
 ## Commit
 
 Implementation commits: `1a7360d` (room client, impaired-network suite, dead-link detection) and
-the Phase 03 completion commit recorded in docs/BUILD_STATUS.md.
+`64a684d` (Phase 03 completion).
 
 ## Next instruction
 

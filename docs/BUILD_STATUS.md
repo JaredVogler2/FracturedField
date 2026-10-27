@@ -7,7 +7,7 @@ Nothing here is advertised as deployed or device-tested unless the evidence colu
 |---|---|---|---|
 | 01 Architecture/feasibility | COMPLETE | `4c8fe27` | [PHASE-01](progress/PHASE-01.md): golden physics identical in Node/Chromium/workerd; 21/21 live two-client DO checks; 60 s in-DO 30 Hz benchmark (local workerd); 56 unit + 3 e2e tests |
 | 02 Local vertical slice | COMPLETE | `60d901f` | [PHASE-02](progress/PHASE-02.md): full local match loop with real input (E2E: score → win → rematch), 2 simultaneous keyboard adapters, bot, 6 D02 shots, 87 unit + 7 e2e tests, desktop + phone captures |
-| 03 Online multiplayer | COMPLETE (local) — remote leg NOT TESTED | (this commit) | [PHASE-03](progress/PHASE-03.md): two browser contexts play create → invite → join → ready → goals → identical match digest → rematch through local workerd; refresh resume; forfeit on leave; 11 in-process two-client tests (50/100/200 ms RTT + jitter + 2 % TCP loss, reset/silent-link/restart recovery); 99 unit + 10 e2e tests. Cross-network / physical devices need a deployed Worker (Phase 12 credentials) |
+| 03 Online multiplayer | COMPLETE (local) — remote leg NOT TESTED | `64a684d` | [PHASE-03](progress/PHASE-03.md): two browser contexts play create → invite → join → ready → goals → identical match digest → rematch through local workerd; refresh resume; forfeit on leave; 11 in-process two-client tests (50/100/200 ms RTT + jitter + 2 % TCP loss, reset/silent-link/restart recovery); 99 unit + 10 e2e tests. Cross-network / physical devices need a deployed Worker (Phase 12 credentials) |
 | 04 Matter/energy physics | NOT STARTED | — | — |
 | 05 Camera gestures | NOT STARTED | — | — |
 | 06 Mobile sensors/control | NOT STARTED | — | — |
