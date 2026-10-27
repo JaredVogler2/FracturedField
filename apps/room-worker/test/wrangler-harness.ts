@@ -27,11 +27,21 @@ export async function startWorker(port: number): Promise<RunningWorker> {
       stop: async () => {},
     };
   }
+  // Own process group: npx → wrangler → workerd must all go down together on stop.
   const proc = spawn('npx', ['wrangler', 'dev', '--ip', '127.0.0.1', '--port', String(port)], {
     cwd: workerDir,
     env: { ...process.env, WRANGLER_SEND_METRICS: 'false' },
     stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
   });
+  const killGroup = (signal: NodeJS.Signals) => {
+    try {
+      if (proc.pid !== undefined) process.kill(-proc.pid, signal);
+    } catch {
+      proc.kill(signal); // group already gone
+    }
+  };
+  process.once('exit', () => killGroup('SIGKILL'));
   let log = '';
   proc.stdout?.on('data', (d: Buffer) => (log += d.toString()));
   proc.stderr?.on('data', (d: Buffer) => (log += d.toString()));
@@ -46,8 +56,9 @@ export async function startWorker(port: number): Promise<RunningWorker> {
           wsBase: base.replace(/^http/, 'ws'),
           proc,
           stop: async () => {
-            proc.kill('SIGTERM');
+            killGroup('SIGTERM');
             await sleep(300);
+            killGroup('SIGKILL');
           },
         };
       }
@@ -56,7 +67,7 @@ export async function startWorker(port: number): Promise<RunningWorker> {
     }
     if (proc.exitCode !== null) break;
   }
-  proc.kill('SIGKILL');
+  killGroup('SIGKILL');
   throw new Error(`wrangler dev failed to start:\n${log.slice(-3000)}`);
 }
 

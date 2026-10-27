@@ -128,9 +128,11 @@ const DENY_TEXT: Record<string, string> = {
 export function DenyToast({
   client,
   localSlots,
+  mirror = false,
 }: {
   client: GameClient;
   localSlots: readonly PlayerSlot[];
+  mirror?: boolean;
 }) {
   const [msg, setMsg] = useState<{ id: number; text: string; slot: PlayerSlot } | null>(null);
   useEffect(() => {
@@ -151,7 +153,11 @@ export function DenyToast({
   }, [client, localSlots]);
   if (!msg) return null;
   return (
-    <div className={`deny-toast ${msg.slot === 0 ? 'left' : 'right'}`} key={msg.id} role="status">
+    <div
+      className={`deny-toast ${msg.slot === (mirror ? 1 : 0) ? 'left' : 'right'}`}
+      key={msg.id}
+      role="status"
+    >
       {msg.text}
     </div>
   );
@@ -164,6 +170,8 @@ export function MatchEndPanel({
   onRematch,
   onMenu,
   waiting,
+  note,
+  rematchDisabled = false,
 }: {
   winner: PlayerSlot | -1;
   roundWins: readonly [number, number];
@@ -171,6 +179,9 @@ export function MatchEndPanel({
   onRematch: () => void;
   onMenu: () => void;
   waiting: boolean;
+  /** One line of context (forfeit, rival left, rival wants a rematch). */
+  note?: string;
+  rematchDisabled?: boolean;
 }) {
   return (
     <div className="modal-backdrop">
@@ -185,7 +196,8 @@ export function MatchEndPanel({
             'DRAW'
           ) : (
             <>
-              <Glyph slot={winner} size={34} /> {labels[winner]} WINS
+              <Glyph slot={winner} size={34} />{' '}
+              {labels[winner] === 'YOU' ? 'YOU WIN' : `${labels[winner]} WINS`}
             </>
           )}
         </div>
@@ -194,11 +206,16 @@ export function MatchEndPanel({
           <small>rounds</small>
           <span>{roundWins[1]}</span>
         </div>
+        {note ? (
+          <p className="muted me-note" data-testid="match-note">
+            {note}
+          </p>
+        ) : null}
         <div className="row">
           <button
             className="btn primary"
             onClick={onRematch}
-            disabled={waiting}
+            disabled={waiting || rematchDisabled}
             data-testid="rematch"
           >
             {waiting ? 'Waiting for opponent…' : 'Rematch'}
@@ -216,24 +233,27 @@ export function PauseMenu({
   onResume,
   onMenu,
   onControls,
+  online = false,
 }: {
   onResume: () => void;
   onMenu: () => void;
   onControls: () => void;
+  /** Online matches cannot be paused: this is only a menu over the running match. */
+  online?: boolean;
 }) {
   return (
     <div className="modal-backdrop">
-      <div className="panel pause" role="dialog" aria-label="Paused">
-        <div className="me-eyebrow">PAUSED</div>
+      <div className="panel pause" role="dialog" aria-label={online ? 'Menu' : 'Paused'}>
+        <div className="me-eyebrow">{online ? 'MENU · THE MATCH KEEPS RUNNING' : 'PAUSED'}</div>
         <div className="col">
           <button className="btn primary" onClick={onResume} autoFocus>
-            Resume
+            {online ? 'Back to the match' : 'Resume'}
           </button>
           <button className="btn" onClick={onControls}>
             Controls
           </button>
           <button className="btn" onClick={onMenu}>
-            Quit to menu
+            {online ? 'Leave match (forfeit)' : 'Quit to menu'}
           </button>
         </div>
       </div>

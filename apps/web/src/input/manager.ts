@@ -459,6 +459,20 @@ export class InputManager {
     for (const seat of this.seats.values()) seat.emitter.aim(seat.aim(), now);
   }
 
+  /**
+   * A new connection to the authority replaced the old one: held abilities were cancelled
+   * server-side and the sequence space restarted. Re-send only the idempotent aim (never replay
+   * casts, which may already have been applied).
+   */
+  onNewConnection(): void {
+    const now = performance.now();
+    for (const seat of this.seats.values()) {
+      seat.emitter.forgetHeld();
+      seat.emitter.resetSequence();
+      if (seat.reticle.initialised) seat.emitter.aim(seat.aim(), now, true);
+    }
+  }
+
   /** Resynchronise reticles to the authoritative manipulators (after kickoff resets). */
   snapReticles(latest: WorldSnapshot): void {
     for (const seat of this.seats.values()) {

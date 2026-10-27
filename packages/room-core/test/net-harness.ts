@@ -29,6 +29,7 @@ import {
   RoomAuthority,
   RoomClient,
   type ClientSocket,
+  type MatchCheckpoint,
   type PersistedRoom,
   type RoomClientState,
   type RoomClientTimings,
@@ -91,6 +92,8 @@ export class VirtualNetwork {
   readonly clock = new VirtualClock();
   room!: RoomAuthority;
   readonly persisted: PersistedRoom[] = [];
+  checkpoint: MatchCheckpoint | null = null;
+  checkpointsSaved = 0;
   readonly logs: { event: string; data?: Record<string, unknown> }[] = [];
   private loop!: FixedRateLoop;
   private readonly pipes = new Map<string, Pipe>();
@@ -105,6 +108,10 @@ export class VirtualNetwork {
       random: deterministicRandom(),
       persist: (s) => {
         this.persisted.push(s);
+      },
+      persistCheckpoint: (cp) => {
+        this.checkpoint = cp ? structuredClone(cp) : null;
+        if (cp) this.checkpointsSaved++;
       },
       onTickingChange: (want) => (want ? this.loop.startLoop() : this.loop.stop()),
       log: (event, data) => {
@@ -261,7 +268,14 @@ export class VirtualNetwork {
     }
     const record = this.persisted[this.persisted.length - 1];
     if (!record) throw new Error('nothing persisted');
-    this.installRoom(new RoomAuthority(this.env, structuredClone(record)));
+    // Exactly what the Durable Object constructor does: storage only, no memory survives.
+    const room = await RoomAuthority.rehydrate(
+      this.env,
+      structuredClone(record),
+      this.checkpoint ? structuredClone(this.checkpoint) : null,
+    );
+    this.installRoom(room);
+    if (room.wantsTicking) this.loop.startLoop();
     await this.settle();
   }
 }

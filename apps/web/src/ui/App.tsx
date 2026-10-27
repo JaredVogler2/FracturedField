@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react';
+import { isRoomCode, normalizeRoomCode } from '@ff/protocol';
 import type { BotDifficulty } from '@ff/sim';
 import { MatchView, type MatchMode } from './MatchView';
+import { OnlinePanel } from './Online';
+import { loadSeat, type StoredSeat } from '../net/seat-store';
 import { useHistory } from '../game/history';
 import { useSettings } from '../game/settings';
 import { sfx } from '../audio/sfx';
@@ -13,13 +16,20 @@ import {
 } from '../input/bindings';
 import { Glyph } from './Glyph';
 
-type Panel = null | 'controls' | 'settings';
+type Panel = null | 'controls' | 'settings' | 'online';
 
-function initialMode(): { mode: MatchMode; fast: boolean; seed?: number } {
+function initialMode(): { mode: MatchMode; fast: boolean; seed?: number; joinCode?: string } {
   const params = new URLSearchParams(window.location.search);
   const fast = params.get('fast') === '1';
   const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
   const seed = Number.isFinite(seedParam) ? seedParam : undefined;
+  // ?room=CODE: a refresh resumes this tab's seat; otherwise it is an invite to join.
+  const room = normalizeRoomCode(params.get('room') ?? '');
+  if (isRoomCode(room)) {
+    const seat = loadSeat(room);
+    if (seat) return { mode: { kind: 'online', seat }, fast };
+    return { mode: { kind: 'attract' }, fast, joinCode: room };
+  }
   const m = params.get('mode');
   const extra = seed !== undefined ? { seed } : {};
   if (m === 'duel') return { mode: { kind: 'duel' }, fast, ...extra };
@@ -36,7 +46,7 @@ export function App() {
   const initial = useMemo(() => initialMode(), []);
   const [mode, setMode] = useState<MatchMode>(initial.mode);
   const [matchKey, setMatchKey] = useState(0);
-  const [panel, setPanel] = useState<Panel>(null);
+  const [panel, setPanel] = useState<Panel>(initial.joinCode ? 'online' : null);
   const play = (m: MatchMode) => {
     sfx.unlock();
     sfx.play('ui');
@@ -44,8 +54,14 @@ export function App() {
     setMatchKey((k) => k + 1);
   };
   const toMenu = () => {
+    setRoomParam(null);
     setMode({ kind: 'attract' });
     setMatchKey((k) => k + 1);
+  };
+  const goOnline = (seat: StoredSeat) => {
+    setPanel(null);
+    setRoomParam(seat.code);
+    play({ kind: 'online', seat });
   };
   return (
     <>
@@ -60,8 +76,27 @@ export function App() {
       {mode.kind === 'attract' ? <MainMenu onPlay={play} onPanel={setPanel} /> : null}
       {panel === 'controls' ? <ControlsPanel onClose={() => setPanel(null)} /> : null}
       {panel === 'settings' ? <SettingsPanel onClose={() => setPanel(null)} /> : null}
+      {panel === 'online' ? (
+        <OnlinePanel
+          initialCode={initial.joinCode ?? ''}
+          fast={initial.fast}
+          onSeat={goOnline}
+          onClose={() => {
+            setRoomParam(null);
+            setPanel(null);
+          }}
+        />
+      ) : null}
     </>
   );
+}
+
+/** Keeps `?room=CODE` in the address bar while in a room (refresh resumes the seat). */
+function setRoomParam(code: string | null): void {
+  const url = new URL(window.location.href);
+  if (code) url.searchParams.set('room', code);
+  else url.searchParams.delete('room');
+  window.history.replaceState(null, '', url);
 }
 
 function MainMenu({
@@ -108,12 +143,8 @@ function MainMenu({
           >
             Local duel · 2 players, 1 keyboard
           </button>
-          <button
-            className="btn"
-            disabled
-            title="Arrives with authoritative online rooms (Phase 03)"
-          >
-            Online duel · coming next
+          <button className="btn big" data-testid="play-online" onClick={() => onPanel('online')}>
+            Online duel · 2 devices
           </button>
           <div className="row">
             <button className="btn" onClick={() => onPanel('controls')}>
@@ -129,7 +160,9 @@ function MainMenu({
             <div className="me-eyebrow">THIS SESSION</div>
             {records.slice(0, 5).map((r) => (
               <div key={r.id} className="history-row">
-                <span>{r.mode === 'duel' ? 'Duel' : 'vs Bot'}</span>
+                <span>
+                  {r.mode === 'duel' ? 'Duel' : r.mode === 'online' ? 'Online' : 'vs Bot'}
+                </span>
                 <span>
                   {r.winner === -1 ? 'Draw' : <Glyph slot={r.winner} size={14} />} {r.roundWins[0]}–
                   {r.roundWins[1]}

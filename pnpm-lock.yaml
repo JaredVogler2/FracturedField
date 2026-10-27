@@ -81,6 +81,9 @@ importers:
       '@ff/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@ff/room-core':
+        specifier: workspace:*
+        version: link:../../packages/room-core
       '@ff/sim':
         specifier: workspace:*
         version: link:../../packages/sim

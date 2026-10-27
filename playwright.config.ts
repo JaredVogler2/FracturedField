@@ -16,10 +16,20 @@ export default defineConfig({
     viewport: { width: 1280, height: 720 },
     launchOptions: { args: ['--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] },
   },
-  webServer: {
-    command: 'pnpm --filter @ff/web build && pnpm --filter @ff/web preview',
-    url: 'http://127.0.0.1:4173/spike',
-    reuseExistingServer: !process.env.CI,
-    timeout: 180_000,
-  },
+  webServer: [
+    {
+      command: 'pnpm --filter @ff/web build && pnpm --filter @ff/web preview',
+      url: 'http://127.0.0.1:4173/spike',
+      reuseExistingServer: !process.env.CI,
+      timeout: 180_000,
+    },
+    {
+      // Authoritative room service for the online E2E (local workerd, development vars only).
+      command: 'pnpm --filter @ff/room-worker dev',
+      url: 'http://127.0.0.1:8787/health',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+      env: { WRANGLER_SEND_METRICS: 'false' },
+    },
+  ],
 });

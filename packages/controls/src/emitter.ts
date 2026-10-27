@@ -91,6 +91,14 @@ export class IntentEmitter {
     }
   }
 
+  /**
+   * Forgets held abilities without sending anything: after a reconnect the authority has already
+   * cancelled them, and a stale END would only be refused.
+   */
+  forgetHeld(): void {
+    this.held.clear();
+  }
+
   isHeld(action: string): boolean {
     return this.held.has(action);
   }

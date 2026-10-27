@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { MERIDIAN_ARENA, type ArenaLayout } from '@ff/game-data';
-import { arenaStaticShapes, type StaticShape } from '@ff/sim';
+import { arenaStaticShapes, type StaticShape } from '@ff/sim/arena';
 import { generateFloorTextures } from './floor-texture';
 import { LIGHTING, MATERIALS, PALETTE, TEAM_COLORS } from './art-tokens';
 import { createMembraneMaterial } from './shaders';

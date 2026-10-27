@@ -35,7 +35,7 @@ export function ArenaDemoPage({ debug = false }: { debug?: boolean }) {
       bots = [new Bot(0, 'hard', 1), new Bot(1, 'normal', 2)];
     });
     void session.start();
-    void checkRoomService().then(setServiceStatus);
+    void checkRoomService().then((h) => setServiceStatus(h.detail));
     return () => client.dispose();
   }, [client]);
 

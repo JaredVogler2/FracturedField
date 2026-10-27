@@ -27,6 +27,11 @@ export function allowedOrigins(env: Env): ReadonlySet<string> {
   );
 }
 
+/** Short test/demo rule sets may only be requested from development hosts. */
+export function devRulesetsAllowed(env: Env): boolean {
+  return env.ENVIRONMENT === 'development';
+}
+
 export function spikeRoutesEnabled(env: Env): boolean {
   return env.ENABLE_SPIKE_ROUTES === 'true' && env.ENVIRONMENT === 'development';
 }

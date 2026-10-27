@@ -2,7 +2,7 @@ import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { DEFAULT_RULES, MERIDIAN_ARENA } from '@ff/game-data';
-import { arenaStaticShapes } from '@ff/sim';
+import { arenaStaticShapes } from '@ff/sim/arena';
 import { useRenderFrame } from './frame-context';
 
 /**

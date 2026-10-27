@@ -13,6 +13,7 @@
     "@ff/controls": "workspace:*",
     "@ff/game-data": "workspace:*",
     "@ff/protocol": "workspace:*",
+    "@ff/room-core": "workspace:*",
     "@ff/sim": "workspace:*",
     "@ff/ui": "workspace:*",
     "@react-three/fiber": "9.8.2",

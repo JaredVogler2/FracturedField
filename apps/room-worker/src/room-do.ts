@@ -1,8 +1,10 @@
 import { DurableObject } from 'cloudflare:workers';
+import type { RulesetId } from '@ff/game-data';
 import {
   FixedRateLoop,
   RoomAuthority,
   newSessionId,
+  type MatchCheckpoint,
   type PersistedRoom,
   type RoomConnection,
   type SeatGrant,
@@ -21,12 +23,14 @@ interface SocketAttachment {
 }
 
 const STORAGE_KEY = 'room';
+const CHECKPOINT_KEY = 'checkpoint';
 const HOUSEKEEPING_MS = 30_000;
 
 /**
  * One Durable Object per invite code = one authoritative room. While a match is live a fixed-rate
  * loop ticks the shared GameWorld at 30 Hz (keeping the object resident); idle rooms rely on the
- * WebSocket Hibernation API and a housekeeping alarm, persisting only seat/ticket state.
+ * WebSocket Hibernation API and a housekeeping alarm, persisting seat/ticket state plus a ~14 KB
+ * match checkpoint at every kickoff so a restarted object resumes a live match instead of losing it.
  */
 export class RoomDurableObject extends DurableObject<Env> {
   private room: RoomAuthority | null = null;
@@ -42,21 +46,31 @@ export class RoomDurableObject extends DurableObject<Env> {
     void ctx.blockConcurrencyWhile(async () => {
       const record = await ctx.storage.get<PersistedRoom>(STORAGE_KEY);
       if (record) {
-        this.room = this.instantiate(record);
+        const checkpoint = (await ctx.storage.get<MatchCheckpoint>(CHECKPOINT_KEY)) ?? null;
+        this.room = await this.instantiate(record, checkpoint);
         await this.readoptSockets();
+        // A match restored from its checkpoint waits (paused) for both seats on a running loop.
+        if (this.room?.wantsTicking) this.setTicking(true);
       }
     });
   }
 
-  private instantiate(record: PersistedRoom): RoomAuthority | null {
+  private async instantiate(
+    record: PersistedRoom,
+    checkpoint: MatchCheckpoint | null,
+  ): Promise<RoomAuthority | null> {
     const secret = ticketSecret(this.env);
     if (!secret) return null;
-    const room = new RoomAuthority(
+    const room = await RoomAuthority.rehydrate(
       {
         now: () => Date.now(),
         secret,
         persist: async (state) => {
           await this.ctx.storage.put(STORAGE_KEY, state);
+        },
+        persistCheckpoint: async (cp) => {
+          if (cp) await this.ctx.storage.put(CHECKPOINT_KEY, cp);
+          else await this.ctx.storage.delete(CHECKPOINT_KEY);
         },
         onTickingChange: (want) => this.setTicking(want),
         onSeated: (connId, slot) => {
@@ -68,6 +82,7 @@ export class RoomDurableObject extends DurableObject<Env> {
         },
       },
       record,
+      checkpoint,
     );
     this.loop = new FixedRateLoop(
       {
@@ -127,7 +142,7 @@ export class RoomDurableObject extends DurableObject<Env> {
 
   /* ------------------------------- RPC (called by the router) ------------------------------- */
 
-  async createRoom(code: string): Promise<SeatGrant> {
+  async createRoom(code: string, ruleset: RulesetId = 'standard'): Promise<SeatGrant> {
     if (this.room && this.room.roomPhase !== 'closed') {
       return { ok: false, status: 409, error: 'seat_taken', message: 'code in use' };
     }
@@ -139,9 +154,10 @@ export class RoomDurableObject extends DurableObject<Env> {
         error: 'server_error',
         message: 'TICKET_SECRET not configured',
       };
-    const record = RoomAuthority.newRecord({ now: () => Date.now() }, code);
+    const record = RoomAuthority.newRecord({ now: () => Date.now() }, code, ruleset);
+    await this.ctx.storage.delete(CHECKPOINT_KEY);
     await this.ctx.storage.put(STORAGE_KEY, record);
-    this.room = this.instantiate(record);
+    this.room = await this.instantiate(record, null);
     if (!this.room)
       return { ok: false, status: 503, error: 'server_error', message: 'room unavailable' };
     const grant = await this.room.claimHostSeat();

@@ -26,7 +26,7 @@ export function DevHud({ client, extra }: { client: GameClient; extra?: Record<s
     ['snapshots/s', sps.toFixed(1)],
     [
       'interp',
-      `${client.buffer.delayTicks} ticks · jitter ${client.buffer.jitterMs.toFixed(1)} ms`,
+      `${client.buffer.delayTicks.toFixed(2)} ticks · jitter ${client.buffer.jitterMs.toFixed(1)} ms`,
     ],
     ['frame', `${renderStats.frameMs.toFixed(1)} ms (${fps.toFixed(0)} fps)`],
     ['draw calls', String(renderStats.drawCalls)],

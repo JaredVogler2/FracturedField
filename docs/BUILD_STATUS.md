@@ -7,7 +7,7 @@ Nothing here is advertised as deployed or device-tested unless the evidence colu
 |---|---|---|---|
 | 01 Architecture/feasibility | COMPLETE | `4c8fe27` | [PHASE-01](progress/PHASE-01.md): golden physics identical in Node/Chromium/workerd; 21/21 live two-client DO checks; 60 s in-DO 30 Hz benchmark (local workerd); 56 unit + 3 e2e tests |
 | 02 Local vertical slice | COMPLETE | `60d901f` | [PHASE-02](progress/PHASE-02.md): full local match loop with real input (E2E: score → win → rematch), 2 simultaneous keyboard adapters, bot, 6 D02 shots, 87 unit + 7 e2e tests, desktop + phone captures |
-| 03 Online multiplayer | IN PROGRESS | — | room authority + live WS proven in Phase 01; client RemoteSession, lobby UX, lag/loss suite, browser E2E pending |
+| 03 Online multiplayer | COMPLETE (local) — remote leg NOT TESTED | (this commit) | [PHASE-03](progress/PHASE-03.md): two browser contexts play create → invite → join → ready → goals → identical match digest → rematch through local workerd; refresh resume; forfeit on leave; 11 in-process two-client tests (50/100/200 ms RTT + jitter + 2 % TCP loss, reset/silent-link/restart recovery); 99 unit + 10 e2e tests. Cross-network / physical devices need a deployed Worker (Phase 12 credentials) |
 | 04 Matter/energy physics | NOT STARTED | — | — |
 | 05 Camera gestures | NOT STARTED | — | — |
 | 06 Mobile sensors/control | NOT STARTED | — | — |
@@ -43,4 +43,8 @@ screenshot-driven visual review.
 - Run `pnpm install && pnpm check` first; `pnpm test:e2e` and `pnpm test:worker` need no secrets.
 - Local dev: `pnpm dev:worker` (port 8787) and `pnpm dev` (port 5173). `apps/room-worker/.dev.vars`
   is copied from `.dev.vars.example` (development-only secret).
-- Earliest incomplete phase: **03** — see the "Next instruction" in docs/progress/PHASE-02.md.
+- Earliest incomplete phase: **04** — see the "Next instruction" in docs/progress/PHASE-03.md.
+- Online play locally: `pnpm dev:worker` + `pnpm dev`, then Online duel → Create room; open
+  `/?room=CODE` in a second browser profile. `pnpm exec playwright test` starts both servers itself.
+- Remote/device validation of Phase 03 is still owed once a Worker is deployed (PHASE-03 lists the
+  minimum steps; it needs the owner's Cloudflare and Vercel access).

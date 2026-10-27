@@ -7,7 +7,7 @@ import {
 } from '@ff/protocol';
 import { newRoomCode, type SeatGrant } from '@ff/room-core';
 import { physicsVersion, runPhysicsHarness } from '@ff/sim';
-import { allowedOrigins, spikeRoutesEnabled, type Env } from './env.js';
+import { allowedOrigins, devRulesetsAllowed, spikeRoutesEnabled, type Env } from './env.js';
 import type { BenchConfig } from './bench-do.js';
 
 export { RoomDurableObject } from './room-do.js';
@@ -79,9 +79,12 @@ export default {
     }
 
     if (path === '/api/rooms' && request.method === 'POST') {
+      // ?rules=fast (short rounds for automated tests) is honoured on development hosts only.
+      const ruleset =
+        url.searchParams.get('rules') === 'fast' && devRulesetsAllowed(env) ? 'fast' : 'standard';
       for (let attempt = 0; attempt < 6; attempt++) {
         const code = newRoomCode();
-        const grant = await roomStub(env, code).createRoom(code);
+        const grant = await roomStub(env, code).createRoom(code, ruleset);
         if (grant.ok || grant.status !== 409) return grantResponse(grant, cors);
       }
       return apiError(503, 'server_error', 'could not allocate a room code', cors);

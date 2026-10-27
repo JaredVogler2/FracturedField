@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import type { PlayerSlot } from '@ff/protocol';
+import type { InputSource, PlayerSlot } from '@ff/protocol';
 import type { BotDifficulty } from '@ff/sim';
 import { GameClient } from '../game/client';
 import { useHud } from '../game/store';
 import { useHistory } from '../game/history';
 import { resolveQuality, useSettings } from '../game/settings';
 import { WorkerSession } from '../net/worker-session';
+import { RemoteSession } from '../net/remote-session';
+import { roomServiceUrl, roomSocketUrl } from '../net/room-service';
+import { forgetSeat, updateSeatTicket, type StoredSeat } from '../net/seat-store';
+import type { SessionDriver } from '../net/session';
 import { GameClientProvider, useGameClient } from '../render/frame-context';
 import { GameScene } from '../render/Scene';
 import { InputManager, type SeatConfig } from '../input/manager';
@@ -16,11 +20,17 @@ import { sfx } from '../audio/sfx';
 import { Hud, type HudSeat } from './Hud';
 import { Banners, DenyToast, MatchEndPanel, PauseMenu } from './Overlays';
 import { TouchControls } from './TouchControls';
+import { NetStatusOverlay, OnlineLobby } from './Online';
+import { teamOf } from './teams';
 import { DevHud } from '../hud/DevHud';
+import { NetPanel } from '../hud/NetPanel';
 import { view } from '../render/view';
 
 export type MatchMode =
-  { kind: 'attract' } | { kind: 'bot'; difficulty: BotDifficulty } | { kind: 'duel' };
+  | { kind: 'attract' }
+  | { kind: 'bot'; difficulty: BotDifficulty }
+  | { kind: 'duel' }
+  | { kind: 'online'; seat: StoredSeat };
 
 interface ModeSetup {
   readonly localSlots: readonly PlayerSlot[];
@@ -49,7 +59,13 @@ function setupFor(mode: MatchMode, touch: boolean): ModeSetup {
         bots: [{ slot: 1, difficulty: mode.difficulty }],
         seats: [{ slot: 0, bindings: SOLO_BINDINGS, pointer: true, touch }],
         hudSeats: [
-          { slot: 0, label: 'YOU · EMBER', bindings: SOLO_BINDINGS, local: true },
+          // Touch players get on-screen buttons; keyboard hints would only confuse them.
+          {
+            slot: 0,
+            label: 'YOU · EMBER',
+            ...(touch ? {} : { bindings: SOLO_BINDINGS }),
+            local: true,
+          },
           { slot: 1, label: `BOT · ${mode.difficulty.toUpperCase()}`, local: false },
         ],
         labels: ['YOU', 'BOT'],
@@ -68,6 +84,26 @@ function setupFor(mode: MatchMode, touch: boolean): ModeSetup {
         ],
         labels: ['PLAYER 1', 'PLAYER 2'],
       };
+    case 'online': {
+      const me = mode.seat.slot;
+      const rival: PlayerSlot = me === 0 ? 1 : 0;
+      const labels: [string, string] = me === 0 ? ['YOU', 'RIVAL'] : ['RIVAL', 'YOU'];
+      return {
+        localSlots: [me],
+        bots: [],
+        seats: [{ slot: me, bindings: SOLO_BINDINGS, pointer: true, touch }],
+        hudSeats: [
+          {
+            slot: me,
+            label: `YOU · ${teamOf(me).name}`,
+            ...(touch ? {} : { bindings: SOLO_BINDINGS }),
+            local: true,
+          },
+          { slot: rival, label: `RIVAL · ${teamOf(rival).name}`, local: false },
+        ],
+        labels,
+      };
+    }
   }
 }
 
@@ -94,15 +130,23 @@ export function MatchView({
 }) {
   const touch = useMemo(() => isTouchDevice(), []);
   const setup = useMemo(() => setupFor(mode, touch), [mode, touch]);
-  const client = useMemo(() => new GameClient(1), []);
-  const session = useRef<WorkerSession | null>(null);
+  const online = mode.kind === 'online' ? mode.seat : null;
+  const client = useMemo(
+    () => new GameClient(online ? { delayTicks: 3, remote: true } : 1),
+    [online],
+  );
+  const session = useRef<SessionDriver | null>(null);
+  const [remote, setRemote] = useState<RemoteSession | null>(null);
   const input = useRef<InputManager | null>(null);
   const [started, setStarted] = useState(mode.kind === 'attract');
   const [paused, setPaused] = useState(false);
   const [rematchWaiting, setRematchWaiting] = useState(false);
   const [denied, setDenied] = useState<ReadonlySet<string>>(new Set());
+  const [inputMode, setInputMode] = useState<InputSource>(touch ? 'touch' : 'keyboard');
   const matchEnd = useHud((s) => s.matchEnd);
   const phase = useHud((s) => s.match?.phase);
+  const lobby = useHud((s) => s.lobby);
+  const netPanel = useMemo(() => new URLSearchParams(window.location.search).has('net'), []);
   const quality = useSettings((s) => s.quality);
   const qualityOverride = useMemo(() => {
     const q = new URLSearchParams(window.location.search).get('quality');
@@ -119,6 +163,10 @@ export function MatchView({
     w.__ffDebug = {
       snapshot: () => client.buffer.latest,
       project: (x: number, y: number, z: number) => view.worldToClient(x, y, z),
+      slot: () => useHud.getState().mySlot,
+      transport: () => useHud.getState().transport.state,
+      lobby: () => useHud.getState().lobby,
+      matchEnd: () => useHud.getState().matchEnd,
     };
     return () => {
       delete w.__ffDebug;
@@ -126,26 +174,53 @@ export function MatchView({
   }, [client]);
 
   useEffect(() => {
-    const s = new WorkerSession(client, {
-      localSlots: setup.localSlots,
-      bots: setup.bots,
-      autoStart: mode.kind === 'attract',
-      fast,
-      ...(seed !== undefined ? { seed } : {}),
-    });
+    let s: SessionDriver;
+    if (online) {
+      const base = roomServiceUrl();
+      let seat = online;
+      const r = new RemoteSession(client, {
+        seat,
+        socketUrl: roomSocketUrl(base ?? '', seat.code),
+        onTicket: (ticket) => {
+          seat = updateSeatTicket(seat, ticket);
+        },
+        onNewConnection: () => input.current?.onNewConnection(),
+      });
+      setRemote(r);
+      s = r;
+    } else {
+      s = new WorkerSession(client, {
+        localSlots: setup.localSlots,
+        bots: setup.bots,
+        autoStart: mode.kind === 'attract',
+        fast,
+        ...(seed !== undefined ? { seed } : {}),
+      });
+    }
     session.current = s;
     client.attach(s);
     void s.start().catch(() => undefined);
     return () => {
       client.dispose();
       session.current = null;
+      setRemote(null);
     };
-  }, [client, setup, mode.kind, fast, seed]);
+  }, [client, setup, mode.kind, online, fast, seed]);
+
+  // A rematch (or a resumed connection) restarts the stream: stop showing "waiting".
+  useEffect(
+    () =>
+      client.resyncs.on((reason) => {
+        if (reason === 'rematch') setRematchWaiting(false);
+      }),
+    [client],
+  );
 
   useEffect(
     () =>
       client.matchEnds.on((end) => {
         setRematchWaiting(false);
+        if (online) setStarted(false); // the room resets READY after a match
         if (mode.kind !== 'attract') {
           useHistory.getState().add({
             mode: mode.kind,
@@ -155,7 +230,7 @@ export function MatchView({
           });
         } else setTimeout(() => session.current?.requestRematch(), 4000); // attract loop
       }),
-    [client, mode.kind],
+    [client, mode.kind, online],
   );
 
   // Refused actions flash the matching HUD chip briefly.
@@ -199,17 +274,25 @@ export function MatchView({
     setStarted(true);
   }, [touch]);
 
+  const setOnlineReady = (ready: boolean) => {
+    sfx.unlock();
+    sfx.play('ui');
+    session.current?.setReady(ready, inputMode);
+    setStarted(ready);
+  };
+
+  // Online, the menu is only an overlay: the authoritative match keeps running.
   const togglePause = useCallback(
     (next?: boolean) => {
-      if (mode.kind === 'attract' || !started) return;
+      if (mode.kind === 'attract' || (!started && !online)) return;
       setPaused((p) => {
         const v = next ?? !p;
-        session.current?.setPaused(v);
+        session.current?.setPaused?.(v);
         input.current?.setPaused(v);
         return v;
       });
     },
-    [mode.kind, started],
+    [mode.kind, started, online],
   );
 
   useEffect(() => {
@@ -218,6 +301,7 @@ export function MatchView({
         if (phase !== 'matchEnd') togglePause();
       } else if (
         !started &&
+        !online &&
         mode.kind !== 'attract' &&
         (e.code === 'Space' || e.code === 'Enter')
       ) {
@@ -230,18 +314,44 @@ export function MatchView({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [togglePause, started, start, mode.kind, phase]);
+  }, [togglePause, started, start, mode.kind, phase, online]);
 
   const rematch = () => {
     sfx.unlock();
-    setRematchWaiting(setup.localSlots.length < 2 && setup.bots.length === 0);
     session.current?.requestRematch();
-    useHud.setState({ matchEnd: null });
+    if (online) setRematchWaiting(true);
+    else useHud.setState({ matchEnd: null });
   };
 
   const exit = () => {
+    if (online) {
+      session.current?.leave?.();
+      forgetSeat(online.code);
+    }
     onExit();
   };
+
+  // Online: hide the result once the rematch actually starts (both players asked).
+  useEffect(() => {
+    if (online && matchEnd && phase === 'countdown') useHud.setState({ matchEnd: null });
+  }, [online, matchEnd, phase]);
+
+  const mySlot = online?.slot ?? 0;
+  const rivalSlot: PlayerSlot = mySlot === 0 ? 1 : 0;
+  const rivalSeat = lobby?.seats[rivalSlot];
+  const serverReady = online ? (lobby?.seats[mySlot].ready ?? started) : started;
+  const inLobby = online !== null && !matchEnd && (phase === undefined || phase === 'lobby');
+  const matchNote = !online
+    ? undefined
+    : matchEnd?.reason === 'forfeit'
+      ? matchEnd.winner === mySlot
+        ? 'Your rival left the match — win by forfeit.'
+        : 'You left the match.'
+      : rivalSeat && !rivalSeat.connected
+        ? 'Your rival has left the room.'
+        : rivalSeat?.wantsRematch
+          ? 'Your rival wants a rematch.'
+          : undefined;
 
   return (
     <GameClientProvider client={client}>
@@ -249,6 +359,8 @@ export function MatchView({
         <GameScene
           quality={qualityOverride ?? resolveQuality(quality)}
           localSlots={setup.localSlots}
+          side={mySlot === 1 ? -1 : 1}
+          portraitSlot={mySlot}
         >
           {setup.seats.length > 0 ? (
             <InputBridge seats={setup.seats} managerRef={input} session={session} />
@@ -256,9 +368,9 @@ export function MatchView({
         </GameScene>
         {mode.kind !== 'attract' ? (
           <>
-            <Hud seats={setup.hudSeats} denied={denied} />
+            <Hud seats={setup.hudSeats} denied={denied} mirror={mySlot === 1} />
             <Banners client={client} />
-            <DenyToast client={client} localSlots={setup.localSlots} />
+            <DenyToast client={client} localSlots={setup.localSlots} mirror={mySlot === 1} />
             {touch && setup.localSlots.length === 1 ? (
               <TouchControls manager={input} slot={setup.localSlots[0]!} />
             ) : null}
@@ -271,12 +383,28 @@ export function MatchView({
             </button>
           </>
         ) : null}
-        {!started ? <ReadyGate mode={mode} onStart={start} onExit={exit} touch={touch} /> : null}
+        {!started && !online ? (
+          <ReadyGate mode={mode} onStart={start} onExit={exit} touch={touch} />
+        ) : null}
+        {online && inLobby ? (
+          <OnlineLobby
+            seat={online}
+            ready={serverReady}
+            inputMode={inputMode}
+            onInputMode={setInputMode}
+            onReady={setOnlineReady}
+            onLeave={exit}
+          />
+        ) : null}
+        {online ? (
+          <NetStatusOverlay mySlot={mySlot} onRetry={() => remote?.retry()} onLeave={exit} />
+        ) : null}
         {paused ? (
           <PauseMenu
             onResume={() => togglePause(false)}
             onMenu={exit}
             onControls={onOpenControls}
+            online={online !== null}
           />
         ) : null}
         {matchEnd && mode.kind !== 'attract' ? (
@@ -287,9 +415,14 @@ export function MatchView({
             onRematch={rematch}
             onMenu={exit}
             waiting={rematchWaiting}
+            {...(matchNote ? { note: matchNote } : {})}
+            rematchDisabled={online !== null && rivalSeat !== undefined && !rivalSeat.connected}
           />
         ) : null}
         {devHud ? <DevHud client={client} /> : null}
+        {online && (devHud || netPanel) ? (
+          <NetPanel client={client} session={remote} slot={mySlot} />
+        ) : null}
       </div>
     </GameClientProvider>
   );
@@ -303,7 +436,7 @@ function InputBridge({
 }: {
   seats: readonly SeatConfig[];
   managerRef: React.RefObject<InputManager | null>;
-  session: React.RefObject<WorkerSession | null>;
+  session: React.RefObject<SessionDriver | null>;
 }) {
   const gl = useThree((s) => s.gl);
   const client = useGameClient();

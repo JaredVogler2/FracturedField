@@ -18,7 +18,7 @@ import {
   type RoomPhase,
   type ServerMessage,
 } from '@ff/protocol';
-import { GameWorld, type SeatResult } from '@ff/sim';
+import { GameWorld, type SeatResult, type WorldCheckpoint } from '@ff/sim';
 import { signTicket, verifyTicket } from './tickets.js';
 import { cryptoRandom, newRoomId, newSeed, newSessionId, type RandomSource } from './ids.js';
 import { TokenBucket } from './rate-limit.js';
@@ -34,6 +34,11 @@ export interface RoomEnv {
   readonly rules?: GameRules;
   /** Persist minimal session state so a restarted host can rehydrate seats and tickets. */
   persist?(state: PersistedRoom): void | Promise<void>;
+  /**
+   * Persist (or clear, with null) the match checkpoint taken at each kickoff, so a host restart
+   * mid-match resumes from the last kickoff with the score intact instead of losing the match.
+   */
+  persistCheckpoint?(checkpoint: MatchCheckpoint | null): void | Promise<void>;
   /** Called whenever `wantsTicking` may have changed. */
   onTickingChange?(wantsTicking: boolean): void;
   /** Called after a connection is authenticated into a seat (adapters persist this on the socket). */
@@ -92,6 +97,15 @@ export interface PersistedRoom {
   readonly ruleset?: RulesetId;
 }
 
+/** Kickoff-boundary match state (~14 KB) stored beside the room record. */
+export interface MatchCheckpoint {
+  readonly v: 1;
+  readonly sim: number;
+  readonly roomId: string;
+  readonly savedAt: number;
+  readonly world: WorldCheckpoint;
+}
+
 export type SeatGrant =
   | { readonly ok: true; readonly response: CreateRoomResponse | JoinRoomResponse }
   | {
@@ -130,8 +144,8 @@ export class RoomAuthority {
   private world: GameWorld | null = null;
   private worldInit: Promise<GameWorld> | null = null;
   private snapshotDebt = 0;
-  private pausedSlot: PlayerSlot | -1 = -1;
-  private graceTicks = 0;
+  /** Remaining disconnect grace (ticks) per seat while a live match waits for it; null = present. */
+  private grace: [number | null, number | null] = [null, null];
   private lastActivity: number;
   private readonly random: RandomSource;
 
@@ -152,6 +166,47 @@ export class RoomAuthority {
     this.phase = init.phase === 'live' ? 'lobby' : init.phase;
     this.seats = [seatFrom(init.seats[0]), seatFrom(init.seats[1])];
     this.lastActivity = env.now();
+  }
+
+  /**
+   * Rebuilds a room after a host restart. A match that was live resumes, paused, from its last
+   * kickoff checkpoint (score, round and clock intact); both seats then get the normal disconnect
+   * grace to come back. Without a usable checkpoint the room falls back to its lobby.
+   */
+  static async rehydrate(
+    env: RoomEnv,
+    record: PersistedRoom,
+    checkpoint: MatchCheckpoint | null,
+  ): Promise<RoomAuthority> {
+    const room = new RoomAuthority(env, record);
+    if (
+      record.phase === 'live' &&
+      checkpoint &&
+      checkpoint.v === 1 &&
+      checkpoint.sim === SIM_VERSION &&
+      checkpoint.roomId === record.roomId
+    ) {
+      await room.resumeFromCheckpoint(checkpoint);
+    }
+    return room;
+  }
+
+  private async resumeFromCheckpoint(cp: MatchCheckpoint): Promise<void> {
+    const world = await GameWorld.restore({ seed: this.seed, rules: this.rules }, cp.world);
+    this.world = world;
+    this.worldInit = Promise.resolve(world);
+    this.phase = 'live';
+    const grace = this.graceTicksFull();
+    for (const slot of [0, 1] as const) {
+      world.setConnected(slot, false);
+      this.grace[slot] = grace;
+    }
+    world.setPaused(true);
+    this.env.log?.('match_restored', { room: this.roomId, tick: world.tick });
+  }
+
+  private graceTicksFull(): number {
+    return secondsToTicks(this.rules.network.disconnectGraceSeconds, this.rules.match.tickRate);
   }
 
   /** Creates a brand-new room record for an invite code. */
@@ -362,27 +417,101 @@ export class RoomAuthority {
     seat.disconnectedAt = this.env.now();
     this.world?.setConnected(slot, false);
     this.env.log?.('seat_disconnected', { room: this.roomId, slot });
-    if (
-      this.phase === 'live' &&
-      this.world &&
-      this.world.phase !== 'matchEnd' &&
-      this.pausedSlot === -1
-    ) {
-      this.world.setPaused(true);
-      this.pausedSlot = slot;
-      this.graceTicks = secondsToTicks(
-        this.rules.network.disconnectGraceSeconds,
-        this.rules.match.tickRate,
-      );
-      this.broadcast({
-        t: 'pause',
-        paused: true,
-        reason: 'disconnect',
-        slot,
-        graceTicks: this.graceTicks,
-      });
-    }
+    this.markAbsent(slot);
     this.broadcastLobby();
+  }
+
+  /* ---------------------------------------------------------------------------------------- */
+  /* Disconnect pause (deterministic rules, see docs/progress/PHASE-03.md)                     */
+  /* ---------------------------------------------------------------------------------------- */
+
+  private get anyAbsent(): boolean {
+    return this.grace[0] !== null || this.grace[1] !== null;
+  }
+
+  /** The absent seat with the least grace left (reported in PAUSE messages). */
+  private urgentAbsent(): PlayerSlot {
+    const [g0, g1] = this.grace;
+    if (g0 === null) return 1;
+    if (g1 === null) return 0;
+    return g1 < g0 ? 1 : 0;
+  }
+
+  /** A seat left a live match: pause the world and start that seat's own grace countdown. */
+  private markAbsent(slot: PlayerSlot): void {
+    const world = this.world;
+    if (this.phase !== 'live' || !world || world.phase === 'matchEnd') return;
+    if (this.grace[slot] !== null) return;
+    const grace = this.graceTicksFull();
+    this.grace[slot] = grace;
+    world.setPaused(true);
+    this.broadcast({ t: 'pause', paused: true, reason: 'disconnect', slot, graceTicks: grace });
+  }
+
+  /** A seat is back: resume once nobody is missing. */
+  private markPresent(slot: PlayerSlot): void {
+    if (this.grace[slot] === null) return;
+    this.grace[slot] = null;
+    if (this.anyAbsent) {
+      const other = this.urgentAbsent();
+      const graceTicks = this.grace[other] ?? 0;
+      this.broadcast({ t: 'pause', paused: true, reason: 'disconnect', slot: other, graceTicks });
+      return;
+    }
+    this.world?.setPaused(false);
+    this.broadcast({ t: 'pause', paused: false, reason: 'resumed', slot, graceTicks: 0 });
+  }
+
+  /**
+   * Counts down every absent seat's grace. When the most urgent one runs out: if the other seat
+   * is present, the absent seat forfeits; if both are gone, the match is abandoned without result.
+   * Returns true when the match ended this tick.
+   */
+  private tickGrace(world: GameWorld): boolean {
+    for (const slot of [0, 1] as const) {
+      const g = this.grace[slot];
+      if (g !== null) this.grace[slot] = g - 1;
+    }
+    const urgent = this.urgentAbsent();
+    const left = this.grace[urgent] ?? 0;
+    if (left > 0) {
+      if (left % this.rules.match.tickRate === 0) {
+        this.broadcast({
+          t: 'pause',
+          paused: true,
+          reason: 'disconnect',
+          slot: urgent,
+          graceTicks: left,
+        });
+      }
+      return false;
+    }
+    const other: PlayerSlot = urgent === 0 ? 1 : 0;
+    const otherPresent = this.grace[other] === null;
+    this.grace = [null, null];
+    world.setPaused(false);
+    if (!otherPresent) {
+      this.abandonMatch();
+      return true;
+    }
+    world.forfeit(urgent);
+    this.broadcast({ t: 'pause', paused: false, reason: 'forfeit', slot: urgent, graceTicks: 0 });
+    this.finishMatch('forfeit');
+    return true;
+  }
+
+  /** Both players gone past their grace: end the match with no result (nobody is watching). */
+  private abandonMatch(): void {
+    this.phase = 'ended';
+    for (const s of this.seats) {
+      s.ready = false;
+      s.wantsRematch = false;
+    }
+    this.env.log?.('match_abandoned', { room: this.roomId });
+    void this.env.persistCheckpoint?.(null);
+    this.env.onTickingChange?.(false);
+    this.broadcastLobby();
+    void this.save();
   }
 
   private async onHello(c: ConnState, msg: HelloMessage): Promise<void> {
@@ -444,11 +573,7 @@ export class RoomAuthority {
     if (!this.conns.has(c.conn.id)) return;
     world.setConnected(slot, true);
     world.resetSequence(slot);
-    if (this.pausedSlot === slot) {
-      this.pausedSlot = -1;
-      world.setPaused(false);
-      this.broadcast({ t: 'pause', paused: false, reason: 'resumed', slot, graceTicks: 0 });
-    }
+    this.markPresent(slot);
     if (this.phase === 'open' && this.seats[0].issued && this.seats[1].issued) this.phase = 'lobby';
 
     this.sendTo(c, {
@@ -573,33 +698,7 @@ export class RoomAuthority {
     const world = this.world;
     if (!world || this.phase !== 'live') return;
 
-    if (this.pausedSlot !== -1) {
-      this.graceTicks--;
-      if (this.graceTicks % this.rules.match.tickRate === 0 && this.graceTicks > 0) {
-        this.broadcast({
-          t: 'pause',
-          paused: true,
-          reason: 'disconnect',
-          slot: this.pausedSlot,
-          graceTicks: this.graceTicks,
-        });
-      }
-      if (this.graceTicks <= 0) {
-        const loser = this.pausedSlot;
-        this.pausedSlot = -1;
-        world.setPaused(false);
-        world.forfeit(loser);
-        this.broadcast({
-          t: 'pause',
-          paused: false,
-          reason: 'forfeit',
-          slot: loser,
-          graceTicks: 0,
-        });
-        this.finishMatch('forfeit');
-        return;
-      }
-    }
+    if (this.anyAbsent && this.tickGrace(world)) return;
 
     if (world.tick % this.rules.match.tickRate === 0) this.reapSilent();
 
@@ -607,6 +706,7 @@ export class RoomAuthority {
     if (result.results.length > 0) this.deliverResults(result.results);
     if (result.events.length > 0) {
       this.broadcast({ t: 'events', list: result.events });
+      if (result.events.some((e) => e.type === 'kickoff')) this.saveCheckpoint(world);
     }
 
     this.snapshotDebt += this.rules.match.snapshotRate / this.rules.match.tickRate;
@@ -616,6 +716,17 @@ export class RoomAuthority {
     }
 
     if (world.phase === 'matchEnd') this.finishMatch('complete');
+  }
+
+  private saveCheckpoint(world: GameWorld): void {
+    if (!this.env.persistCheckpoint) return;
+    void this.env.persistCheckpoint({
+      v: 1,
+      sim: SIM_VERSION,
+      roomId: this.roomId,
+      savedAt: this.env.now(),
+      world: world.checkpoint(),
+    });
   }
 
   /** Closes seated connections that went silent mid-match (dead link without a close event). */
@@ -633,6 +744,7 @@ export class RoomAuthority {
     const world = this.world;
     if (!world || this.phase === 'ended') return;
     this.phase = 'ended';
+    this.grace = [null, null];
     for (const s of this.seats) {
       s.ready = false;
       s.wantsRematch = false;
@@ -651,6 +763,7 @@ export class RoomAuthority {
     this.broadcastLobby();
     this.env.log?.('match_end', { room: this.roomId, winner: summary.winner, reason });
     this.env.onTickingChange?.(false);
+    void this.env.persistCheckpoint?.(null);
     void this.save();
   }
 

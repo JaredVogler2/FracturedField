@@ -7,6 +7,7 @@ import type {
   MatchEndMessage,
   PauseMessage,
   PlayerSlot,
+  ResyncMessage,
   WorldSnapshot,
 } from '@ff/protocol';
 
@@ -24,6 +25,8 @@ export interface TransportStatus {
 /** Everything the presentation layer needs from a session, independent of where authority runs. */
 export interface SessionCallbacks {
   onSnapshot(snapshot: WorldSnapshot, receivedAt: number): void;
+  /** Full-state resynchronisation (join, resume, rematch): discard interpolation history. */
+  onResync?(snapshot: WorldSnapshot, reason: ResyncMessage['reason'], receivedAt: number): void;
   onEvents(events: readonly GameEvent[]): void;
   onAck(slot: PlayerSlot, result: ActionResult): void;
   onStatus(status: TransportStatus): void;
@@ -52,5 +55,9 @@ export interface SessionDriver {
   sendIntent(slot: PlayerSlot, intent: ActionIntent): void;
   setReady(ready: boolean, inputMode: InputSource): void;
   requestRematch(): void;
+  /** Local practice only: freeze the local authority (online matches never pause on request). */
+  setPaused?(paused: boolean): void;
+  /** Online only: leave the room (forfeits a live match). */
+  leave?(): void;
   dispose(): void;
 }

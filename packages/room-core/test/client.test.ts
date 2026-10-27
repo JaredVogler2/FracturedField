@@ -338,6 +338,70 @@ describe('two remote clients, one authoritative room', () => {
     expect(net.room.roomPhase).toBe('ended');
   });
 
+  it('host restart mid-match: both clients reconnect by themselves and play resumes from the last kickoff, score kept (D03)', async () => {
+    const net = new VirtualNetwork('standard'); // 3 goals per round: one goal does not end it
+    const { a, b } = await connectBoth(net);
+    await readyBoth(net, a, b);
+    const g = await scoreFor(net, a, [a, b]);
+    await untilPlayingAfter(net, [a, b], g.id);
+    await net.run(2000); // progress after the kickoff checkpoint: a restart loses (only) this
+    expect(net.checkpointsSaved).toBeGreaterThanOrEqual(2);
+    const tickBefore = a.latest!.tick;
+
+    await net.restartHost(); // all sockets drop; the new authority sees storage only
+    const back = await net.until(() => a.welcomes.length === 2 && b.welcomes.length === 2, 15_000);
+    expect(back).toBe(true);
+    expect(a.welcomes[1]!.resumed).toBe(true);
+    expect(b.welcomes[1]!.slot).toBe(1);
+    await net.run(600);
+    for (const p of [a, b]) {
+      expect(p.latest!.match.score).toEqual([1, 0]);
+      expect(p.latest!.match.phase).toBe('playing');
+      expect(p.latest!.match.paused).toBe(false);
+      expect(p.latest!.tick).toBeLessThan(tickBefore); // rewound to the kickoff checkpoint
+    }
+    expect(net.logs.some((l) => l.event === 'match_restored')).toBe(true);
+
+    // The restored match is fully playable and both clients agree.
+    await scoreFor(net, b, [a, b]);
+    await net.run(300);
+    expect(a.latest!.match.score).toEqual([1, 1]);
+    expect(b.latest!.match.score).toEqual([1, 1]);
+    expect(a.matchEnd).toBeNull();
+  });
+
+  it('host restart: if only one player returns, the absent one forfeits after the grace period', async () => {
+    const net = new VirtualNetwork('fast');
+    const { a, b } = await connectBoth(net);
+    await readyBoth(net, a, b);
+    b.client.close(); // B's device is gone for good
+    await net.run(1000);
+    await net.restartHost();
+    const back = await net.until(() => a.welcomes.length === 2, 15_000);
+    expect(back).toBe(true);
+    await net.run(1000);
+    expect(a.latest!.match.paused).toBe(true);
+    expect(a.pauses.at(-1)).toMatchObject({ paused: true, slot: 1 });
+    const ended = await net.until(() => a.matchEnd !== null, 40_000);
+    expect(ended).toBe(true);
+    expect(a.matchEnd).toMatchObject({ winner: 0, reason: 'forfeit' });
+  });
+
+  it('host restart: if nobody returns, the match is abandoned without a result', async () => {
+    const net = new VirtualNetwork('fast');
+    const { a, b } = await connectBoth(net);
+    await readyBoth(net, a, b);
+    a.client.close();
+    b.client.close();
+    await net.run(500);
+    await net.restartHost();
+    expect(net.room.roomPhase).toBe('live');
+    await net.run(35_000);
+    expect(net.room.roomPhase).toBe('ended');
+    expect(net.logs.some((l) => l.event === 'match_abandoned')).toBe(true);
+    expect(net.checkpoint).toBeNull();
+  });
+
   it('duplicate and out-of-order intents from a client are ignored by the authority', async () => {
     const net = new VirtualNetwork('fast');
     const { a, b } = await connectBoth(net);

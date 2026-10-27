@@ -38,7 +38,7 @@ export function FrameDriver() {
   const client = useGameClient();
   const frame = useRenderFrame();
   useFrame(() => {
-    frame.current = client.buffer.sample(performance.now());
+    frame.current = client.sample(performance.now());
   }, -2);
   return null;
 }
