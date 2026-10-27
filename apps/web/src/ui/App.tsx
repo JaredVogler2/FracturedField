@@ -1,0 +1,277 @@
+import { useMemo, useState } from 'react';
+import type { BotDifficulty } from '@ff/sim';
+import { MatchView, type MatchMode } from './MatchView';
+import { useHistory } from '../game/history';
+import { useSettings } from '../game/settings';
+import { sfx } from '../audio/sfx';
+import {
+  keyLabel,
+  P1_BINDINGS,
+  P2_BINDINGS,
+  SOLO_BINDINGS,
+  type KeyBindings,
+} from '../input/bindings';
+import { Glyph } from './Glyph';
+
+type Panel = null | 'controls' | 'settings';
+
+function initialMode(): { mode: MatchMode; fast: boolean; seed?: number } {
+  const params = new URLSearchParams(window.location.search);
+  const fast = params.get('fast') === '1';
+  const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
+  const seed = Number.isFinite(seedParam) ? seedParam : undefined;
+  const m = params.get('mode');
+  const extra = seed !== undefined ? { seed } : {};
+  if (m === 'duel') return { mode: { kind: 'duel' }, fast, ...extra };
+  if (m === 'bot') {
+    const d = params.get('difficulty');
+    const difficulty: BotDifficulty = d === 'easy' || d === 'hard' ? d : 'normal';
+    return { mode: { kind: 'bot', difficulty }, fast, ...extra };
+  }
+  return { mode: { kind: 'attract' }, fast };
+}
+
+/** Top-level product shell: live attract arena behind the menu, then matches. */
+export function App() {
+  const initial = useMemo(() => initialMode(), []);
+  const [mode, setMode] = useState<MatchMode>(initial.mode);
+  const [matchKey, setMatchKey] = useState(0);
+  const [panel, setPanel] = useState<Panel>(null);
+  const play = (m: MatchMode) => {
+    sfx.unlock();
+    sfx.play('ui');
+    setMode(m);
+    setMatchKey((k) => k + 1);
+  };
+  const toMenu = () => {
+    setMode({ kind: 'attract' });
+    setMatchKey((k) => k + 1);
+  };
+  return (
+    <>
+      <MatchView
+        key={matchKey}
+        mode={mode}
+        fast={initial.fast}
+        {...(initial.seed !== undefined && matchKey === 0 ? { seed: initial.seed } : {})}
+        onExit={toMenu}
+        onOpenControls={() => setPanel('controls')}
+      />
+      {mode.kind === 'attract' ? <MainMenu onPlay={play} onPanel={setPanel} /> : null}
+      {panel === 'controls' ? <ControlsPanel onClose={() => setPanel(null)} /> : null}
+      {panel === 'settings' ? <SettingsPanel onClose={() => setPanel(null)} /> : null}
+    </>
+  );
+}
+
+function MainMenu({
+  onPlay,
+  onPanel,
+}: {
+  onPlay: (m: MatchMode) => void;
+  onPanel: (p: Panel) => void;
+}) {
+  const [difficulty, setDifficulty] = useState<BotDifficulty>('normal');
+  const records = useHistory((s) => s.records);
+  return (
+    <div className="menu" data-testid="main-menu">
+      <div className="menu-card">
+        <h1 className="title">
+          FRACTURE <span>FIELD</span>
+        </h1>
+        <p className="tagline">Bend matter and energy. Drive the Rift Core into the rival gate.</p>
+        <div className="col">
+          <button
+            className="btn primary big"
+            data-testid="play-bot"
+            onClick={() => onPlay({ kind: 'bot', difficulty })}
+          >
+            Quick match vs bot
+          </button>
+          <div className="seg" role="radiogroup" aria-label="Bot difficulty">
+            {(['easy', 'normal', 'hard'] as const).map((d) => (
+              <button
+                key={d}
+                role="radio"
+                aria-checked={difficulty === d}
+                className={difficulty === d ? 'on' : ''}
+                onClick={() => setDifficulty(d)}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+          <button
+            className="btn big"
+            data-testid="play-duel"
+            onClick={() => onPlay({ kind: 'duel' })}
+          >
+            Local duel · 2 players, 1 keyboard
+          </button>
+          <button
+            className="btn"
+            disabled
+            title="Arrives with authoritative online rooms (Phase 03)"
+          >
+            Online duel · coming next
+          </button>
+          <div className="row">
+            <button className="btn" onClick={() => onPanel('controls')}>
+              Controls
+            </button>
+            <button className="btn" onClick={() => onPanel('settings')}>
+              Settings
+            </button>
+          </div>
+        </div>
+        {records.length > 0 ? (
+          <div className="history">
+            <div className="me-eyebrow">THIS SESSION</div>
+            {records.slice(0, 5).map((r) => (
+              <div key={r.id} className="history-row">
+                <span>{r.mode === 'duel' ? 'Duel' : 'vs Bot'}</span>
+                <span>
+                  {r.winner === -1 ? 'Draw' : <Glyph slot={r.winner} size={14} />} {r.roundWins[0]}–
+                  {r.roundWins[1]}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function BindingTable({ title, b }: { title: string; b: KeyBindings }) {
+  const rows: [string, readonly string[]][] = [
+    [
+      'Move',
+      [...b.up.slice(0, 1), ...b.left.slice(0, 1), ...b.down.slice(0, 1), ...b.right.slice(0, 1)],
+    ],
+    ['Pulse (tap)', b.pulse],
+    ['Lift (hold)', b.lift],
+    ['Sweep ↑ / ↓', [...b.sweepUp.slice(0, 1), ...b.sweepDown.slice(0, 1)]],
+    ['Guard', b.guard],
+  ];
+  return (
+    <div className="binding-table">
+      <div className="me-eyebrow">{title}</div>
+      {rows.map(([name, keys]) => (
+        <div key={name} className="binding-row">
+          <span>{name}</span>
+          <span>
+            {keys.slice(0, 4).map((k) => (
+              <kbd key={k}>{keyLabel(k)}</kbd>
+            ))}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ControlsPanel({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="panel controls"
+        role="dialog"
+        aria-label="Controls"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="me-title">Controls</div>
+        <p className="muted">
+          Every input method produces the same capped actions — no device has a power advantage.
+          Your force point moves at the same top speed for everyone.
+        </p>
+        <div className="binding-grid">
+          <BindingTable title="SOLO (KEYBOARD + MOUSE)" b={SOLO_BINDINGS} />
+          <BindingTable title="DUEL · PLAYER 1" b={P1_BINDINGS} />
+          <BindingTable title="DUEL · PLAYER 2" b={P2_BINDINGS} />
+        </div>
+        <p className="muted">
+          Mouse: point to aim · left click Pulse · right button hold Lift · wheel Sweep · middle
+          click Guard. Esc / P pauses, M toggles sound. Touch: drag to aim, buttons for abilities.
+        </p>
+        <button className="btn primary" onClick={onClose} autoFocus>
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SettingsPanel({ onClose }: { onClose: () => void }) {
+  const s = useSettings();
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="panel settings"
+        role="dialog"
+        aria-label="Settings"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="me-title">Settings</div>
+        <label className="setting">
+          <span>Sound</span>
+          <input
+            type="checkbox"
+            checked={s.sound}
+            onChange={(e) => s.set('sound', e.target.checked)}
+          />
+        </label>
+        <label className="setting">
+          <span>Volume</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={s.volume}
+            onChange={(e) => s.set('volume', Number(e.target.value))}
+          />
+        </label>
+        <label className="setting">
+          <span>Graphics quality</span>
+          <select
+            value={s.quality}
+            onChange={(e) => s.set('quality', e.target.value as typeof s.quality)}
+          >
+            <option value="auto">Auto</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </label>
+        <label className="setting">
+          <span>Reduced motion (no camera shake)</span>
+          <input
+            type="checkbox"
+            checked={s.reducedMotion}
+            onChange={(e) => s.set('reducedMotion', e.target.checked)}
+          />
+        </label>
+        <label className="setting">
+          <span>Reduced flashes</span>
+          <input
+            type="checkbox"
+            checked={s.reducedFlashes}
+            onChange={(e) => s.set('reducedFlashes', e.target.checked)}
+          />
+        </label>
+        <label className="setting">
+          <span>Developer HUD</span>
+          <input
+            type="checkbox"
+            checked={s.devHud}
+            onChange={(e) => s.set('devHud', e.target.checked)}
+          />
+        </label>
+        <button className="btn primary" onClick={onClose} autoFocus>
+          Done
+        </button>
+      </div>
+    </div>
+  );
+}

@@ -1,4 +1,12 @@
-import type { ActionResult, GameEvent, PlayerSlot, WorldSnapshot } from '@ff/protocol';
+import type {
+  ActionResult,
+  GameEvent,
+  LobbyMessage,
+  MatchEndMessage,
+  PauseMessage,
+  PlayerSlot,
+  WorldSnapshot,
+} from '@ff/protocol';
 import { DEFAULT_RULES } from '@ff/game-data';
 import { SnapshotBuffer } from './snapshot-buffer';
 import { useHud } from './store';
@@ -26,6 +34,7 @@ export class GameClient implements SessionCallbacks {
   readonly buffer: SnapshotBuffer;
   readonly events = new Emitter<GameEvent>();
   readonly acks = new Emitter<{ slot: PlayerSlot; result: ActionResult }>();
+  readonly matchEnds = new Emitter<MatchEndMessage>();
   session: SessionDriver | null = null;
   private lastHudUpdate = 0;
   private snapCounter = 0;
@@ -84,9 +93,32 @@ export class GameClient implements SessionCallbacks {
     useHud.getState().setTransport(status);
   }
 
+  onMatchEnd(end: MatchEndMessage): void {
+    useHud.setState({ matchEnd: end });
+    this.matchEnds.emit(end);
+  }
+
+  onLobby(lobby: LobbyMessage): void {
+    useHud.setState({ lobby });
+  }
+
+  onPause(pause: PauseMessage): void {
+    useHud.setState({ pause: pause.paused ? pause : null });
+  }
+
+  onWelcome(info: {
+    slot: PlayerSlot;
+    roomCode: string;
+    tickRate: number;
+    snapshotRate: number;
+  }): void {
+    useHud.setState({ mySlot: info.slot, roomCode: info.roomCode });
+  }
+
   dispose(): void {
     this.session?.dispose();
     this.session = null;
     this.buffer.clear();
+    useHud.setState({ match: null, players: null, matchEnd: null, pause: null, lobby: null });
   }
 }

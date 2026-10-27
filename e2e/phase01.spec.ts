@@ -25,7 +25,7 @@ test('3D arena boots, renders WebGL and advances the shared simulation without e
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push(m.text());
   });
-  await page.goto('/');
+  await page.goto('/demo');
   const hud = page.getByTestId('dev-hud');
   await expect(hud).toContainText('local · connected');
   const tickOf = async () => Number(await page.locator('[data-key="sim tick"]').textContent());

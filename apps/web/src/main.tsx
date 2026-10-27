@@ -6,6 +6,7 @@ const ArenaDemoPage = lazy(() =>
   import('./routes/ArenaDemoPage').then((m) => ({ default: m.ArenaDemoPage })),
 );
 const SpikePage = lazy(() => import('./routes/SpikePage').then((m) => ({ default: m.SpikePage })));
+const App = lazy(() => import('./ui/App').then((m) => ({ default: m.App })));
 
 function Router() {
   const path = window.location.pathname.replace(/\/+$/, '') || '/';
@@ -14,8 +15,10 @@ function Router() {
       return <SpikePage />;
     case '/sim-debug':
       return <ArenaDemoPage debug />;
-    default:
+    case '/demo':
       return <ArenaDemoPage />;
+    default:
+      return <App />;
   }
 }
 

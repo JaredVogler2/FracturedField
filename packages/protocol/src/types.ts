@@ -98,8 +98,10 @@ export interface EffectSnapshot {
   readonly r: number;
   readonly ttl: number;
   readonly maxTtl: number;
-  /** Signed modifier (vortex chirality). */
+  /** Signed modifier (+1 left / -1 right of the caster's attack direction). */
   readonly s: number;
+  /** Unit wind direction on the arena plane (world x, z). */
+  readonly d: Vec2;
 }
 
 export const MATCH_PHASES = [

@@ -58,6 +58,7 @@ export function Arena({
       <Pillars shapes={shapes} />
       <Gate end={-1} arena={arena} />
       <Gate end={1} arena={arena} />
+      <Plinths arena={arena} />
       <Underside arena={arena} />
       <DistantSpires />
     </group>
@@ -219,49 +220,60 @@ function Gate({ end, arena }: { end: 1 | -1; arena: ArenaLayout }) {
   const pylonZ = g.mouthHalfWidth + 1.05;
   const pylonH = 5.4;
   const archR = pylonZ;
+  const tall = useRef<THREE.Group>(null);
+  useFrame(({ camera }) => {
+    // When the camera looks from behind this gate (portrait end view), its tall structure would
+    // hide the goal mouth: drop it from view (gameplay readability over set dressing).
+    if (tall.current) tall.current.visible = camera.position.x * end < L + 4;
+  });
   return (
     <group position-x={end * L}>
-      {/* Pylons flanking the mouth */}
-      {[-1, 1].map((s) => (
-        <group key={s} position={[end * 0.35, 0, s * pylonZ]}>
-          <mesh position-y={pylonH / 2} castShadow receiveShadow material={stone}>
-            <boxGeometry args={[1.5, pylonH, 1.3]} />
-          </mesh>
-          <mesh position-y={pylonH + 0.15} castShadow material={brass}>
-            <boxGeometry args={[1.7, 0.3, 1.5]} />
-          </mesh>
-          <mesh position-y={0.3} material={brass}>
-            <boxGeometry args={[1.62, 0.18, 1.42]} />
-          </mesh>
-          <mesh
-            position={[-end * 0.76, pylonH * 0.55, 0]}
-            rotation-y={Math.PI / 2}
-            material={glyph}
-          >
-            <ringGeometry args={[0.28, 0.36, 3, 1]} />
-          </mesh>
-        </group>
-      ))}
-      {/* Monumental arch */}
-      <mesh
-        position={[end * 0.35, pylonH + 0.3, 0]}
-        rotation-y={Math.PI / 2}
-        castShadow
-        material={steel}
-      >
-        <torusGeometry args={[archR, 0.32, 16, 64, Math.PI]} />
-      </mesh>
-      <mesh position={[end * 0.35, pylonH + 0.3, 0]} rotation-y={Math.PI / 2} material={brass}>
-        <torusGeometry args={[archR - 0.42, 0.09, 8, 64, Math.PI]} />
-      </mesh>
-      {/* Lintel */}
-      <mesh position={[end * 0.35, g.mouthHeight + 0.35, 0]} castShadow material={brass}>
-        <boxGeometry args={[0.9, 0.7, g.mouthHalfWidth * 2 + 0.8]} />
-      </mesh>
-      {/* Cavity */}
-      <mesh position={[end * (g.depth + 0.25), g.mouthHeight / 2, 0]} material={cavity}>
-        <boxGeometry args={[0.5, g.mouthHeight, g.mouthHalfWidth * 2 + 1]} />
-      </mesh>
+      <group ref={tall}>
+        {/* Pylons flanking the mouth */}
+        {[-1, 1].map((s) => (
+          <group key={s} position={[end * 0.35, 0, s * pylonZ]}>
+            <mesh position-y={pylonH / 2} castShadow receiveShadow material={stone}>
+              <boxGeometry args={[1.5, pylonH, 1.3]} />
+            </mesh>
+            <mesh position-y={pylonH + 0.15} castShadow material={brass}>
+              <boxGeometry args={[1.7, 0.3, 1.5]} />
+            </mesh>
+            <mesh position-y={0.3} material={brass}>
+              <boxGeometry args={[1.62, 0.18, 1.42]} />
+            </mesh>
+            <mesh
+              position={[-end * 0.76, pylonH * 0.55, 0]}
+              rotation-y={Math.PI / 2}
+              material={glyph}
+            >
+              <ringGeometry args={[0.28, 0.36, 3, 1]} />
+            </mesh>
+          </group>
+        ))}
+        {/* Monumental arch */}
+        <mesh
+          position={[end * 0.35, pylonH + 0.3, 0]}
+          rotation-y={Math.PI / 2}
+          castShadow
+          material={steel}
+        >
+          <torusGeometry args={[archR, 0.32, 16, 64, Math.PI]} />
+        </mesh>
+        <mesh position={[end * 0.35, pylonH + 0.3, 0]} rotation-y={Math.PI / 2} material={brass}>
+          <torusGeometry args={[archR - 0.42, 0.09, 8, 64, Math.PI]} />
+        </mesh>
+        {/* Lintel */}
+        <mesh position={[end * 0.35, g.mouthHeight + 0.35, 0]} castShadow material={brass}>
+          <boxGeometry args={[0.9, 0.7, g.mouthHalfWidth * 2 + 0.8]} />
+        </mesh>
+        {/* Cavity back wall and roof would also block an end-on view of the mouth */}
+        <mesh position={[end * (g.depth + 0.25), g.mouthHeight / 2, 0]} material={cavity}>
+          <boxGeometry args={[0.5, g.mouthHeight, g.mouthHalfWidth * 2 + 1]} />
+        </mesh>
+        <mesh position={[end * (g.depth / 2), g.mouthHeight + 0.25, 0]} material={cavity}>
+          <boxGeometry args={[g.depth + 0.5, 0.5, g.mouthHalfWidth * 2 + 1]} />
+        </mesh>
+      </group>
       {[-1, 1].map((s) => (
         <mesh
           key={s}
@@ -271,9 +283,6 @@ function Gate({ end, arena }: { end: 1 | -1; arena: ArenaLayout }) {
           <boxGeometry args={[g.depth, g.mouthHeight, 0.5]} />
         </mesh>
       ))}
-      <mesh position={[end * (g.depth / 2), g.mouthHeight + 0.25, 0]} material={cavity}>
-        <boxGeometry args={[g.depth + 0.5, 0.5, g.mouthHalfWidth * 2 + 1]} />
-      </mesh>
       {/* Posts */}
       {[-1, 1].map((s) => (
         <mesh
@@ -300,6 +309,54 @@ function Gate({ end, arena }: { end: 1 | -1; arena: ArenaLayout }) {
         distance={9}
         decay={2}
       />
+    </group>
+  );
+}
+
+/**
+ * Dark stone plinths behind the far wall, outside the scoring lane: the wielders' stations
+ * (characters arrive in Phase 07D). Distinct engraved shape per team, not just colour.
+ */
+function Plinths({ arena }: { arena: ArenaLayout }) {
+  const stone = useStandard({ color: '#1e242b', roughness: 0.78, metalness: 0.05 });
+  const brass = useStandard(BRASS);
+  const inlays = [
+    useStandard({
+      color: '#140a02',
+      emissive: TEAM_COLORS[0],
+      emissiveIntensity: 2.4,
+      roughness: 0.4,
+    }),
+    useStandard({
+      color: '#02100f',
+      emissive: TEAM_COLORS[1],
+      emissiveIntensity: 2.4,
+      roughness: 0.4,
+    }),
+  ] as const;
+  const z = -(arena.halfWidth + 2.4);
+  return (
+    <group>
+      {([0, 1] as const).map((slot) => {
+        const x = (slot === 0 ? -1 : 1) * 11.5;
+        const sides = slot === 0 ? 6 : 4;
+        return (
+          <group key={slot} position={[x, 0, z]}>
+            <mesh position-y={0.8} castShadow receiveShadow material={stone}>
+              <cylinderGeometry args={[1.45, 1.7, 1.6, sides]} />
+            </mesh>
+            <mesh position-y={1.63} castShadow material={brass}>
+              <cylinderGeometry args={[1.55, 1.5, 0.08, sides]} />
+            </mesh>
+            <mesh position-y={1.68} rotation-x={-Math.PI / 2} material={inlays[slot]}>
+              <ringGeometry args={[0.85, 1.0, sides]} />
+            </mesh>
+            <mesh position-y={0.25} material={brass}>
+              <cylinderGeometry args={[1.74, 1.78, 0.12, sides]} />
+            </mesh>
+          </group>
+        );
+      })}
     </group>
   );
 }

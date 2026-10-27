@@ -6,15 +6,15 @@ Nothing here is advertised as deployed or device-tested unless the evidence colu
 | Phase | State | Commit | Evidence |
 |---|---|---|---|
 | 01 Architecture/feasibility | COMPLETE | `4c8fe27` | [PHASE-01](progress/PHASE-01.md): golden physics identical in Node/Chromium/workerd; 21/21 live two-client DO checks; 60 s in-DO 30 Hz benchmark (local workerd); 56 unit + 3 e2e tests |
-| 02 Local vertical slice | IN PROGRESS | — | match FSM + abilities already in `GameWorld`; input adapters, HUD, onboarding, shots and tuning pending |
-| 03 Online multiplayer | NOT STARTED | — | room authority + live WS proven in Phase 01; client RemoteSession, lag/loss suite, browser E2E pending |
+| 02 Local vertical slice | COMPLETE | (see git log `Phase 02:`) | [PHASE-02](progress/PHASE-02.md): full local match loop with real input (E2E: score → win → rematch), 2 simultaneous keyboard adapters, bot, 6 D02 shots, 87 unit + 7 e2e tests, desktop + phone captures |
+| 03 Online multiplayer | IN PROGRESS | — | room authority + live WS proven in Phase 01; client RemoteSession, lobby UX, lag/loss suite, browser E2E pending |
 | 04 Matter/energy physics | NOT STARTED | — | — |
 | 05 Camera gestures | NOT STARTED | — | — |
 | 06 Mobile sensors/control | NOT STARTED | — | — |
 | 07 Visual production | NOT STARTED | — | — |
 | 08 Game depth/balance | NOT STARTED | — | — |
 | 09 UX/audio | NOT STARTED | — | — |
-| 10 Solo bot | NOT STARTED | — | snapshot-only bot exists (used by demo) |
+| 10 Solo bot | NOT STARTED | — | snapshot-only bot (easy/normal/hard) used by vs-bot mode and attract demo |
 | 11 QA/security/performance | NOT STARTED | — | — |
 | 12 Production deployment | NOT STARTED — NOT DEPLOYED | — | no Cloudflare/Vercel deployment has been executed |
 | 13 Adversarial audit | NOT STARTED | — | — |
@@ -43,4 +43,4 @@ screenshot-driven visual review.
 - Run `pnpm install && pnpm check` first; `pnpm test:e2e` and `pnpm test:worker` need no secrets.
 - Local dev: `pnpm dev:worker` (port 8787) and `pnpm dev` (port 5173). `apps/room-worker/.dev.vars`
   is copied from `.dev.vars.example` (development-only secret).
-- Earliest incomplete phase: **02** — see the "Next instruction" in docs/progress/PHASE-01.md.
+- Earliest incomplete phase: **03** — see the "Next instruction" in docs/progress/PHASE-02.md.

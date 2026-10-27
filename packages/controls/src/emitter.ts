@@ -29,6 +29,11 @@ export class IntentEmitter {
     this.source = source;
   }
 
+  /** Sequence number the next intent will carry. */
+  get nextSeq(): number {
+    return this.seq;
+  }
+
   /** Resets the sequence space (call when the transport connection is replaced). */
   resetSequence(): void {
     this.seq = 0;

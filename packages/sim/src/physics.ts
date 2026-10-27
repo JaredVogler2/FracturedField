@@ -58,7 +58,11 @@ export class PhysicsWorld {
   private readonly colliderToEntity = new Map<number, EntityId>();
   private nextId = 1;
   readonly staticShapes: readonly StaticShape[];
-  private readonly impactThreshold = 6;
+  /** Minimum reported contact impulse (N·s); resting support is filtered per body mass. */
+  private readonly impactThreshold = 10;
+  /** Last tick an impact was reported per collider pair (persistent contacts are de-duplicated). */
+  private readonly lastImpact = new Map<string, { tick: number; impulse: number }>();
+  private stepCount = 0;
 
   constructor(
     readonly rules: GameRules,
@@ -137,7 +141,7 @@ export class PhysicsWorld {
         .setFriction(core.friction)
         .setCollisionGroups(groups(GROUP.CORE))
         .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
-        .setContactForceEventThreshold(this.impactThreshold * this.rules.match.tickRate),
+        .setContactForceEventThreshold(this.impactThreshold * this.rules.match.tickRate * 0.8),
       body,
     );
     return this.register('core', -1, body, col, 'riftCore', core.radius, -1);
@@ -165,7 +169,7 @@ export class PhysicsWorld {
         .setFriction(mat.friction)
         .setCollisionGroups(groups(GROUP.BOULDER))
         .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
-        .setContactForceEventThreshold(this.impactThreshold * this.rules.match.tickRate),
+        .setContactForceEventThreshold(this.impactThreshold * this.rules.match.tickRate * 0.8),
       body,
     );
     return this.register('boulder', -1, body, col, material, radius, -1);
@@ -191,7 +195,7 @@ export class PhysicsWorld {
         .setFriction(MATERIALS.guardStone.friction)
         .setCollisionGroups(groups(GROUP.GUARD))
         .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
-        .setContactForceEventThreshold(this.impactThreshold * this.rules.match.tickRate),
+        .setContactForceEventThreshold(this.impactThreshold * this.rules.match.tickRate * 0.8),
       body,
     );
     return this.register('guard', owner, body, col, 'guardStone', Math.max(half[0], half[2]), ttl);
@@ -238,8 +242,11 @@ export class PhysicsWorld {
    */
   step(): { impacts: ImpactReport[]; invalid: EntityId[] } {
     this.world.step(this.queue);
+    this.stepCount++;
     const impacts: ImpactReport[] = [];
     const seen = new Set<string>();
+    const g = this.rules.gravity;
+    const dt = this.dt;
     this.queue.drainContactForceEvents((ev) => {
       const h1 = ev.collider1();
       const h2 = ev.collider2();
@@ -270,6 +277,13 @@ export class PhysicsWorld {
       if (!(impulse >= this.impactThreshold) || points === 0) return;
       const ea = this.colliderToEntity.get(h1) ?? -1;
       const eb = this.colliderToEntity.get(h2) ?? -1;
+      // Ignore resting support: impulse must clearly exceed what gravity alone produces.
+      const lightest = Math.min(this.massOf(ea), this.massOf(eb));
+      if (impulse < 2.2 * lightest * g * dt) return;
+      // Persistent contacts (pinned against a wall) report at most every 6 ticks unless harder.
+      const prev = this.lastImpact.get(key);
+      if (prev && this.stepCount - prev.tick < 6 && impulse < prev.impulse * 2) return;
+      this.lastImpact.set(key, { tick: this.stepCount, impulse });
       // Order so `a` is always an entity (statics are -1).
       const [a, b] = ea === -1 ? [eb, ea] : [ea, eb];
       if (a === -1) return;
@@ -309,6 +323,15 @@ export class PhysicsWorld {
       }
     }
     return { impacts, invalid };
+  }
+
+  /** Mass of an entity's body (Infinity for statics / unknown, so statics never filter). */
+  private massOf(id: EntityId): number {
+    if (id < 0) return Number.POSITIVE_INFINITY;
+    const e = this.entities.get(id);
+    if (!e) return Number.POSITIVE_INFINITY;
+    const b = this.world.getRigidBody(e.bodyHandle);
+    return b.isDynamic() ? b.mass() : Number.POSITIVE_INFINITY;
   }
 
   /** Serialises the Rapier world (bodies, colliders, contacts, islands). */

@@ -57,6 +57,14 @@ export interface CoreRules {
   readonly hoverDamping: number;
   /** Minimum penetration of the core centre past the goal plane for a goal (fraction of radius). */
   readonly goalPenetration: number;
+  /**
+   * Anti-stall "Meridian drift": a slow core further than `idleDriftDeadZone` from the centre line
+   * is pulled back toward it (m/s^2), fading out as speed approaches `idleDriftSpeed`. Symmetric,
+   * weak, and irrelevant to any moving shot — it only prevents unreachable dead cores.
+   */
+  readonly idleDriftAcceleration: number;
+  readonly idleDriftSpeed: number;
+  readonly idleDriftDeadZone: number;
 }
 
 export interface ManipulatorRules {
@@ -131,6 +139,9 @@ export const DEFAULT_RULES: GameRules = {
     hoverStiffness: 30,
     hoverDamping: 7,
     goalPenetration: 0.9,
+    idleDriftAcceleration: 1.1,
+    idleDriftSpeed: 3,
+    idleDriftDeadZone: 4,
   },
   manipulator: {
     maxSpeed: 13,

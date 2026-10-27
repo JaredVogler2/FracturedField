@@ -6,7 +6,12 @@ import { ToneMappingMode } from 'postprocessing';
 import { MERIDIAN_ARENA } from '@ff/game-data';
 import { Arena } from './Arena';
 import { Entities, Manipulators } from './Entities';
-import { FrameDriver } from './frame-context';
+import { FrameDriver, useGameClient } from './frame-context';
+import { view } from './view';
+import { useSettings } from '../game/settings';
+import { EventEffects } from './vfx/EventEffects';
+import { AimPreview, CoreTrail, LiftTethers, Reticles, SweepFields } from './vfx/FieldEffects';
+import type { PlayerSlot } from '@ff/protocol';
 import { LIGHTING, POST, QUALITY, type QualityTier } from './art-tokens';
 import { fitBroadcastCamera } from './camera';
 import { createSkyMaterial } from './shaders';
@@ -17,11 +22,19 @@ export interface SceneProps {
   readonly quality?: QualityTier['name'];
   readonly side?: 1 | -1;
   readonly portraitSlot?: 0 | 1;
+  /** Seats controlled on this device (aim previews / reticles). */
+  readonly localSlots?: readonly PlayerSlot[];
   readonly children?: ReactNode;
 }
 
 /** The 3D arena canvas: lighting, atmosphere, arena, authoritative entities and post. */
-export function GameScene({ quality = 'high', side = 1, portraitSlot = 0, children }: SceneProps) {
+export function GameScene({
+  quality = 'high',
+  side = 1,
+  portraitSlot = 0,
+  localSlots = [],
+  children,
+}: SceneProps) {
   const tier = QUALITY[quality];
   return (
     <Canvas
@@ -37,6 +50,7 @@ export function GameScene({ quality = 'high', side = 1, portraitSlot = 0, childr
       onCreated={({ gl }) => {
         gl.outputColorSpace = THREE.SRGBColorSpace;
         gl.setClearColor('#050d16');
+        view.element = gl.domElement;
       }}
     >
       <FrameDriver />
@@ -46,6 +60,12 @@ export function GameScene({ quality = 'high', side = 1, portraitSlot = 0, childr
       <Arena textureSize={tier.textureSize} />
       <Entities />
       <Manipulators />
+      <CoreTrail />
+      <SweepFields />
+      <LiftTethers />
+      <AimPreview slots={localSlots} />
+      <Reticles slots={localSlots} />
+      <EventEffects />
       {children}
       <StatsProbe />
       {tier.bloom ? (
@@ -71,14 +91,43 @@ export function GameScene({ quality = 'high', side = 1, portraitSlot = 0, childr
 function CameraRig({ side, portraitSlot }: { side: 1 | -1; portraitSlot: 0 | 1 }) {
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
   const size = useThree((s) => s.size);
+  const client = useGameClient();
+  const reducedMotion = useSettings((s) => s.reducedMotion);
+  const base = useRef(new THREE.Vector3());
+  const shake = useRef(0);
   useEffect(() => {
     const aspect = size.width / Math.max(1, size.height);
-    const pose = fitBroadcastCamera(MERIDIAN_ARENA, aspect, side, portraitSlot);
+    // Short landscape screens: reserve the band the bottom HUD panels occupy (~78 px).
+    const hudBottom = aspect > 1.2 && size.height < 560 ? Math.min(0.22, 78 / size.height) : 0;
+    const pose = fitBroadcastCamera(MERIDIAN_ARENA, aspect, side, portraitSlot, hudBottom);
     camera.fov = pose.fov;
     camera.position.copy(pose.position);
     camera.lookAt(pose.target);
     camera.updateProjectionMatrix();
+    base.current.copy(pose.position);
+    view.camera = camera;
   }, [camera, size.width, size.height, side, portraitSlot]);
+  useEffect(
+    () =>
+      client.events.on((e) => {
+        if (e.type === 'goal') shake.current = Math.max(shake.current, 0.45);
+        else if (e.type === 'impact' && e.impulse > 260)
+          shake.current = Math.max(shake.current, 0.12);
+      }),
+    [client],
+  );
+  useFrame(({ clock }, dt) => {
+    if (shake.current <= 0) return;
+    shake.current = Math.max(0, shake.current - dt * 0.9);
+    const amp = reducedMotion ? 0 : shake.current * shake.current;
+    const t = clock.elapsedTime * 38;
+    camera.position.set(
+      base.current.x + Math.sin(t * 1.3) * amp,
+      base.current.y + Math.sin(t * 1.7 + 1) * amp * 0.6,
+      base.current.z + Math.sin(t * 0.9 + 2) * amp,
+    );
+    if (shake.current === 0) camera.position.copy(base.current);
+  });
   return null;
 }
 

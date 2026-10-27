@@ -68,6 +68,9 @@ interface EffectState {
   ttl: number;
   maxTtl: number;
   sign: number;
+  /** Unit wind direction (x, z). */
+  dx: number;
+  dz: number;
 }
 
 interface MatchState {
@@ -518,7 +521,7 @@ export class GameWorld {
         outcome = this.castPulse(p, intensity);
         break;
       case 'sweep':
-        outcome = this.castSweep(p, intent.modifier);
+        outcome = this.castSweep(p, intent.modifier, intent.dir);
         break;
       case 'guard':
         outcome = this.castGuard(p, intent.dir);
@@ -545,6 +548,9 @@ export class GameWorld {
   private castPulse(p: PlayerState, intensity: number): RejectReason | null {
     const def = this.abilities.pulse;
     const oy = this.rules.manipulator.height;
+    // Release into the shot: a pulse ends the caster's own lift so the body can actually fly.
+    if (p.hold) this.releaseHold(p, true);
+    const loftHeight = this.rules.core.hoverHeight + def.loftThreshold;
     let coreMag = 0;
     for (const e of this.physics.entities.values()) {
       if (e.kind !== 'core' && e.kind !== 'boulder') continue;
@@ -567,7 +573,8 @@ export class GameWorld {
         nx = p.slot === 0 ? 1 : -1;
         nz = 0;
       }
-      const ny = def.lift;
+      // Elevated bodies (e.g. lifted) are lofted into a ballistic arc: the lob shot.
+      const ny = t.y > loftHeight ? def.loft : def.lift;
       const inv = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
       const j = def.impulse * strength;
       body.applyImpulse({ x: nx * inv * j, y: ny * inv * j, z: nz * inv * j }, true);
@@ -584,10 +591,25 @@ export class GameWorld {
     return null;
   }
 
-  private castSweep(p: PlayerState, modifier: number | undefined): RejectReason | null {
+  private castSweep(
+    p: PlayerState,
+    modifier: number | undefined,
+    dir: readonly [number, number] | undefined,
+  ): RejectReason | null {
     const def = this.abilities.sweep;
     if (this.effects.length >= this.rules.limits.maxActiveEffects) return 'limit';
     const sign = modifier !== undefined && modifier < 0 ? -1 : 1;
+    // Default wind: to the caster's left (+1) or right (-1) relative to their attack direction.
+    // Slot 0 attacks +X, so its left is -Z; slot 1 attacks -X, so its left is +Z.
+    let dx = 0;
+    let dz = (p.slot === 0 ? -1 : 1) * sign;
+    if (dir && Number.isFinite(dir[0]) && Number.isFinite(dir[1])) {
+      const len = length2(dir[0], dir[1]);
+      if (len > 0.2) {
+        dx = dir[0] / len;
+        dz = dir[1] / len;
+      }
+    }
     const ttl = this.ticks(def.durationSeconds);
     this.effects.push({
       id: this.nextEffectId++,
@@ -599,6 +621,8 @@ export class GameWorld {
       ttl,
       maxTtl: ttl,
       sign,
+      dx,
+      dz,
     });
     this.emit({
       type: 'cast',
@@ -655,12 +679,28 @@ export class GameWorld {
       return false;
     });
     if (blocked) return 'illegal_target';
+    // Moving bodies are tested against the barrier's oriented box using their true positions
+    // (the broad-phase is only refreshed during a step); other guards must not stack.
+    const cos = Math.cos(yaw);
+    const sin = Math.sin(yaw);
     for (const e of this.physics.entities.values()) {
-      if (e.kind !== 'guard') continue;
       const b = this.physics.body(e.id);
       if (!b) continue;
       const t = b.translation();
-      if (length2(t.x - x, t.z - z) < def.halfWidth * 1.2) return 'illegal_target';
+      if (e.kind === 'guard') {
+        if (length2(t.x - x, t.z - z) < def.halfWidth * 1.2) return 'illegal_target';
+        continue;
+      }
+      // Into the guard's local frame: local X = (cos, -sin), local Z = (sin, cos) for yaw θ.
+      const rx = t.x - x;
+      const rz = t.z - z;
+      const lx = rx * cos - rz * sin;
+      const lz = rx * sin + rz * cos;
+      const cx = clamp(lx, -half[0], half[0]);
+      const cz = clamp(lz, -half[2], half[2]);
+      const cy = clamp(t.y, 0, half[1] * 2);
+      const d = Math.sqrt((lx - cx) ** 2 + (lz - cz) ** 2 + (t.y - cy) ** 2);
+      if (d < e.radius + 0.05) return 'illegal_target';
     }
     if (this.physics.entityCount >= this.rules.limits.maxDynamicBodies) return 'limit';
 
@@ -815,7 +855,7 @@ export class GameWorld {
       if (h.target === this.coreId) coreLifted = true;
     }
 
-    // Sweeps (vortex fields).
+    // Sweeps (crosswind fields): smooth radial falloff, fade in/out, force-like mass scaling.
     if (this.effects.length > 0) {
       const def = this.abilities.sweep;
       for (const e of this.physics.entities.values()) {
@@ -824,20 +864,33 @@ export class GameWorld {
         const body = this.physics.body(e.id);
         if (!body) continue;
         const t = body.translation();
+        const massScale = clamp(def.referenceMass / body.mass(), 0.2, 1.5);
         for (const fx of this.effects) {
-          const dx = t.x - fx.x;
-          const dz = t.z - fx.z;
-          const r = length2(dx, dz);
-          if (r >= fx.radius || r < 1e-3) continue;
-          // Ring profile peaks mid-radius; fades in/out over the effect lifetime.
+          const r = length2(t.x - fx.x, t.z - fx.z);
+          if (r >= fx.radius) continue;
           const life = Math.min(1, fx.ttl / 6, (fx.maxTtl - fx.ttl + 1) / 4);
-          const profile = Math.sin((Math.PI * r) / fx.radius) * life;
-          const tx = (-dz / r) * fx.sign;
-          const tz = (dx / r) * fx.sign;
-          const at = def.tangentialAcceleration * profile;
-          const ai = def.inwardAcceleration * profile;
-          this.accumulate(e.id, tx * at - (dx / r) * ai, 0, tz * at - (dz / r) * ai);
+          const k = 1 - r / fx.radius;
+          const a = def.windAcceleration * (k * k * (3 - 2 * k)) * life * massScale;
+          this.accumulate(e.id, fx.dx * a, 0, fx.dz * a);
         }
+      }
+    }
+
+    // Anti-stall drift: a slow core far from the centre line eases back toward it.
+    const driftCore = this.physics.body(this.coreId);
+    if (driftCore && !coreLifted && this.match.phase === 'playing') {
+      const c = this.rules.core;
+      const t = driftCore.translation();
+      const v = driftCore.linvel();
+      const speed = Math.hypot(v.x, v.z);
+      if (speed < c.idleDriftSpeed && Math.abs(t.x) > c.idleDriftDeadZone) {
+        const fade = Math.min(1, (Math.abs(t.x) - c.idleDriftDeadZone) / 2);
+        this.accumulate(
+          this.coreId,
+          -Math.sign(t.x) * c.idleDriftAcceleration * (1 - speed / c.idleDriftSpeed) * fade,
+          0,
+          0,
+        );
       }
     }
 
@@ -1159,6 +1212,7 @@ export class GameWorld {
       ttl: f.ttl,
       maxTtl: f.maxTtl,
       s: f.sign,
+      d: [q4(f.dx), q4(f.dz)],
     }));
     const m = this.match;
     const match: MatchSnapshot = {
@@ -1219,7 +1273,7 @@ export class GameWorld {
         .int(p.lockout)
         .int(p.hold ? p.hold.target : -1);
     }
-    for (const f of this.effects) h.int(f.id).num(f.x).num(f.z).int(f.ttl).int(f.sign);
+    for (const f of this.effects) h.int(f.id).num(f.x).num(f.z).int(f.ttl).num(f.dx).num(f.dz);
     const m = this.match;
     h.str(m.phase)
       .int(m.round)
@@ -1303,6 +1357,32 @@ export class GameWorld {
 
   debugSetEnergy(slot: PlayerSlot, energy: number): void {
     this.players[slot].energy = energy;
+  }
+
+  /** Debug/test-only: set the remaining round clock (ticks) to exercise expiry rules quickly. */
+  debugSetClock(ticks: number): void {
+    this.match.clockTicks = Math.max(1, Math.floor(ticks));
+  }
+
+  /** Debug/test-only: clear the post-kickoff ability shield. */
+  debugClearKickoffShield(): void {
+    this.match.kickoffShield = 0;
+  }
+
+  /** Debug/test-only: authoritative per-seat state needed by fixtures (energy, cooldowns). */
+  debugPlayer(slot: PlayerSlot): {
+    energy: number;
+    lockout: number;
+    cooldowns: Partial<Record<AbilityId, number>>;
+    guards: readonly EntityId[];
+  } {
+    const p = this.players[slot];
+    return {
+      energy: p.energy,
+      lockout: p.lockout,
+      cooldowns: { ...p.cooldowns },
+      guards: [...p.guards],
+    };
   }
 
   /** Physics budget counters for HUD/diagnostics. */

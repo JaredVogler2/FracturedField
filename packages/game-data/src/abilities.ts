@@ -42,6 +42,10 @@ export interface PulseDef extends AbilityBase {
   readonly radius: number;
   /** Upward share of the impulse direction (adds liveliness without lofting). */
   readonly lift: number;
+  /** Upward share used when the target is already elevated (lift -> pulse = lob shot). */
+  readonly loft: number;
+  /** Height above the hover band at which a body counts as elevated (m). */
+  readonly loftThreshold: number;
 }
 
 export interface LiftDef extends AbilityBase {
@@ -57,14 +61,20 @@ export interface LiftDef extends AbilityBase {
   readonly maxHoldSeconds: number;
 }
 
+/**
+ * SWEEP raises a bounded crosswind: a disc of air at the manipulator blowing in one lateral
+ * direction (left/right of the caster's attack direction, or an explicit input direction). A
+ * uniform field bends a passing core predictably; equal and opposite crosswinds cancel exactly.
+ * (A pure vortex was rejected after testing: its sideways push cancels over a straight pass.)
+ */
 export interface SweepDef extends AbilityBase {
   readonly id: 'sweep';
   readonly radius: number;
   readonly durationSeconds: number;
-  /** Peak tangential acceleration at the ring of maximum strength (m/s^2). */
-  readonly tangentialAcceleration: number;
-  /** Small inward pull that keeps trajectories curving instead of flinging outward (m/s^2). */
-  readonly inwardAcceleration: number;
+  /** Wind acceleration on a body of `referenceMass` at the field centre (m/s^2). */
+  readonly windAcceleration: number;
+  /** Bodies heavier than this accelerate proportionally less (wind is a force, not gravity). */
+  readonly referenceMass: number;
 }
 
 export interface GuardDef extends AbilityBase {
@@ -112,6 +122,8 @@ export const DEFAULT_ABILITIES: AbilityTable = {
     fullStrengthRadius: 2.6,
     radius: 7.5,
     lift: 0.08,
+    loft: 0.32,
+    loftThreshold: 0.8,
   },
   lift: {
     id: 'lift',
@@ -138,9 +150,9 @@ export const DEFAULT_ABILITIES: AbilityTable = {
     lockoutSeconds: 0.2,
     available: true,
     radius: 5.5,
-    durationSeconds: 2,
-    tangentialAcceleration: 16,
-    inwardAcceleration: 2.5,
+    durationSeconds: 1.8,
+    windAcceleration: 12,
+    referenceMass: 8,
   },
   guard: {
     id: 'guard',
