@@ -38,7 +38,7 @@ This file is the actionable sequence for Claude Code. Execute the top-level phas
 ## Policy for each substep
 - Read main prompt, companion, docs/GAME_DESIGN.md, docs/CREATIVE_TARGET.md, docs/ARCHITECTURE.md, docs/ACCEPTANCE.md.
 - Output actual implementation; record tests and screenshots. Never write a second planning document as substitute for code.
-- Maintain "main" green as much as practical. Commit coherent steps and update docs/progress/STEP-N.md.
+- Maintain "main" green as much as practical. Commit coherent steps, update docs/progress/PHASE-XX.md with actual evidence and update docs/BUILD_STATUS.md as the single status source of truth.
 - Enforce a *red gate*: core round trip, scored match, physics equivalence, accessible touch, no footage upload, no fabricated cloud resources.
 - If absent credentials/hardware prevent a cloud or phone action, fully implement all code that can be tested locally, record blocker unambiguously and continue only with tasks that don't conceal it.
 - For graphics, repeat art critique and phone benchmark until rubric passes or list specific gaps; don't consider adding effects alone sufficient.
