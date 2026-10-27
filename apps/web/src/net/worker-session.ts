@@ -96,6 +96,11 @@ export class WorkerSession implements SessionDriver {
     });
   }
 
+  /** Test runs only: re-paces the local authority (ignored unless started with a time scale). */
+  setTimeScale(value: number): void {
+    this.post({ type: 'timeScale', value });
+  }
+
   /** Hands Lab: puts a task's bodies where it starts (ignored outside the lab). */
   labPlace(
     core: readonly [number, number],

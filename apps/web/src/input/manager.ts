@@ -502,7 +502,11 @@ class TouchAimController {
       return;
     }
     this.activeId = e.pointerId;
-    this.el.setPointerCapture?.(e.pointerId);
+    try {
+      this.el.setPointerCapture?.(e.pointerId);
+    } catch {
+      // The touch already ended (or is not a live pointer): aim without capturing it.
+    }
     this.aimAt(e);
     const r = this.seat.reticle;
     this.holding = this.seat.handsOn && this.nearBody(r.x, r.z, TOUCH_GRAB_RADIUS);

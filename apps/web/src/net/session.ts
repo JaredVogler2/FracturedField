@@ -64,6 +64,8 @@ export interface SessionDriver {
   requestRematch(): void;
   /** Local practice only: freeze the local authority (online matches never pause on request). */
   setPaused?(paused: boolean): void;
+  /** Test runs only: re-pace the local authority (see `?test=1&timescale=`). */
+  setTimeScale?(value: number): void;
   /** Online only: leave the room (forfeits a live match). */
   leave?(): void;
   dispose(): void;

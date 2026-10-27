@@ -347,8 +347,9 @@ export function MatchView({
     [setup.seats, seatLoadouts],
   );
 
-  // Read-only test hook (?test=1): lets automated E2E "players" see the same public state a human
-  // sees on screen and project world points to screen coordinates. Grants no authority.
+  // Test hook (?test=1): lets automated E2E "players" see the same public state a human sees on
+  // screen and project world points to screen coordinates. Grants no authority (its one control
+  // re-paces a test run's local authority; rules and physics are untouched).
   useEffect(() => {
     if (!new URLSearchParams(window.location.search).has('test')) return;
     const w = window as unknown as Record<string, unknown>;
@@ -409,6 +410,9 @@ export function MatchView({
       matchEnd: () => useHud.getState().matchEnd,
       // Renderer counters (all passes of the last frame) and texture-generation cost at load.
       renderStats: () => ({ ...renderStats, surfaces: { ...surfaceStats } }),
+      // Test runs with a time scale only (the worker ignores it otherwise): a scripted player
+      // re-paces the local authority to keep its reactions within a set time of play.
+      timeScale: (v: number) => session.current?.setTimeScale?.(v),
     };
     return () => {
       offAcks();

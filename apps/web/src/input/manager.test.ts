@@ -92,6 +92,34 @@ describe('InputManager control modes', () => {
     m.dispose();
   });
 
+  it('a touch whose pointer can no longer be captured (it already ended) still aims', async () => {
+    const { view } = await import('../render/view');
+    const project = vi
+      .spyOn(view, 'screenToArena')
+      .mockImplementation((x: number, y: number) => ({ x: -20 + x / 10, z: -12 + y / 10 }));
+    const canvas = Object.assign(new EventTarget(), {
+      setPointerCapture: () => {
+        throw new Error('NotFoundError: no active pointer with the given id');
+      },
+    }) as unknown as HTMLElement;
+    const m = new InputManager(
+      [{ slot: 0, bindings: SOLO_BINDINGS, pointer: false, mode: 'touch' }],
+      canvas,
+      () => {},
+    );
+    canvas.dispatchEvent(
+      Object.assign(new Event('pointerdown'), {
+        pointerId: 9,
+        pointerType: 'touch',
+        clientX: 140,
+        clientY: 120,
+      }),
+    );
+    expect(m.seat(0)!.reticle).toMatchObject({ x: -6, z: 0, initialised: true });
+    m.dispose();
+    project.mockRestore();
+  });
+
   it('hiding the tab releases holds', () => {
     const { m, last } = rig('touch');
     m.action(0, { action: 'lift', phase: 'start' });

@@ -29,6 +29,14 @@ export type ToSimWorker =
       readonly lab?: boolean;
     }
   | {
+      /**
+       * Test runs only (a worker started with `timeScale`): re-paces the simulation, 0.1–1. A
+       * scripted test player keeps its reactions within a set time of play on any machine.
+       */
+      readonly type: 'timeScale';
+      readonly value: number;
+    }
+  | {
       /** Hands Lab only: set up a task (the core, and a boulder moved into place). */
       readonly type: 'labPlace';
       readonly core: readonly [number, number];

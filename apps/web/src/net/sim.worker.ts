@@ -24,6 +24,8 @@ let stepMs = 0;
 let seed = 0;
 /** Wall-clock speed of the simulation (test runs only; 1 everywhere else). */
 let timeScale = 1;
+/** Started by a test run (with a time scale): its pace may be changed while it runs. */
+let testPaced = false;
 /** The Hands Lab sandbox (task setup allowed). */
 let lab = false;
 let endAnnounced = false;
@@ -39,6 +41,7 @@ function post(msg: FromSimWorker): void {
 async function init(msg: Extract<ToSimWorker, { type: 'init' }>): Promise<void> {
   seed = msg.seed;
   timeScale = Math.min(1, Math.max(0.25, msg.timeScale ?? 1));
+  testPaced = msg.timeScale !== undefined;
   lab = msg.lab === true;
   world = await GameWorld.create({
     seed,
@@ -156,6 +159,10 @@ scope.onmessage = (ev: MessageEvent<ToSimWorker>) => {
       break;
     case 'labPlace':
       labPlace(msg);
+      break;
+    case 'timeScale':
+      if (testPaced && Number.isFinite(msg.value))
+        timeScale = Math.min(1, Math.max(0.1, msg.value));
       break;
     case 'rematch':
       requestRematch(msg.slots);
