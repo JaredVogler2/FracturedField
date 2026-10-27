@@ -113,3 +113,20 @@ export function tickN(t: TestRoom, n: number): void {
     t.room.tick();
   }
 }
+
+/**
+ * Like tickN, but the given connections behave like real clients and send the 1 Hz live keep-alive
+ * (a seated socket silent for 6 s mid-match is treated as a dead link and closed).
+ */
+export function tickAlive(t: TestRoom, n: number, alive: readonly FakeConnection[]): void {
+  for (let i = 0; i < n; i++) {
+    if (i % 30 === 0) {
+      for (const c of alive) {
+        if (!c.closed)
+          void t.room.onMessage(c.id, JSON.stringify({ t: 'ping', seq: i + 1, t0: t.clock.t }));
+      }
+    }
+    t.clock.t += 1000 / 30;
+    t.room.tick();
+  }
+}

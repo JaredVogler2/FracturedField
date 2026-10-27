@@ -165,3 +165,27 @@ export function secondsToTicks(seconds: number, tickRate: number): number {
   if (!Number.isFinite(seconds) || seconds <= 0) return 0;
   return Math.max(1, Math.round(seconds * tickRate));
 }
+
+/**
+ * Short rounds for automated tests, demos and quick local practice. Online rooms only accept it on
+ * development hosts; production rooms always play `standard`.
+ */
+export const FAST_RULES: GameRules = {
+  ...DEFAULT_RULES,
+  match: {
+    ...DEFAULT_RULES.match,
+    roundSeconds: 25,
+    goalsToWinRound: 1,
+    goldenRiftSeconds: 10,
+    countdownSeconds: 2,
+    goalPauseSeconds: 1.5,
+    roundEndPauseSeconds: 2,
+  },
+};
+
+export const RULESET_IDS = ['standard', 'fast'] as const;
+export type RulesetId = (typeof RULESET_IDS)[number];
+
+export function rulesFor(id: RulesetId): GameRules {
+  return id === 'fast' ? FAST_RULES : DEFAULT_RULES;
+}

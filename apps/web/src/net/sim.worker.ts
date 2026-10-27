@@ -2,7 +2,7 @@
  * Local authority worker: runs the shared GameWorld (and any snapshot bots) at a fixed 30 Hz off
  * the render thread, emitting exactly the snapshot/event/ack stream a remote room would.
  */
-import { DEFAULT_RULES, type GameRules } from '@ff/game-data';
+import { DEFAULT_RULES, FAST_RULES } from '@ff/game-data';
 import type { PlayerSlot } from '@ff/protocol';
 import { GameWorld, SnapshotBot, physicsVersion } from '@ff/sim';
 import type { FromSimWorker, ToSimWorker } from './sim-protocol';
@@ -30,28 +30,12 @@ function post(msg: FromSimWorker): void {
   scope.postMessage(msg);
 }
 
-/** Short rounds for automated tests and quick demos (local play only, never online). */
-function fastRules(): GameRules {
-  return {
-    ...DEFAULT_RULES,
-    match: {
-      ...DEFAULT_RULES.match,
-      roundSeconds: 25,
-      goalsToWinRound: 1,
-      goldenRiftSeconds: 10,
-      countdownSeconds: 2,
-      goalPauseSeconds: 1.5,
-      roundEndPauseSeconds: 2,
-    },
-  };
-}
-
 async function init(msg: Extract<ToSimWorker, { type: 'init' }>): Promise<void> {
   seed = msg.seed;
   world = await GameWorld.create({
     seed,
     autoStart: msg.autoStart,
-    ...(msg.fast ? { rules: fastRules() } : {}),
+    ...(msg.fast ? { rules: FAST_RULES } : {}),
   });
   bots = msg.bots.map((b, i) => new SnapshotBot(b.slot, b.difficulty, seed + i + 1));
   for (const b of msg.bots) ready[b.slot] = true;

@@ -64,7 +64,9 @@ export class FixedRateLoop {
     if (!this.running) return;
     const period = 1000 / this.hz;
     const now = this.clock.now();
-    let due = Math.floor((now - this.start) / period) - this.done;
+    // The epsilon absorbs float rounding at large epoch values: waking exactly on schedule must
+    // count as due, or the loop would re-arm with a zero delay without advancing.
+    let due = Math.floor((now - this.start) / period + 1e-3) - this.done;
     if (due > this.maxCatchUp) {
       // Sustained overload: skip ahead instead of spiralling; record the loss honestly.
       this.stats.dropped += due - this.maxCatchUp;

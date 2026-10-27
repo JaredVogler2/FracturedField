@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { RoomAuthority, CLOSE, signTicket, verifyTicket } from '../src/index.js';
-import { FakeConnection, hello, makeRoom, seatBoth, startLive, tickN } from './helpers.js';
+import {
+  FakeConnection,
+  hello,
+  makeRoom,
+  seatBoth,
+  startLive,
+  tickAlive,
+  tickN,
+} from './helpers.js';
 
 const intent = (seq: number, action: string, phase: string, extra: Record<string, unknown> = {}) =>
   JSON.stringify({
@@ -236,16 +244,27 @@ describe('authoritative match flow', () => {
   it('forfeits the absent player after the grace period (S14) — no free goal before that', async () => {
     const t = makeRoom();
     const { a, b } = await startLive(t);
-    tickN(t, 100);
+    tickAlive(t, 100, [a, b]);
     t.room.onClose(b.id);
-    tickN(t, 30 * 29);
+    tickAlive(t, 30 * 29, [a]);
     expect(a.last('matchEnd')).toBeUndefined();
     expect(a.last('snap')?.s.match.score).toEqual([0, 0]);
-    tickN(t, 40);
+    tickAlive(t, 40, [a]);
     const end = a.last('matchEnd');
     expect(end?.winner).toBe(0);
     expect(end?.reason).toBe('forfeit');
     expect(t.room.roomPhase).toBe('ended');
+  });
+
+  it('closes a seated socket that goes silent mid-match and pauses for the absent seat', async () => {
+    const t = makeRoom();
+    const { a, b } = await startLive(t);
+    tickAlive(t, 30 * 5, [a, b]);
+    expect(b.closed).toBeNull();
+    tickAlive(t, 30 * 7, [a]); // b stops sending anything (dead link, no close event)
+    expect(b.closed?.code).toBe(CLOSE.TIMEOUT);
+    expect(a.closed).toBeNull();
+    expect(a.of('pause').some((p) => p.paused && p.slot === 1)).toBe(true);
   });
 
   it('rebuilds seats from persisted state after a host restart', async () => {

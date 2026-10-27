@@ -7,7 +7,12 @@ import {
   type RoomConnection,
   type SeatGrant,
 } from '@ff/room-core';
-import type { PlayerSlot, RoomInfoResponse } from '@ff/protocol';
+import {
+  IDLE_PING_FRAME,
+  IDLE_PONG_FRAME,
+  type PlayerSlot,
+  type RoomInfoResponse,
+} from '@ff/protocol';
 import { ticketSecret, type Env } from './env.js';
 
 interface SocketAttachment {
@@ -30,6 +35,10 @@ export class RoomDurableObject extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    // Idle keep-alives are answered by the runtime without waking a hibernated room.
+    ctx.setWebSocketAutoResponse(
+      new WebSocketRequestResponsePair(IDLE_PING_FRAME, IDLE_PONG_FRAME),
+    );
     void ctx.blockConcurrencyWhile(async () => {
       const record = await ctx.storage.get<PersistedRoom>(STORAGE_KEY);
       if (record) {

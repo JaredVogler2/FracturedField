@@ -186,6 +186,15 @@ export function encodeMessage(msg: ServerMessage | ClientMessage): string {
   return JSON.stringify(msg);
 }
 
+/**
+ * Fixed keep-alive frames used outside live play. The host may answer IDLE_PING with IDLE_PONG
+ * itself (Cloudflare WebSocket auto-response) without waking a hibernated room; the client then
+ * measures RTT from its own send time. Both are valid ordinary PING/PONG messages, so any host
+ * that does not special-case them still answers correctly.
+ */
+export const IDLE_PING_FRAME = '{"t":"ping","seq":0,"t0":0}';
+export const IDLE_PONG_FRAME = '{"t":"pong","seq":0,"t0":0,"t1":0}';
+
 const SERVER_TYPES: ReadonlySet<string> = new Set<ServerMessageType>([
   'welcome',
   'lobby',

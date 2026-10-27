@@ -1,4 +1,4 @@
-import { DEFAULT_RULES, secondsToTicks, type GameRules } from '@ff/game-data';
+import { rulesFor, secondsToTicks, type GameRules, type RulesetId } from '@ff/game-data';
 import {
   PROTOCOL_VERSION,
   SIM_VERSION,
@@ -22,6 +22,7 @@ import { GameWorld, type SeatResult } from '@ff/sim';
 import { signTicket, verifyTicket } from './tickets.js';
 import { cryptoRandom, newRoomId, newSeed, newSessionId, type RandomSource } from './ids.js';
 import { TokenBucket } from './rate-limit.js';
+import { CLOSE } from './close-codes.js';
 
 /** Platform services injected by the adapter (Durable Object, Node server, tests). */
 export interface RoomEnv {
@@ -60,6 +61,8 @@ interface SeatState {
 interface ConnState {
   readonly conn: RoomConnection;
   readonly openedAt: number;
+  /** Last frame received (any type); a live seat silent for too long is treated as gone. */
+  lastFrameAt: number;
   slot: PlayerSlot | null;
   helloPending: boolean;
   readonly frames: TokenBucket;
@@ -85,6 +88,8 @@ export interface PersistedRoom {
   readonly expiresAt: number;
   readonly phase: RoomPhase;
   readonly seats: readonly [PersistedSeat, PersistedSeat];
+  /** Rule set chosen at creation (absent in records from older builds = standard). */
+  readonly ruleset?: RulesetId;
 }
 
 export type SeatGrant =
@@ -96,18 +101,14 @@ export type SeatGrant =
       readonly message: string;
     };
 
-/** Close codes used on the WebSocket (4000-4999 are application defined). */
-export const CLOSE = {
-  NORMAL: 1000,
-  PROTOCOL: 4000,
-  REPLACED: 4001,
-  BAD_TICKET: 4003,
-  TIMEOUT: 4008,
-  ROOM_CLOSED: 4010,
-  RATE: 4029,
-} as const;
-
 const HELLO_TIMEOUT_MS = 10_000;
+/**
+ * A seated socket that sends nothing for this long during a live match is closed (clients ping at
+ * 1 Hz while live). This catches dead links that never deliver a close event, so the opponent gets
+ * the disconnect pause instead of a frozen rival. Outside live play idle pings may be answered by
+ * the host without reaching the room (hibernation), so silence is not judged there.
+ */
+const LIVE_SILENCE_MS = 6_000;
 const MAX_VIOLATIONS = 20;
 const MAX_DROPPED_FRAMES = 300;
 
@@ -117,6 +118,7 @@ const MAX_DROPPED_FRAMES = 300;
  */
 export class RoomAuthority {
   readonly rules: GameRules;
+  readonly ruleset: RulesetId;
   readonly roomId: string;
   readonly code: string;
   readonly seed: number;
@@ -137,7 +139,8 @@ export class RoomAuthority {
     private readonly env: RoomEnv,
     init: PersistedRoom,
   ) {
-    this.rules = env.rules ?? DEFAULT_RULES;
+    this.ruleset = init.ruleset ?? 'standard';
+    this.rules = env.rules ?? rulesFor(this.ruleset);
     this.random = env.random ?? cryptoRandom;
     this.roomId = init.roomId;
     this.code = init.code;
@@ -152,9 +155,13 @@ export class RoomAuthority {
   }
 
   /** Creates a brand-new room record for an invite code. */
-  static newRecord(env: Pick<RoomEnv, 'now' | 'random' | 'rules'>, code: string): PersistedRoom {
+  static newRecord(
+    env: Pick<RoomEnv, 'now' | 'random' | 'rules'>,
+    code: string,
+    ruleset: RulesetId = 'standard',
+  ): PersistedRoom {
     const now = env.now();
-    const rules = env.rules ?? DEFAULT_RULES;
+    const rules = env.rules ?? rulesFor(ruleset);
     const random = env.random ?? cryptoRandom;
     const emptySeat: PersistedSeat = { issued: false, nonce: 0, ready: false, inputMode: null };
     return {
@@ -166,6 +173,7 @@ export class RoomAuthority {
       expiresAt: now + rules.network.roomTtlSeconds * 1000,
       phase: 'open',
       seats: [emptySeat, emptySeat],
+      ruleset,
     };
   }
 
@@ -196,6 +204,7 @@ export class RoomAuthority {
       expiresAt: this.expiresAt,
       phase: this.phase,
       seats: [persistSeat(this.seats[0]), persistSeat(this.seats[1])],
+      ruleset: this.ruleset,
     };
   }
 
@@ -270,6 +279,7 @@ export class RoomAuthority {
     this.conns.set(conn.id, {
       conn,
       openedAt: now,
+      lastFrameAt: now,
       slot: null,
       helloPending: false,
       // All frames (pings included) and intents are limited separately.
@@ -286,6 +296,7 @@ export class RoomAuthority {
     if (!c) return;
     const now = this.env.now();
     this.lastActivity = now;
+    c.lastFrameAt = now;
     if (!c.frames.take(now)) {
       // Drop silently (replying to each frame would amplify a flood); notify sparingly and
       // disconnect only on sustained abuse.
@@ -590,6 +601,8 @@ export class RoomAuthority {
       }
     }
 
+    if (world.tick % this.rules.match.tickRate === 0) this.reapSilent();
+
     const result = world.stepFixed();
     if (result.results.length > 0) this.deliverResults(result.results);
     if (result.events.length > 0) {
@@ -603,6 +616,17 @@ export class RoomAuthority {
     }
 
     if (world.phase === 'matchEnd') this.finishMatch('complete');
+  }
+
+  /** Closes seated connections that went silent mid-match (dead link without a close event). */
+  private reapSilent(): void {
+    const now = this.env.now();
+    for (const c of [...this.conns.values()]) {
+      if (c.slot === null || now - c.lastFrameAt <= LIVE_SILENCE_MS) continue;
+      this.env.log?.('seat_silent', { room: this.roomId, slot: c.slot });
+      this.onClose(c.conn.id);
+      c.conn.close(CLOSE.TIMEOUT, 'connection silent');
+    }
   }
 
   private finishMatch(reason: 'complete' | 'forfeit'): void {
