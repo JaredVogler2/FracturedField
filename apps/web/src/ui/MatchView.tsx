@@ -410,7 +410,11 @@ export function MatchView({
       lobby: () => useHud.getState().lobby,
       matchEnd: () => useHud.getState().matchEnd,
       // Renderer counters (all passes of the last frame) and texture-generation cost at load.
-      renderStats: () => ({ ...renderStats, surfaces: { ...surfaceStats } }),
+      renderStats: () => ({
+        ...renderStats,
+        tierLog: [...renderStats.tierLog],
+        surfaces: { ...surfaceStats },
+      }),
       // Test runs with a time scale only (the worker ignores it otherwise): a scripted player
       // re-paces the local authority to keep its reactions within a set time of play.
       timeScale: (v: number) => session.current?.setTimeScale?.(v),

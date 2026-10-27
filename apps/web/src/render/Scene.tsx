@@ -511,6 +511,11 @@ function StatsProbe({ tier, adaptive }: { tier: TierName; adaptive: boolean }) {
   useEffect(() => {
     renderStats.tier = tier;
     renderStats.adaptive = adaptive;
+    const log = renderStats.tierLog;
+    if (log[log.length - 1]?.tier !== tier) {
+      log.push({ tier, at: performance.now() });
+      if (log.length > 16) log.shift();
+    }
   }, [tier, adaptive]);
   useEffect(() => {
     // The composer renders several passes per frame; count them all and reset once per frame.

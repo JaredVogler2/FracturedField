@@ -13,7 +13,7 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import { cameraActive, drive, handFor, learnAim, type AimMap, type HandPose } from './camera';
-import { debug, openRoom, project, readyUp, snapshot, type Snap } from './helpers';
+import { debug, openRoom, projectAll, readyUp, snapshot, type Snap } from './helpers';
 
 const coreOf = (s: Snap) => s.entities.find((e) => e.kind === 'core')!;
 
@@ -144,22 +144,77 @@ test('camera, hands-on by default: grip the core, swing, let go — and score ag
 });
 
 /**
- * Grips the core with the mouse the way a person reaches for it: the hand closes first and then
- * moves onto the core, so it takes hold on arrival (within reach) instead of knocking the core
- * away — an open hand moving fast is a stroke. If the core slipped away meanwhile (it may still be
- * rolling) or the hand closed on something else, it opens and reaches again. Then waits until
- * every device sees seat `slot` holding the core.
+ * Where seat `slot`'s open hand goes next on its way to the core, read from the page in one round
+ * trip: the whole way to `QUICK_M` short of the core at once, then `STEP_M` at a time — slow
+ * enough that the hand drags nothing (an open hand moving fast is a stroke, and would knock the
+ * core away). Null once the hand is over the core.
+ */
+const STEP_M = 0.2;
+const QUICK_M = 3.5;
+const OVER_M = 0.6;
+const nextReach = (p: Page, slot: 0 | 1) =>
+  p.evaluate(
+    ([slot, step, quick, over]) => {
+      const hook = (
+        window as unknown as {
+          __ffDebug: {
+            snapshot(): Snap | null;
+            project(x: number, y: number, z: number): { x: number; y: number } | null;
+          };
+        }
+      ).__ffDebug;
+      const s = hook.snapshot()!;
+      const core = s.entities.find((e) => e.kind === 'core')!;
+      const [mx, mz] = s.players[slot]!.m;
+      const dx = core.p[0] - mx;
+      const dz = core.p[2] - mz;
+      const d = Math.hypot(dx, dz);
+      if (d < over) return { d, at: null };
+      const go = d > quick ? d - quick : step;
+      return { d, at: hook.project(mx + (dx / d) * go, 1.1, mz + (dz / d) * go) };
+    },
+    [slot, STEP_M, QUICK_M, OVER_M] as const,
+  );
+
+/**
+ * Grips the core with the mouse the way a person reaches for it: with energy for a hold (an open
+ * hand recovers it) and the core within reach of this seat's half, the open hand goes over the
+ * core — quickly most of the way, slowly at the end — and closes on top of it. A closed hand takes
+ * the first body that comes within its reach, so it never closes on the way. If it took something
+ * else, or the core slipped away, it opens and reaches again. Then waits until every device sees
+ * seat `slot` holding the core.
  */
 async function mouseGrip(p: Page, slot: 0 | 1, others: Page[]) {
   const id = coreOf((await snapshot(p))!).id;
-  const grasp = async (q: Page) => (await snapshot(q))!.players[slot]!.grasp;
-  for (let attempt = 0; attempt < 6 && (await grasp(p)) !== id; attempt++) {
+  const seat = async (q: Page) => (await snapshot(q))!.players[slot]!;
+  const side = slot === 0 ? 1 : -1;
+  for (let attempt = 0; attempt < 6 && (await seat(p)).grasp !== id; attempt++) {
+    await expect
+      .poll(
+        async () => {
+          const s = (await snapshot(p))!;
+          const c = coreOf(s);
+          return (
+            s.players[slot]!.energy >= 80 && side * c.p[0] < 4 && Math.hypot(c.v[0], c.v[2]) < 1.5
+          );
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(true);
+    // Over the core; a hand held back by the midline stops short, still within reach.
+    let last = Infinity;
+    let stalled = 0;
+    for (let i = 0; i < 80; i++) {
+      const r = await nextReach(p, slot);
+      if (!r.at) break;
+      stalled = r.d > last - 0.05 ? stalled + 1 : 0;
+      last = r.d;
+      if (stalled >= 3 && r.d < 2.6) break;
+      await p.mouse.move(r.at.x, r.at.y);
+    }
     await p.mouse.down();
-    const c = coreOf((await snapshot(p))!);
-    const at = (await project(p, c.p[0], 1.1, c.p[2]))!;
-    await p.mouse.move(at.x, at.y, { steps: 4 });
     const held = await expect
-      .poll(() => grasp(p), { timeout: 8_000 })
+      .poll(async () => (await seat(p)).grasp, { timeout: 8_000 })
       .toBe(id)
       .then(
         () => true,
@@ -168,39 +223,86 @@ async function mouseGrip(p: Page, slot: 0 | 1, others: Page[]) {
     if (!held) await p.mouse.up();
   }
   // The room's authority grips it, and every device sees the grip.
-  for (const q of [p, ...others]) await expect.poll(() => grasp(q), { timeout: 10_000 }).toBe(id);
+  for (const q of [p, ...others])
+    await expect.poll(async () => (await seat(q)).grasp, { timeout: 10_000 }).toBe(id);
   return id;
 }
 
-/** Carries what seat `p` holds to (x, z) in `steps`, button held. */
+/**
+ * Carries what seat `p` holds to (x, z) in `steps`, button held. The waypoints are projected in
+ * one round trip, so the carry — and the hold's energy cost — does not grow with the page's
+ * frame time.
+ */
 async function mouseCarryTo(p: Page, x: number, z: number, steps: number) {
   const c = coreOf((await snapshot(p))!);
-  for (let i = 1; i <= steps; i++) {
-    const at = (await project(
-      p,
-      c.p[0] + ((x - c.p[0]) * i) / steps,
+  const path = await projectAll(
+    p,
+    Array.from({ length: steps }, (_, i): [number, number, number] => [
+      c.p[0] + ((x - c.p[0]) * (i + 1)) / steps,
       1.1,
-      c.p[2] + ((z - c.p[2]) * i) / steps,
-    ))!;
-    await p.mouse.move(at.x, at.y);
+      c.p[2] + ((z - c.p[2]) * (i + 1)) / steps,
+    ]),
+  );
+  for (const at of path) {
+    await p.mouse.move(at!.x, at!.y);
     await p.waitForTimeout(150);
+  }
+}
+
+/** The round in play, or null between rounds. */
+const roundInPlay = async (p: Page) => {
+  const s = (await snapshot(p))!;
+  return s.match.phase === 'playing' ? s.match.round : null;
+};
+
+/**
+ * Runs one hand-held step within a single round of play. The room's clock runs in real time, so
+ * on a slow machine a round may end during a step — which lets go of every grip and puts the core
+ * back at the centre; the step then lets go and starts over in the next round. Any other failure
+ * fails the test.
+ */
+async function withinARound<T>(p: Page, step: () => Promise<T>): Promise<T> {
+  for (let tries = 0; ; tries++) {
+    await expect.poll(() => roundInPlay(p), { timeout: 60_000 }).not.toBeNull();
+    const round = await roundInPlay(p);
+    const result = await step().then(
+      (v) => ({ v }),
+      (e: unknown) => ({ e }),
+    );
+    if ((await roundInPlay(p)) === round) {
+      if ('e' in result) throw result.e;
+      return result.v;
+    }
+    await p.mouse.up();
+    if (tries >= 2) throw new Error('a round ended during every try of this step');
   }
 }
 
 test('online: both seats hands-on — each grips the core in turn, and both devices see it', async ({
   browser,
 }) => {
-  test.setTimeout(420_000);
-  const { ctxA, ctxB, a, b, errors } = await openRoom(browser, { query: '&hands=1' });
+  test.setTimeout(600_000);
+  // Standard rules (90 s rounds plus the golden rift; no goal is scored here): the short test
+  // rounds ended the whole match mid-carry on a slow runner. Small canvases: two
+  // software-rendered pages share the machine, and a page drawing slower than the authority's
+  // stale time (0.6 s) could not hold anything.
+  const { ctxA, ctxB, a, b, errors } = await openRoom(browser, {
+    query: '&hands=1',
+    fast: false,
+    viewport: { width: 640, height: 360 },
+  });
   await readyUp(a, b);
   const marks = { a: await debug(a, 'mark'), b: await debug(b, 'mark') };
 
   // Seat 0 grips the core and carries it to the midline, then opens the hand.
-  const core = await mouseGrip(a, 0, [b]);
-  await mouseCarryTo(a, 1.5, 0, 8);
-  await expect
-    .poll(async () => coreOf((await snapshot(b))!).p[0], { timeout: 15_000 })
-    .toBeGreaterThan(-1);
+  const core = await withinARound(a, async () => {
+    const id = await mouseGrip(a, 0, [b]);
+    await mouseCarryTo(a, 1.5, 0, 8);
+    await expect
+      .poll(async () => coreOf((await snapshot(b))!).p[0], { timeout: 15_000 })
+      .toBeGreaterThan(-1);
+    return id;
+  });
   await a.mouse.up();
   for (const q of [a, b])
     await expect
@@ -208,11 +310,15 @@ test('online: both seats hands-on — each grips the core in turn, and both devi
       .toBe(-1);
 
   // Seat 1 takes it: grips it on its own device and carries it back into its half.
-  expect(await mouseGrip(b, 1, [a])).toBe(core);
-  await mouseCarryTo(b, 6, 2, 8);
-  await expect
-    .poll(async () => coreOf((await snapshot(a))!).p[0], { timeout: 15_000 })
-    .toBeGreaterThan(4);
+  const taken = await withinARound(b, async () => {
+    const id = await mouseGrip(b, 1, [a]);
+    await mouseCarryTo(b, 6, 2, 8);
+    await expect
+      .poll(async () => coreOf((await snapshot(a))!).p[0], { timeout: 15_000 })
+      .toBeGreaterThan(4);
+    return id;
+  });
+  expect(taken).toBe(core);
   await b.mouse.up();
   await expect
     .poll(async () => (await snapshot(a))!.players[1]!.grasp, { timeout: 10_000 })

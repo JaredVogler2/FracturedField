@@ -58,7 +58,7 @@ taught, and which mappings they find natural.
   deliberate spin `s` in its entity snapshot.
 - **Tuning** (`@ff/game-data → DEFAULT_RULES.hand`): engage 0.6 / release 0.35, reach 3.2 m,
   stiffness 6–40 s⁻² with damping ratio 0.7 and velocity matching, hold height 2.2 m, accelerations
-  capped (hold 40, sweep 30, push 40 m/s², all inside the per-body field cap), 0.3 s stale hand,
+  capped (hold 40, sweep 30, push 40 m/s², all inside the per-body field cap), 0.6 s stale hand,
   0.2 s regrip, spin 14 rad/s, Magnus 0.05 capped at 4 m/s², energy 4/s holding plus 0.6 per
   m/s of Δv given (a full swing-and-throw costs about a PULSE).
 - **Simulation** (`@ff/sim → GameWorld`, tick step 4): grip engages on the nearest movable body
@@ -104,7 +104,7 @@ taught, and which mappings they find natural.
   50°. The gesture engine now reports the locked hand's features and knuckle angle.
 - **Intent emitter** (`@ff/controls`): the hand rides on aim intents — clamped, sent on change,
   re-sent every 100 ms while an input describes one, open and still included (the authority's
-  stale time is 300 ms, and only a present hand sweeps); when an input stops describing a hand an
+  stale time is 600 ms, and only a present hand sweeps); when an input stops describing a hand an
   open hand is sent once, so whatever it held is let go at once.
 - **Adapters** (`apps/web/src/input`), active when the seat is hands-on (the Hands Lab, the
   `handsOn` control setting, or `?hands=1`); only the device that owns the aim describes the
@@ -197,9 +197,42 @@ taught, and which mappings they find natural.
   the reach limit from off-centre spots. They were fixed in the player (a time budget; a carry
   to a set-up spot first), not in the rules. Online, both seats hands-on with the mouse grip
   the core in turn through the room, both devices see each grip, and the room refuses no intent
-  (1.4 min). The camera tests of the sign scheme now select it explicitly (`hands=0`); the
-  settings test covers the *Hands* group.
+  (1.4 min; it plays the standard match clock, see *CI on PR #3*). The camera tests of the sign
+  scheme now select it explicitly (`hands=0`); the settings test covers the *Hands* group.
 - **Not yet:** the bot still plays with discrete moves (Phase 10); the handheld-motion mapping;
   a touch or gamepad player in a match in the browser; anything on a physical device; the
   people study.
 
+
+### CI on PR #3 (slower runners)
+
+The browser job runs on slower machines than this container. Hands tests failed there in two
+rounds, and each failure was reproduced here with the page's CPU throttled
+(`E2E_CPU_THROTTLE=N`, `e2e/throttle.ts`):
+
+- `3c1d5a8`: the online grip never held, and the Hands Lab's scripted mouse throw came out at
+  3.7 m/s. The authority dropped a hand after 0.3 s without an update and a throttled page drew
+  a frame every ~0.45 s, so every grip let go between frames — as a render hitch or a burst of
+  network jitter would for a person. Fixed in `51b79c7`: the stale time is 0.6 s (a unit test
+  with updates 0.45 s apart fails at 0.3 s), the online test reaches in with a closed hand, and
+  the lab's scripted strokes keep their play speed.
+- `51b79c7`: the online test's second carry stopped at x = 3.75 m (needed > 4). The room's match
+  had ended mid-carry: the test played the short test rounds (25 s, two to win) and on a slow
+  runner took longer than the whole match, so the authority let go of every grip and stopped
+  (reproduced at 3× throttle: 3.74 m, `match_end` in the room's log). Throttled runs then showed
+  two more weaknesses of the scripted mouse player, both in the test:
+  - Its hand closed first and then travelled to the core (the `51b79c7` change), so it took the
+    first body that came within reach on the way — a boulder — dragged it along and took it again
+    on every retry, spending its energy; under the short rounds a mid-test round reset had been
+    refilling that energy. It now reaches as a person does: with energy for a hold, the open hand
+    goes over the core (quickly most of the way, 0.2 m at a time at the end, too slow to drag
+    anything) and closes on top of it.
+  - The room's clock runs in real time, so a slow enough machine outlasts any round. The test
+    plays the standard clock (90 s rounds plus the golden rift; no goal is scored in it), and a
+    step that a round end interrupts (every grip let go, the core back at the centre) starts over
+    in the next round; any other failure fails the test. Its two pages use small canvases
+    (640 × 360), which keep their frames well inside the stale time (0.23–0.35 s at 3× throttle
+    here).
+
+  After the fix the test passed 3 of 3 runs here (2.8 and 3.0 min at 3× throttle, 2.3 min at
+  normal speed).

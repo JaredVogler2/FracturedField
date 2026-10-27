@@ -171,9 +171,10 @@ export async function touchAutopilot(
 /**
  * The same player inside the page, for a race against the bot: every rendered frame it reads the
  * snapshot and taps — touch pointer events dispatched to the element a finger would land on (the
- * arena canvas, the PULSE button), whose own handlers do the rest. In a local test run it also
- * re-paces the authority so a frame stays within STEP_PLAY_S of play. Returns when seat `slot`
- * scores or wins a round, or the match ends; throws after `playSeconds` of play or `wallMs`.
+ * arena canvas, the PULSE button), whose own handlers do the rest. It takes its place behind the
+ * core during the kickoff countdown, as the bot does. In a local test run it also re-paces the
+ * authority so a frame stays within STEP_PLAY_S of play. Returns when seat `slot` scores or wins
+ * a round, or the match ends; throws after `playSeconds` of play or `wallMs`.
  */
 export async function touchAutopilotInPage(
   page: Page,
@@ -245,8 +246,11 @@ export async function touchAutopilotInPage(
             asked = want;
           }
           const core = s.entities.find((e) => e.kind === 'core');
-          if (s.match.phase === 'playing' && core && canvas) {
-            stats.frames++;
+          // It gets into position during the kickoff countdown too, as the bot does (waiting for
+          // play to start let the bot reach the core first at every kickoff); it casts in play.
+          const live = s.match.phase === 'playing';
+          if ((live || s.match.phase === 'countdown') && core && canvas) {
+            if (live) stats.frames++;
             // The same decision as the out-of-page player (readStep).
             const leadS = Math.min(maxLeadS, stats.playPerFrame + travelS);
             const gx = slot === 0 ? goalX : -goalX;
@@ -266,7 +270,8 @@ export async function touchAutopilotInPage(
             const pz = cz - m[1];
             const reach = Math.hypot(px, pz);
             const align = (px * dx + pz * dz) / ((reach || 1) * d);
-            const lined = Math.hypot(m[0] - tx, m[1] - tz) < 1.0 && reach < 5.5 && align > 0.9;
+            const lined =
+              live && Math.hypot(m[0] - tx, m[1] - tz) < 1.0 && reach < 5.5 && align > 0.9;
             const button = document.querySelector('[data-testid="tc-pulse"]');
             if (lined) stats.lined++;
             if (lined && button && s.tick - lastPulseTick > pulseGapS * tickHz) {

@@ -250,6 +250,18 @@ match, another in none). Two changes, no assertion weakened:
   test runs only): rules, physics and every tick are unchanged, only the time between ticks
   grows, giving back the reaction time the software-rendered harness takes from the stand-in.
 
+Later, on PR #3 (`51b79c7`), the simplified-mode player again did not score in four matches, on a
+commit that changed nothing taps use. Since it moved into the page it had scored in 2 of 7 CI
+matches. A headless model of the race — the real sim and the easy bot, the player's decision rule
+with its frame and input delays, 60 matches per variant — scored in 58 % of matches and showed
+the main reason: the bot steers during the kickoff countdown, while the player waited for play to
+start, so the bot reached the core first at every kickoff. The player now takes its place behind
+the core during the countdown (it casts only in play), and after a rematch the test hands over
+during the countdown rather than after it: 95–100 % of matches in the model. Locally the test then
+passed four runs of four, three of them with the page's CPU throttled 2× (frames 141–150 ms) and
+one at normal speed under load (175 ms): a goal in match 1 twice and in match 2 once, and once a
+round won on the clock in match 1 (the test counts a goal or a round won).
+
 ### A bug the new browser test found
 
 `e2e/phase07.spec.ts` (adaptive quality steps down under a slow renderer) failed on its first run:
@@ -259,6 +271,12 @@ a row (a tab switch, a GC pause) are still ignored; three or more are load (each
 most 1 s). The unit test that had modelled twenty consecutive 2 s frames as hitches encoded the
 bug; it now models isolated hitches between normal frames, and a new case checks that a 3 fps
 renderer steps down to medium, then low.
+
+On PR #3's slower runner the test failed again — "expected high, received medium" — because it
+read the tier too late: the menu and the countdown alone outlasted the 5 s hold there, and the
+controller had already, correctly, stepped down. The scene now logs when each tier began
+(`renderStats.tierLog` in the test hook), and the test checks that rendering began on high and
+that the first step down came at least 5 s later, however long the start took.
 
 ### Tests (light rig, atmosphere, tiers)
 
@@ -386,6 +404,13 @@ Unit tests:
   detail does not.
 - **The Rift Core and element VFX (7C) and the wielders and hands (7D) are not started.** The fire
   is still cones and the water a flat decal.
+
+### Commits
+
+- `11267c9` — Phase 7B: lighting and atmosphere (code, tests, evidence, the 3D visual program
+  docs).
+- The tier log for the adaptive-quality test, the CI notes above and the 7B hash in the build
+  status: the commits that follow `11267c9`.
 
 ## 7C — Rift Core and elemental VFX (D09) — NOT STARTED
 ## 7D — Wielder characters and IK (D10) — NOT STARTED

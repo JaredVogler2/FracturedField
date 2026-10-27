@@ -53,6 +53,8 @@ interface DebugHook {
     programs: number;
     tier: 'low' | 'medium' | 'high';
     adaptive: boolean;
+    /** Every tier rendered so far, with when it began (page performance.now() ms). */
+    tierLog: { tier: 'low' | 'medium' | 'high'; at: number }[];
     surfaces: { generated: number; ms: number };
   };
 }
@@ -64,6 +66,13 @@ export const snapshot = (page: Page) =>
 
 export const project = (page: Page, x: number, y: number, z: number) =>
   page.evaluate(([a, b, c]) => (window as Win).__ffDebug!.project(a!, b!, c!), [x, y, z]);
+
+/** Several world points to screen in one round trip (a slow page answers once per frame). */
+export const projectAll = (page: Page, points: [number, number, number][]) =>
+  page.evaluate(
+    (pts) => pts.map(([x, y, z]) => (window as Win).__ffDebug!.project(x, y, z)),
+    points,
+  );
 
 export const debug = <K extends keyof DebugHook>(page: Page, key: K) =>
   page.evaluate((k) => {
@@ -131,11 +140,16 @@ export async function openRoom(
     guest?: BrowserContextOptions;
     /** Extra query for both pages (e.g. `&hands=0` for the camera's sign scheme). */
     query?: string;
+    /** Short test rounds (default); false plays the standard match clock. */
+    fast?: boolean;
+    /** Both pages' viewport (default 960 × 540). */
+    viewport?: { width: number; height: number };
   } = {},
 ) {
   const q = opts.query ?? '';
-  const ctxA = await browser.newContext({ viewport: VIEW });
-  const ctxB = await browser.newContext(opts.guest ?? { viewport: VIEW });
+  const view = opts.viewport ?? VIEW;
+  const ctxA = await browser.newContext({ viewport: view });
+  const ctxB = await browser.newContext(opts.guest ?? { viewport: view });
   const a = await ctxA.newPage();
   const b = await ctxB.newPage();
   await throttle(a);
@@ -146,7 +160,7 @@ export async function openRoom(
   opts.beforeNavigate?.(a, b);
 
   // Host creates a room (fast test rules are honoured by development room services only).
-  await a.goto(`/?fast=1&test=1&quality=low${q}`);
+  await a.goto(`/?${opts.fast === false ? '' : 'fast=1&'}test=1&quality=low${q}`);
   await a.getByTestId('play-online').click();
   await expect(a.getByTestId('room-service-health')).toHaveClass(/ok/);
   await a.getByTestId('create-room').click();

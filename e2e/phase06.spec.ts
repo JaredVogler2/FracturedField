@@ -11,6 +11,7 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import { debug, openRoom, project, snapshot, type Snap } from './helpers';
+import { throttle } from './throttle';
 import { PHONE_LANDSCAPE, touchAutopilot, touchAutopilotInPage } from './touch';
 
 test('D06 gate: a touch-only phone (no camera, no sensors) completes three rounds online', async ({
@@ -215,6 +216,7 @@ test('simplified (one-hand) mode: one tap holds LIFT, another lets go; taps alon
   test.setTimeout(900_000);
   const ctx = await browser.newContext(PHONE_LANDSCAPE);
   const page = await ctx.newPage();
+  await throttle(page);
   // Fast rules: one goal wins a round, two rounds win the match. The authority runs at half
   // speed: the scripted player reacts through page round trips on a software-rendered page,
   // the bot every tick — the race must not depend on the test machine's speed.
@@ -262,7 +264,10 @@ test('simplified (one-hand) mode: one tap holds LIFT, another lets go; taps alon
     expect(matches, 'the simplified-mode player did not score in 4 matches').toBeLessThan(4);
     await expect(page.getByTestId('rematch')).toBeVisible({ timeout: 20_000 });
     await page.getByTestId('rematch').tap();
-    await playing();
+    // Back in by the kickoff countdown: the player takes its place before play starts.
+    await expect
+      .poll(async () => (await snapshot(page))?.match.phase, { timeout: 30_000 })
+      .toMatch(/countdown|playing/);
     matches++;
   }
   console.log(`simplified mode: scored in match ${matches}`);
