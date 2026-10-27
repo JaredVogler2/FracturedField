@@ -16,6 +16,26 @@ Open this repository in Claude Code and simply invoke the repository-provided Cl
 /goal Read README.md, docs/GAME_DESIGN.md, docs/ARCHITECTURE.md, docs/ACCEPTANCE.md and docs/BUILD_ORDER.md; follow the deep-dive prompts assigned to each phase. Follow prompts/00-ORCHESTRATOR.md as the standing execution contract. Execute phases sequentially starting with 01, implementing actual runnable code and tests; do not merely summarize the prompts or create a mockup. Commit after each passing phase. Do not advance a phase until its acceptance gates pass or you have documented a concrete blocker. Prioritize playable end-to-end local multiplayer as quickly as possible, then excellent graphics, physics, camera/sensor controls, and competitive depth. Never claim any test or deployment succeeded unless executed and evidenced.
 ```
 
+## Development (implemented code)
+
+Requirements: Node 22+, pnpm 10 (`corepack enable`). No secrets are needed for local work.
+
+```bash
+pnpm install
+pnpm check              # typecheck + lint + unit tests + builds
+pnpm dev:worker         # authoritative room service (Cloudflare Worker + Durable Objects in local workerd) on :8787
+pnpm dev                # web client on http://127.0.0.1:5173  (routes: /, /sim-debug, /spike)
+pnpm test:e2e           # Playwright against the production build
+pnpm test:worker        # live two-client WebSocket checks against local workerd
+pnpm benchmark:sim      # offline simulation benchmark (1/10/50 rooms)
+pnpm benchmark:worker   # 60 s, 30 Hz benchmark inside the Durable Object runtime
+```
+
+Workspace map, versions and decisions: [ADR-0003](docs/decisions/ADR-0003-monorepo-and-versions.md),
+[ADR-0001 authority](docs/decisions/ADR-0001-authoritative-rooms.md),
+[ADR-0005 feasibility](docs/decisions/ADR-0005-durable-object-simulation-feasibility.md).
+Current phase state: [docs/BUILD_STATUS.md](docs/BUILD_STATUS.md).
+
 ## Expanded step-by-step implementation map
 
 **[Open the step-by-step BUILD ORDER](docs/BUILD_ORDER.md)** to run the 13 implementation phases plus **16 specialist deep-dives**. Phase 07 now has five gated visual production passes: environment modeling, lighting/atmosphere, the core and elemental VFX, articulated characters, then screenshot-led art redesign. **[Creative target & objective art criteria](docs/CREATIVE_TARGET.md)** define the expected cinematic experience; the game must be playable, not just attractive in screenshots.

@@ -1,0 +1,76 @@
+{
+  "measuredAt": "2026-10-27T01:16:16.753Z",
+  "runtime": "node v22.22.0 (offline, single thread)",
+  "host": {
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "cpuCount": 4
+  },
+  "rapier": "0.21.0",
+  "scenario": {
+    "dynamicBodies": 20,
+    "regions": 20,
+    "ticks": 1800,
+    "snapshotHz": 20
+  },
+  "results": [
+    {
+      "rooms": 1,
+      "ticks": 1800,
+      "perRoomTickMs": {
+        "mean": 0.3666,
+        "p50": 0.1034,
+        "p95": 0.4553,
+        "p99": 0.9629,
+        "max": 380.145
+      },
+      "allRoomsTickMs": {
+        "p50": 0.104,
+        "p95": 0.457,
+        "max": 380.152
+      },
+      "cpuShareOfOneCore": 0.0031,
+      "fitsIn33msBudgetAtP95": true,
+      "checksum": 965.6077045984566
+    },
+    {
+      "rooms": 10,
+      "ticks": 1800,
+      "perRoomTickMs": {
+        "mean": 0.0819,
+        "p50": 0.0686,
+        "p95": 0.1627,
+        "p99": 0.3141,
+        "max": 2.2158
+      },
+      "allRoomsTickMs": {
+        "p50": 0.762,
+        "p95": 1.451,
+        "max": 3.966
+      },
+      "cpuShareOfOneCore": 0.0229,
+      "fitsIn33msBudgetAtP95": true,
+      "checksum": 935.8451959863305
+    },
+    {
+      "rooms": 50,
+      "ticks": 1800,
+      "perRoomTickMs": {
+        "mean": 0.0809,
+        "p50": 0.0699,
+        "p95": 0.1543,
+        "p99": 0.2518,
+        "max": 4.4672
+      },
+      "allRoomsTickMs": {
+        "p50": 3.915,
+        "p95": 6.956,
+        "max": 12.715
+      },
+      "cpuShareOfOneCore": 0.1175,
+      "fitsIn33msBudgetAtP95": true,
+      "checksum": 941.1304329633713
+    }
+  ]
+}

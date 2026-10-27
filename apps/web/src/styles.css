@@ -1,0 +1,126 @@
+:root {
+  --sky-abyss: #071421;
+  --storm: #12364a;
+  --basalt: #202830;
+  --basalt-polished: #343b42;
+  --silver: #9aaab7;
+  --brass: #c18b53;
+  --amber: #ff9c46;
+  --cyan: #50d8e8;
+  --violet: #9c7dff;
+  --text: #e8eef3;
+  --text-dim: #9fb0bd;
+  --panel: rgba(8, 18, 28, 0.72);
+  --panel-border: rgba(154, 170, 183, 0.22);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  color-scheme: dark;
+  font-family:
+    'Inter',
+    'Segoe UI',
+    system-ui,
+    -apple-system,
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--sky-abyss);
+  color: var(--text);
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.boot {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  letter-spacing: 0.4em;
+  color: var(--silver);
+  font-weight: 600;
+}
+
+.stage {
+  position: fixed;
+  inset: 0;
+}
+
+.stage canvas {
+  display: block;
+  touch-action: none;
+}
+
+.dev-hud {
+  position: absolute;
+  top: calc(8px + var(--safe-top));
+  left: calc(8px + var(--safe-left));
+  padding: 8px 10px;
+  background: rgba(3, 9, 14, 0.66);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  font:
+    11px/1.45 ui-monospace,
+    'SFMono-Regular',
+    Menlo,
+    Consolas,
+    monospace;
+  color: var(--text-dim);
+  pointer-events: none;
+  min-width: 230px;
+  z-index: 50;
+}
+
+.dev-hud div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dev-hud b {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.spike-banner {
+  position: absolute;
+  bottom: calc(10px + var(--safe-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.page {
+  padding: 24px;
+  max-width: 920px;
+  margin: 0 auto;
+  overflow: auto;
+  height: 100%;
+}
+
+.page pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: #020609;
+  border: 1px solid var(--panel-border);
+  padding: 12px;
+  border-radius: 8px;
+}

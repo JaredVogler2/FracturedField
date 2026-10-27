@@ -1,0 +1,56 @@
+{
+  "measuredAt": "2026-10-27T01:17:27.397Z",
+  "host": {
+    "platform": "linux",
+    "arch": "x64",
+    "cpus": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "cpuCount": 4,
+    "node": "v22.22.0"
+  },
+  "clientSnapshotsReceived": [1199, 1199],
+  "clientBytesReceived": [2774492, 2774492],
+  "report": {
+    "runtime": "workerd (local wrangler dev) — NOT Cloudflare production",
+    "rapier": "0.21.0",
+    "config": {
+      "seconds": 60,
+      "bodies": 20,
+      "regions": 20
+    },
+    "status": "done",
+    "ticks": 1800,
+    "wallSeconds": 60.002,
+    "meanTickMs": 0.1938888888888889,
+    "p50TickMs": 0,
+    "p95TickMs": 1,
+    "p99TickMs": 1,
+    "maxTickMs": 4,
+    "batchMeanMs": [
+      0.467, 0.3, 0.233, 0.133, 0.333, 0.133, 0.1, 0.133, 0.233, 0.167, 0.2, 0.2, 0.2, 0.367, 0.133,
+      0.167, 0.267, 0.2, 0.233, 0.133, 0.167, 0.233, 0.3, 0.367, 0.167, 0.333, 0.067, 0.2, 0.167,
+      0.2, 0.133, 0.067, 0.2, 0.067, 0.1, 0.1, 0.233, 0.133, 0.2, 0.2, 0.233, 0.233, 0.2, 0.3,
+      0.133, 0.2, 0.167, 0.167, 0.167, 0.267, 0.133, 0.1, 0.1, 0.167, 0.267, 0.267, 0.267, 0.133,
+      0.1, 0.067
+    ],
+    "loop": {
+      "dropped": 0,
+      "maxLateMs": 17,
+      "catchUps": 0
+    },
+    "snapshots": {
+      "sent": 1199,
+      "meanBytes": 2314,
+      "maxBytes": 2326
+    },
+    "clients": 2,
+    "clientIntents": 1196,
+    "entities": 20,
+    "timerResolutionMs": 1,
+    "notes": [
+      "Date.now() inside workerd advances in 1 ms steps; per-tick percentiles are quantised to 1 ms.",
+      "Production Workers freeze timers during execution; use Cloudflare CPU-time metrics there.",
+      "JS heap usage is not observable from inside workerd; DO isolate memory limit is 128 MB.",
+      "checksum 984"
+    ]
+  }
+}
