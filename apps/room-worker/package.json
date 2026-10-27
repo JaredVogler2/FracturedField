@@ -1,0 +1,25 @@
+{
+  "name": "@ff/room-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --ip 127.0.0.1 --port 8787",
+    "deploy": "wrangler deploy",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "typecheck": "tsc -p tsconfig.json && tsc -p test/tsconfig.json",
+    "test:live": "tsx test/live-room.ts",
+    "bench:live": "tsx test/live-bench.ts"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d": "0.21.0",
+    "@ff/game-data": "workspace:*",
+    "@ff/protocol": "workspace:*",
+    "@ff/room-core": "workspace:*",
+    "@ff/sim": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261026.1",
+    "wrangler": "4.153.0"
+  }
+}

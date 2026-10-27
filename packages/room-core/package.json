@@ -1,0 +1,22 @@
+{
+  "name": "@ff/room-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client-entry.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ff/game-data": "workspace:*",
+    "@ff/protocol": "workspace:*",
+    "@ff/sim": "workspace:*"
+  },
+  "devDependencies": {
+    "@ff/test-utils": "workspace:*"
+  },
+  "sideEffects": false
+}

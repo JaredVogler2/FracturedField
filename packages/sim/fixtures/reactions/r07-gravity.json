@@ -1,0 +1,21 @@
+{
+  "id": "R7",
+  "title": "gravity well curves a shot aimed wide into the goal",
+  "seed": 5,
+  "ticks": 220,
+  "loadouts": [
+    ["gravity", "charge"],
+    ["freeze", "charge"]
+  ],
+  "script": [
+    { "t": 10, "place": "core", "p": [-9, 1.15, 0] },
+    { "t": 10, "slot": 0, "act": "pulse", "at": [-10.58245, -0.23634] }
+  ],
+  "variants": {
+    "control": { "expect": { "goal": null, "reactions": { "well": 0 } } },
+    "reaction": {
+      "script": [{ "t": 0, "slot": 0, "act": "gravity", "at": [0, -3] }],
+      "expect": { "goal": 0, "reactions": { "well": 1 } }
+    }
+  }
+}

@@ -1,0 +1,62 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    name: typecheck · lint · unit · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm test
+      - run: pnpm --filter @ff/web build
+      - name: Worker bundle (dry run, no credentials)
+        run: pnpm --filter @ff/room-worker build
+        env:
+          WRANGLER_SEND_METRICS: 'false'
+
+  runtime:
+    name: e2e browser + live worker
+    runs-on: ubuntu-latest
+    # Software-rendered browsers: the camera suites (real model inference on CPU, a camera-driven
+    # match to a goal and a rematch) and the Phase 06 phone suites (a three-round online match
+    # with touch alone, a simplified-mode goal vs the bot) add several minutes each.
+    timeout-minutes: 60
+    needs: static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Browser E2E (production build, SwiftShader WebGL)
+        run: pnpm test:e2e
+        env:
+          CI: 'true'
+      - name: Live two-client room test (local workerd)
+        run: pnpm test:worker
+        env:
+          WRANGLER_SEND_METRICS: 'false'

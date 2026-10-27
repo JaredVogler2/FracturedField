@@ -1,0 +1,34 @@
+# FRACTURE FIELD authoritative room service (Cloudflare Worker + SQLite-backed Durable Objects).
+# Local: `pnpm dev:worker` (wrangler dev / workerd). Deploy: see docs/progress/PHASE-12.md (not deployed yet).
+name = "fracture-field-rooms"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# workerd forbids compiling WASM from bytes; the compat package does exactly that, so the Worker
+# build swaps in a loader that instantiates the byte-identical raw .wasm module (ADR-0002).
+[alias]
+"@dimforge/rapier3d-compat" = "./src/rapier-shim.js"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RoomDurableObject"
+
+[[durable_objects.bindings]]
+name = "BENCH"
+class_name = "BenchDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomDurableObject", "BenchDurableObject"]
+
+[vars]
+ENVIRONMENT = "development"
+# Comma-separated browser origins allowed to open sockets / call the API (Origin is a CSRF guard,
+# not authentication — seat tickets are the credential).
+ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173"
+# Benchmark/spike routes are development-only.
+ENABLE_SPIKE_ROUTES = "true"
+
+[observability]
+enabled = true

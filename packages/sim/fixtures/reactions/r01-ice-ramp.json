@@ -1,0 +1,21 @@
+{
+  "id": "R1",
+  "title": "water + cold → ice-ramp plate lofts the shot over a guard",
+  "seed": 5,
+  "ticks": 220,
+  "script": [
+    { "t": 55, "slot": 1, "act": "guard", "at": [13, 0], "dir": [1, 0] },
+    { "t": 56, "place": "core", "p": [3.5, 1.15, 0] },
+    { "t": 56, "slot": 0, "act": "pulse", "at": [1.5, 0] }
+  ],
+  "variants": {
+    "control": {
+      "expect": { "notGoal": 0, "reactions": { "freeze": 0 }, "maxCoreHeight": { "atMost": 2 } }
+    },
+    "reaction": {
+      "pools": [{ "owner": 1, "x": 8.5, "z": 0, "r": 2.2, "depth": 0.8 }],
+      "script": [{ "t": 0, "slot": 1, "act": "freeze", "at": [8.5, 0] }],
+      "expect": { "goal": 0, "reactions": { "freeze": 1 }, "maxCoreHeight": { "atLeast": 4 } }
+    }
+  }
+}

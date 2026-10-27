@@ -1,0 +1,37 @@
+{
+  "name": "@ff/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node ../../scripts/prepare-vision-assets.mjs && vite",
+    "build": "node ../../scripts/prepare-vision-assets.mjs && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "vision-assets": "node ../../scripts/prepare-vision-assets.mjs"
+  },
+  "dependencies": {
+    "@ff/controls": "workspace:*",
+    "@ff/game-data": "workspace:*",
+    "@ff/gestures": "workspace:*",
+    "@ff/protocol": "workspace:*",
+    "@ff/room-core": "workspace:*",
+    "@ff/sim": "workspace:*",
+    "@ff/ui": "workspace:*",
+    "@mediapipe/tasks-vision": "1.0.1",
+    "@react-three/fiber": "9.8.2",
+    "@react-three/postprocessing": "3.2.2",
+    "postprocessing": "6.39.5",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "three": "0.186.1",
+    "zustand": "5.0.16"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/three": "0.186.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "vite": "8.3.5"
+  }
+}

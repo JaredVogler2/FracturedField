@@ -1,0 +1,24 @@
+{
+  "id": "R6",
+  "title": "crosswind + flame → heat carried downwind melts an ice ramp",
+  "seed": 5,
+  "ticks": 300,
+  "script": [
+    { "t": 0, "slot": 1, "act": "freeze", "at": [7, 0] },
+    { "t": 3, "slot": 0, "act": "infuse", "at": [1.5, 0], "modifier": 1 },
+    { "t": 110, "slot": 1, "act": "guard", "at": [13, 0], "dir": [1, 0] },
+    { "t": 112, "place": "core", "p": [3.5, 1.15, 0] },
+    { "t": 112, "slot": 0, "act": "pulse", "at": [1.5, 0] }
+  ],
+  "variants": {
+    "control": {
+      "pools": [{ "owner": 1, "x": 7, "z": 0, "r": 2.2, "depth": 0.8 }],
+      "expect": { "goal": 0, "reactions": { "freeze": 1, "melt": 0 } }
+    },
+    "reaction": {
+      "pools": [{ "owner": 1, "x": 7, "z": 0, "r": 2.2, "depth": 0.8 }],
+      "script": [{ "t": 12, "slot": 0, "act": "sweep", "at": [1.5, 0], "dir": [1, 0] }],
+      "expect": { "notGoal": 0, "reactions": { "freeze": 1, "melt": 1 } }
+    }
+  }
+}

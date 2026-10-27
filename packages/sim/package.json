@@ -1,0 +1,22 @@
+{
+  "name": "@ff/sim",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./arena": "./src/arena.ts",
+    "./scenario": "./src/scenario-entry.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json && tsc -p bench/tsconfig.json"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "0.21.0",
+    "@ff/game-data": "workspace:*",
+    "@ff/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@ff/test-utils": "workspace:*"
+  }
+}

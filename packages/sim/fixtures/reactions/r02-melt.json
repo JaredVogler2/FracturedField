@@ -1,0 +1,31 @@
+{
+  "id": "R2",
+  "title": "ice + heat → the melted pool slows the core instead of launching it",
+  "seed": 5,
+  "ticks": 260,
+  "script": [
+    { "t": 0, "slot": 1, "act": "freeze", "at": [8.5, 0] },
+    { "t": 96, "slot": 1, "act": "guard", "at": [13, 0], "dir": [1, 0] },
+    { "t": 97, "place": "core", "p": [3.5, 1.15, 0] },
+    { "t": 97, "slot": 0, "act": "pulse", "at": [1.5, 0] }
+  ],
+  "variants": {
+    "control": {
+      "pools": [{ "owner": 1, "x": 8.5, "z": 0, "r": 2.2, "depth": 0.8 }],
+      "expect": {
+        "goal": 0,
+        "reactions": { "freeze": 1, "melt": 0 },
+        "maxCoreHeight": { "atLeast": 4 }
+      }
+    },
+    "reaction": {
+      "pools": [{ "owner": 1, "x": 8.5, "z": 0, "r": 2.2, "depth": 0.8 }],
+      "script": [{ "t": 43, "slot": 1, "act": "infuse", "at": [8.5, 0], "modifier": 1 }],
+      "expect": {
+        "notGoal": 0,
+        "reactions": { "freeze": 1, "melt": 1 },
+        "maxCoreHeight": { "atMost": 2 }
+      }
+    }
+  }
+}

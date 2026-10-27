@@ -1,0 +1,2 @@
+# Copy to .dev.vars for local development. Production uses `wrangler secret put TICKET_SECRET`.
+TICKET_SECRET=local-development-only-secret-change-me
