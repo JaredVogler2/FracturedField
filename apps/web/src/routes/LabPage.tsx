@@ -5,6 +5,7 @@ import type { ScenarioFixture, VariantName } from '@ff/sim/scenario';
 import { GameClient } from '../game/client';
 import { GameClientProvider } from '../render/frame-context';
 import { GameScene, type CameraOverride } from '../render/Scene';
+import type { SeatPicks } from '../render/wielder/Wielders';
 import { LabController, LAB_FIXTURES, type LabState } from '../lab/lab-controller';
 import { LabOverlays } from '../lab/LabOverlays';
 import { renderStats } from '../render/render-stats';
@@ -84,6 +85,10 @@ export function LabPage() {
         state: () => lab.getState(),
         seek: (n: number) => lab.seek(n),
         spin: (v: number) => lab.setCoreSpin(v),
+        push: (x: number, y: number, z: number) => lab.pushCore(x, y, z),
+        // A seat's hand from the next tick on (grip, push, twist), or none with a null grip.
+        hand: (slot: 0 | 1, grip: number | null, push = 0, twist = 0) =>
+          lab.setHand(slot, grip === null ? null : { grip, push, twist }),
         step: () => lab.stepOnce(),
         frame: (ms: number) => {
           renderAt += ms / 1000;
@@ -120,6 +125,17 @@ export function LabPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [lab]);
 
+  // The wielders show each seat's picks (7D's loadout motif), as the fixture's world holds them.
+  const loadouts = useMemo<SeatPicks | undefined>(() => {
+    const l = state.loadouts;
+    if (!l) return undefined;
+    const picks: SeatPicks = {};
+    for (const slot of [0, 1] as const) {
+      const [a, b] = l[slot];
+      if (a && b) picks[slot] = [a, b];
+    }
+    return picks;
+  }, [state.loadouts]);
   const view = useMemo(() => viewParam(), []);
   const camera = useMemo(
     () => (cam === 'close' ? (view ?? closeUp(state.fixture, state.variant)) : undefined),
@@ -130,7 +146,12 @@ export function LabPage() {
     <GameClientProvider client={client}>
       <div className="lab" data-testid="lab">
         <div className="lab-stage">
-          <GameScene quality={quality} frameloop={frameloop} {...(camera ? { camera } : {})}>
+          <GameScene
+            quality={quality}
+            frameloop={frameloop}
+            {...(camera ? { camera } : {})}
+            {...(loadouts ? { loadouts } : {})}
+          >
             <LabOverlays vectors={vectors} regions={regions} impacts={impacts} />
           </GameScene>
           <div className="lab-tick" aria-live="off" data-testid="lab-tick">

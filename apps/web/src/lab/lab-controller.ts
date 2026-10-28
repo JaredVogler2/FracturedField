@@ -1,4 +1,5 @@
-import type { EntityId, GameEvent, WorldSnapshot } from '@ff/protocol';
+import type { AdvancedAbilityId } from '@ff/game-data';
+import type { EntityId, GameEvent, HandState, PlayerSlot, WorldSnapshot } from '@ff/protocol';
 import {
   REACTION_FIXTURES,
   ScenarioRun,
@@ -44,6 +45,8 @@ export interface LabState {
   /** The authoritative state currently shown. */
   readonly snapshot: WorldSnapshot | null;
   readonly energy: readonly [number, number];
+  /** Each seat's advanced picks, as the run's world holds them (null while none is loaded). */
+  readonly loadouts: readonly [readonly AdvancedAbilityId[], readonly AdvancedAbilityId[]] | null;
 }
 
 export const LAB_FIXTURES = REACTION_FIXTURES;
@@ -149,6 +152,7 @@ export class LabController {
       checks: [],
       snapshot: null,
       energy: [0, 0],
+      loadouts: null,
     };
   }
 
@@ -197,7 +201,7 @@ export class LabController {
     this.marks = [run.mark()];
     this.log = [];
     this.publish(run.world.snapshot(), [], true);
-    this.set({ loading: false });
+    this.set({ loading: false, loadouts: [run.world.loadout(0), run.world.loadout(1)] });
   }
 
   private publish(snapshot: WorldSnapshot, events: readonly GameEvent[], reset: boolean): void {
@@ -326,6 +330,33 @@ export class LabController {
     this.marks = this.marks.filter((m) => m.t < run.t);
     this.marks.push(run.mark());
     this.publish(run.world.snapshot(), [], true);
+    this.set({ modifiedAt: this.state.modifiedAt ?? run.t });
+  }
+
+  /**
+   * An impulse (N·s) on the core at the current tick: a harder shot, whose impacts the physics
+   * then decides (Lab captures, e.g. a wielder's flinch; invalidates later marks).
+   */
+  pushCore(x: number, y: number, z: number): void {
+    const run = this.run;
+    const core = run?.world.debugEntities('core')[0];
+    if (!run || core === undefined || this.busy) return;
+    run.world.debugApplyImpulse(core, x, y, z);
+    this.marks = this.marks.filter((m) => m.t < run.t);
+    this.marks.push(run.mark());
+    this.publish(run.world.snapshot(), [], true);
+    this.set({ modifiedAt: this.state.modifiedAt ?? run.t });
+  }
+
+  /**
+   * A hand seat `slot` describes from the next tick on, as a camera would, or none (Lab captures
+   * of the spectral hands; invalidates later marks).
+   */
+  setHand(slot: PlayerSlot, hand: HandState | null): void {
+    const run = this.run;
+    if (!run || this.busy) return;
+    run.setHand(slot, hand);
+    this.marks = this.marks.filter((m) => m.t <= run.t);
     this.set({ modifiedAt: this.state.modifiedAt ?? run.t });
   }
 

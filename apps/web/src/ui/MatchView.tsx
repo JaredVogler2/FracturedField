@@ -17,6 +17,7 @@ import { forgetSeat, updateSeatTicket, type StoredSeat } from '../net/seat-store
 import type { SeatLoadouts, SessionDriver } from '../net/session';
 import { GameClientProvider, useGameClient } from '../render/frame-context';
 import { GameScene, type CameraOverride } from '../render/Scene';
+import type { SeatPicks } from '../render/wielder/Wielders';
 import { InputManager, isControlActivation, type SeatConfig } from '../input/manager';
 import { P1_BINDINGS, P2_BINDINGS, SOLO_BINDINGS, applyOverride } from '../input/bindings';
 import {
@@ -624,6 +625,12 @@ export function MatchView({
       }),
     [setup.hudSeats, seatLoadouts, rivalLoadout, soloSlot, controlMode, soloBindings],
   );
+  // The wielders show each seat's picks as their motes' motif (7D), where this device knows them.
+  const sceneLoadouts = useMemo<SeatPicks>(() => {
+    const picks: SeatPicks = {};
+    for (const h of hudSeats) if (h.loadout) picks[h.slot] = h.loadout;
+    return picks;
+  }, [hudSeats]);
   const serverReady = online ? (lobby?.seats[mySlot].ready ?? started) : started;
   // On-screen thumb controls (touch, motion, simplified): the HUD and camera make room for them.
   const touchUi =
@@ -658,6 +665,7 @@ export function MatchView({
           portraitSlot={mySlot}
           controlsSide={touchUi ? controls.hand : null}
           cinematic={mode.kind === 'attract'}
+          loadouts={sceneLoadouts}
           {...(reviewShot ? { camera: reviewShot } : {})}
         >
           {setup.seats.length > 0 ? (

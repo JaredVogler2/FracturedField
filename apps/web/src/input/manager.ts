@@ -793,7 +793,10 @@ export class InputManager {
 
   dispose(): void {
     this.releaseAll();
-    for (const slot of this.seats.keys()) localAim.delete(slot);
+    for (const slot of this.seats.keys()) {
+      localAim.delete(slot);
+      localHand.delete(slot);
+    }
     for (const c of this.controllers) c.dispose();
     for (const { adapters } of this.modal.values()) for (const a of adapters) a.dispose();
     this.modal.clear();

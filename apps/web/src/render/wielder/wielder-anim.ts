@@ -77,6 +77,11 @@ export interface WielderPose {
   readonly look: THREE.Vector3;
   /** The energy around the wielder, 0..1 (dim when disconnected). */
   aura: number;
+  /**
+   * The coat's tails (secondary motion), radians: x swings them back, y aside (+ toward the
+   * wielder's left), z spreads the two apart (+ the left one back).
+   */
+  readonly coat: THREE.Vector3;
 }
 
 export function newPose(): WielderPose {
@@ -93,6 +98,7 @@ export function newPose(): WielderPose {
     crouch: 0,
     look: new THREE.Vector3(0, RIG.headY, 6),
     aura: 1,
+    coat: new THREE.Vector3(),
   };
 }
 
@@ -116,6 +122,7 @@ export function blendPose(into: WielderPose, from: WielderPose, w: number): Wiel
   into.crouch += (from.crouch - into.crouch) * k;
   into.look.lerp(from.look, k);
   into.aura += (from.aura - into.aura) * k;
+  into.coat.lerp(from.coat, k);
   return into;
 }
 
@@ -134,6 +141,7 @@ function copyPose(into: WielderPose, from: WielderPose): WielderPose {
   into.crouch = from.crouch;
   into.look.copy(from.look);
   into.aura = from.aura;
+  into.coat.copy(from.coat);
   return into;
 }
 
@@ -174,11 +182,32 @@ export function moveFor(ability: AbilityId): WielderMove | null {
 
 const CELEBRATE_SECONDS = 1.8;
 const STAGGER_SECONDS = 0.9;
+/**
+ * A hard hit near a wielder's own goal makes it flinch (D10: "reaction to physics hit"): an
+ * impact of at least this impulse (the one that shakes the camera) within this many metres of
+ * its goal line — its third of the field, its guard's usual place — for this long. Bot matches
+ * land such a hit about twice a minute (the hardest near a goal were 260–285), so the flinch is
+ * rare and can be plain: 0.7 of the full reaction at the threshold, all of it at FLINCH_FULL.
+ */
+const FLINCH_IMPULSE = 260;
+const FLINCH_FULL = 350;
+const FLINCH_REACH = 14;
+const FLINCH_SECONDS = 0.45;
 /** Time constants (s) of the layers' weights: holds snap in, moods settle. */
 const HOLD_TAU = 0.08;
 const MOOD_TAU = 0.25;
 /** Natural frequency (rad/s) of the critically damped springs the hands follow. */
-const HAND_OMEGA = 26;
+const HAND_OMEGA = 32;
+/** Bearing (radians from straight ahead) past which a target counts as on one side. */
+const SIDE_SWITCH = 0.06;
+/**
+ * Sine of the steepest a casting arm points below level (about 20°): from the plinth a cast at
+ * the near field would otherwise point at the plinth's foot; out over the field reads as a cast.
+ */
+const MAX_DROP = 0.34;
+/** The coat tails' spring: natural frequency (rad/s) and damping ratio (a soft, cloth-like lag). */
+const COAT_OMEGA = 7;
+const COAT_ZETA = 0.35;
 
 type Mood = 'ready' | 'dejected' | 'victorious';
 
@@ -187,6 +216,14 @@ const smooth = (a: number, b: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 const finite = (v: number, fallback = 0) => (Number.isFinite(v) ? v : fallback);
+
+/** Unit direction `d`, tipped up to no steeper than MAX_DROP below level. */
+function level(d: THREE.Vector3): THREE.Vector3 {
+  if (d.y >= -MAX_DROP) return d;
+  const h = Math.hypot(d.x, d.z);
+  const k = Math.sqrt(1 - MAX_DROP * MAX_DROP);
+  return h > 1e-6 ? d.set((d.x * k) / h, -MAX_DROP, (d.z * k) / h) : d.set(0, -MAX_DROP, k);
+}
 
 const tmp = new THREE.Vector3();
 const tmp2 = new THREE.Vector3();
@@ -200,9 +237,45 @@ export class WielderAnimator {
   /** The pose to draw this frame (hands spring-smoothed). */
   readonly pose = newPose();
 
-  private move: { kind: WielderMove; start: number; target: THREE.Vector3; hot: boolean } | null =
-    null;
+  /** How many times each move and outcome has started (a test can match them to the events). */
+  readonly played: Partial<Record<WielderMove | 'celebrate' | 'stagger' | 'flinch', number>> = {};
+
+  /** The hand acting now (+1 the left, −1 the right): a move's, else the one that aims. */
+  get activeHand(): 1 | -1 {
+    return this.move?.hand ?? this.aimHand;
+  }
+  /** The move being played now, if any (its gauntlet flare takes the move's motif). */
+  get currentMove(): WielderMove | null {
+    return this.move?.kind ?? null;
+  }
+  /**
+   * A flash at the acting gauntlet as a move is cast (0..1): whole at the event — the release,
+   * when its effect and sound start — and gone by mid-move, so the flare marks the caster at once
+   * whatever the move's own wind-up (a freeze presses out only 0.2–0.4 s after its event).
+   */
+  get castFlash(): number {
+    return this.flash;
+  }
+  /** How much the wielder is reaching for the field now (0..1): aiming, gripping or casting. */
+  get reaching(): number {
+    return Math.min(1, this.wAim * (1 - this.wDormant) + this.wGrip + (this.move ? 1 : 0));
+  }
+
+  private move: {
+    kind: WielderMove;
+    start: number;
+    target: THREE.Vector3;
+    hot: boolean;
+    /** The hand that plays it: the one on the target's side. */
+    hand: 1 | -1;
+  } | null = null;
+  /** The hand that aims at the manipulator; it changes sides only once the target is across. */
+  private aimHand: 1 | -1;
   private outcome: { kind: 'celebrate' | 'stagger'; start: number } | null = null;
+  private flinch: { start: number; strength: number } | null = null;
+  private flash = 0;
+  /** World x of its goal line, as the last state gave it (NaN before the first). */
+  private goalX = Number.NaN;
   private mood: Mood = 'ready';
   private wAim = 0;
   private wLift = 0;
@@ -220,6 +293,10 @@ export class WielderAnimator {
   private readonly target = newPose();
   private readonly m = new THREE.Vector3();
   private readonly coreL = new THREE.Vector3();
+  private readonly coatX = new THREE.Vector3();
+  private readonly coatV = new THREE.Vector3();
+  private readonly coatGoal = new THREE.Vector3();
+  private readonly last = { hipsZ: 0, crouch: 0, yaw: 0 };
 
   constructor(
     readonly slot: PlayerSlot,
@@ -227,6 +304,7 @@ export class WielderAnimator {
   ) {
     // The lead hand is on the side of the field's centre.
     this.lead = toLocal(place, 0, place.y, 0, tmp).x >= 0 ? 1 : -1;
+    this.aimHand = this.lead;
   }
 
   /** An authoritative event, at render time `t` (seconds). */
@@ -236,30 +314,33 @@ export class WielderAnimator {
         if (e.slot !== this.slot || (e.phase !== 'tap' && e.phase !== 'start')) return;
         const kind = moveFor(e.ability);
         if (!kind) return;
-        this.move = {
-          kind,
-          start: t,
-          target: this.local(e.p[0], e.p[1], e.p[2]),
-          hot: e.mag === 1,
-        };
+        const target = this.local(e.p[0], e.p[1], e.p[2]);
+        this.move = { kind, start: t, target, hot: e.mag === 1, hand: this.handFor(target) };
+        this.count(kind);
         return;
       }
       case 'grip':
         // Letting go throws: the release plays as a throw along the body's flight.
         if (e.slot === this.slot && e.phase === 'end') {
-          this.move = {
-            kind: 'throw',
-            start: t,
-            target: this.local(e.p[0] + e.v[0] * 0.3, e.p[1], e.p[2] + e.v[2] * 0.3),
-            hot: false,
-          };
+          const target = this.local(e.p[0] + e.v[0] * 0.3, e.p[1], e.p[2] + e.v[2] * 0.3);
+          this.move = { kind: 'throw', start: t, target, hot: false, hand: this.handFor(target) };
+          this.count('throw');
         }
         return;
       case 'goal':
         this.outcome = { kind: e.scorer === this.slot ? 'celebrate' : 'stagger', start: t };
+        this.count(this.outcome.kind);
         this.mood = e.scorer === this.slot ? 'ready' : 'dejected';
         this.move = null;
         return;
+      case 'impact': {
+        // A hard hit near its own goal: it flinches (not before it knows where its goal is).
+        if (e.impulse < FLINCH_IMPULSE || !(Math.abs(e.p[0] - this.goalX) <= FLINCH_REACH)) return;
+        const over = (e.impulse - FLINCH_IMPULSE) / (FLINCH_FULL - FLINCH_IMPULSE);
+        this.flinch = { start: t, strength: Math.min(1, 0.7 + 0.3 * over) };
+        this.count('flinch');
+        return;
+      }
       case 'kickoff':
         this.mood = 'ready';
         return;
@@ -283,6 +364,7 @@ export class WielderAnimator {
 
     const playing = state.phase === 'playing';
     const live = state.connected;
+    this.goalX = state.ownGoalX;
     this.wAim = toward(this.wAim, playing && live ? 1 : 0, MOOD_TAU);
     this.wLift = toward(this.wLift, live && state.hold === 'lift' ? 1 : 0, HOLD_TAU);
     this.wDraw = toward(this.wDraw, live && state.hold === 'draw' ? 1 : 0, HOLD_TAU);
@@ -322,19 +404,26 @@ export class WielderAnimator {
     else b.look.set(0, RIG.headY, 6);
     b.aura = 1;
 
-    // Aim: the lead hand reaches toward the manipulator, the torso turns with it.
+    // Aim: the hand on the manipulator's side reaches toward it, the other rests at the hip, the
+    // torso turns with it. The aiming hand changes sides only once the target is well across.
     const lp = this.layer;
     copyPose(lp, b);
-    const shoulderLead = tmp2.set(L * RIG.shoulderHalf, RIG.shoulderY, 0);
-    dirT.copy(this.m).sub(shoulderLead).normalize();
-    this.leadHand(lp)
-      .copy(shoulderLead)
+    const bearing = Math.atan2(this.m.x, this.m.z);
+    if (bearing > SIDE_SWITCH) this.aimHand = 1;
+    else if (bearing < -SIDE_SWITCH) this.aimHand = -1;
+    const H = this.aimHand;
+    const shoulderAim = tmp2.set(H * RIG.shoulderHalf, RIG.shoulderY, 0);
+    level(dirT.copy(this.m).sub(shoulderAim).normalize());
+    this.handOf(lp, H)
+      .copy(shoulderAim)
       .addScaledVector(dirT, ARM_REACH * 0.8);
-    this.leadPalm(lp).copy(dirT);
-    this.offHand(lp).set(L * 0.02, 1.2, 0.26);
-    this.offPalm(lp).set(L, 0, 0);
-    lp.yaw = THREE.MathUtils.clamp(Math.atan2(this.m.x, this.m.z), -0.6, 0.6) * 0.5;
-    this.glowLead(lp, 0.55);
+    this.palmOf(lp, H).copy(dirT);
+    this.otherHand(lp, H).set(-H * 0.2, 1.0, 0.14);
+    this.otherPalm(lp, H)
+      .set(-H * 0.3, -1, 0.2)
+      .normalize();
+    lp.yaw = THREE.MathUtils.clamp(bearing, -0.6, 0.6) * 0.5;
+    this.setGlow(lp, H, 0.55);
     blendPose(b, lp, this.wAim);
 
     // Moods: dormant when the player's link is gone, downcast after conceding.
@@ -409,24 +498,28 @@ export class WielderAnimator {
     }
     if (this.wGrip > 0.001) {
       copyPose(lp, tp);
-      this.leadHand(lp)
-        .copy(shoulderLead)
+      tmp2.set(H * RIG.shoulderHalf, RIG.shoulderY, 0);
+      level(dirT.copy(this.m).sub(tmp2).normalize());
+      this.handOf(lp, H)
+        .copy(tmp2)
         .addScaledVector(dirT, ARM_REACH * 0.95);
-      this.leadPalm(lp).copy(dirT);
-      this.fistLead(lp, 1);
-      this.glowLead(lp, 0.95);
+      this.palmOf(lp, H).copy(dirT);
+      this.setFist(lp, H, 1);
+      this.setGlow(lp, H, 0.95);
       lp.pitch = 0.1;
       blendPose(tp, lp, this.wGrip);
     }
 
     // The one-shot move from the last cast.
     const mv = this.move;
+    this.flash = 0;
     if (mv) {
       const u = (t - mv.start) / MOVE_SECONDS[mv.kind];
       if (u >= 1 || u < 0) this.move = null;
       else {
+        this.flash = 1 - smooth(0.3, 0.65, u);
         copyPose(lp, tp);
-        this.playMove(lp, mv.kind, u, mv.target, mv.hot, t);
+        this.playMove(lp, mv.kind, u, mv.target, mv.hot, mv.hand, t);
         // In at once (the event is the release), out over the last part.
         blendPose(tp, lp, 1 - smooth(0.55, 1, u));
       }
@@ -445,6 +538,19 @@ export class WielderAnimator {
         if (oc.kind === 'celebrate') celebrate(lp, u, t, (i) => this.role(i));
         else stagger(lp, u);
         blendPose(tp, lp, smooth(0, 0.08, u) * (1 - smooth(0.75, 1, u)));
+      }
+    }
+
+    // A hard hit near its goal: a flinch over whatever it is doing, but not over a goal's own
+    // reaction.
+    const fl = this.flinch;
+    if (fl) {
+      const u = (t - fl.start) / FLINCH_SECONDS;
+      if (u >= 1 || this.outcome) this.flinch = null;
+      else if (u >= 0) {
+        copyPose(lp, tp);
+        flinch(lp, u, fl.strength);
+        blendPose(tp, lp, smooth(0, 0.05, u) * (1 - smooth(0.45, 1, u)));
       }
     }
 
@@ -471,8 +577,49 @@ export class WielderAnimator {
       }
       out.hand[i]!.copy(x);
     }
+
+    // The coat's tails trail the body on a soft spring (CREATIVE_TARGET: "cloak/coat as
+    // controlled secondary motion"): back when it lunges or drops, aside when it turns, with a
+    // little of the storm's wind.
+    const cg = this.coatGoal;
+    if (dt > 0) {
+      const vz = (tp.hips.z - this.last.hipsZ) / dt;
+      const vc = (tp.crouch - this.last.crouch) / dt;
+      const vy = (tp.yaw - this.last.yaw) / dt;
+      cg.set(
+        0.05 + 0.03 * Math.sin(t * 1.3) + 0.8 * vz + 0.25 * vc,
+        L * 0.025 * Math.sin(t * 0.9 + 1) - 0.12 * vy,
+        L * 0.04 * Math.sin(t * 2.3),
+      );
+    } else cg.set(0.05, 0, 0);
+    this.last.hipsZ = tp.hips.z;
+    this.last.crouch = tp.crouch;
+    this.last.yaw = tp.yaw;
+    if (!Number.isFinite(cg.x + cg.y + cg.z)) cg.set(0.05, 0, 0);
+    if (dt <= 0) {
+      this.coatX.copy(cg);
+      this.coatV.set(0, 0, 0);
+    } else {
+      const steps = Math.max(1, Math.ceil(dt / (1 / 240)));
+      const h = dt / steps;
+      for (let s = 0; s < steps; s++) {
+        tmp.subVectors(cg, this.coatX).multiplyScalar(COAT_OMEGA * COAT_OMEGA);
+        tmp.addScaledVector(this.coatV, -2 * COAT_ZETA * COAT_OMEGA);
+        this.coatV.addScaledVector(tmp, h);
+        this.coatX.addScaledVector(this.coatV, h);
+      }
+    }
+    out.coat.set(
+      THREE.MathUtils.clamp(this.coatX.x, -0.12, 0.7),
+      THREE.MathUtils.clamp(this.coatX.y, -0.45, 0.45),
+      THREE.MathUtils.clamp(this.coatX.z, -0.2, 0.2),
+    );
     this.sprung = true;
     return out;
+  }
+
+  private count(k: WielderMove | 'celebrate' | 'stagger' | 'flinch'): void {
+    this.played[k] = (this.played[k] ?? 0) + 1;
   }
 
   /** A world point in this wielder's frame; straight ahead if the point is not a number. */
@@ -485,23 +632,29 @@ export class WielderAnimator {
   private role(i: number): number {
     return i === (this.lead === 1 ? 0 : 1) ? 0 : 1;
   }
-  private leadHand(p: WielderPose): THREE.Vector3 {
-    return p.hand[this.lead === 1 ? 0 : 1];
+  /** The hand on the target's side (+1 the left, −1 the right); straight ahead, the lead hand. */
+  private handFor(target: THREE.Vector3): 1 | -1 {
+    const bearing = Math.atan2(target.x, target.z);
+    return bearing > SIDE_SWITCH ? 1 : bearing < -SIDE_SWITCH ? -1 : this.lead;
   }
-  private offHand(p: WielderPose): THREE.Vector3 {
-    return p.hand[this.lead === 1 ? 1 : 0];
+  // Hand `h` (+1 left, −1 right) and the other one, their palms, glow and fist.
+  private handOf(p: WielderPose, h: 1 | -1): THREE.Vector3 {
+    return p.hand[h === 1 ? 0 : 1];
   }
-  private leadPalm(p: WielderPose): THREE.Vector3 {
-    return p.palm[this.lead === 1 ? 0 : 1];
+  private otherHand(p: WielderPose, h: 1 | -1): THREE.Vector3 {
+    return p.hand[h === 1 ? 1 : 0];
   }
-  private offPalm(p: WielderPose): THREE.Vector3 {
-    return p.palm[this.lead === 1 ? 1 : 0];
+  private palmOf(p: WielderPose, h: 1 | -1): THREE.Vector3 {
+    return p.palm[h === 1 ? 0 : 1];
   }
-  private glowLead(p: WielderPose, g: number): void {
-    p.glow[this.lead === 1 ? 0 : 1] = g;
+  private otherPalm(p: WielderPose, h: 1 | -1): THREE.Vector3 {
+    return p.palm[h === 1 ? 1 : 0];
   }
-  private fistLead(p: WielderPose, f: number): void {
-    p.fist[this.lead === 1 ? 0 : 1] = f;
+  private setGlow(p: WielderPose, h: 1 | -1, g: number): void {
+    p.glow[h === 1 ? 0 : 1] = g;
+  }
+  private setFist(p: WielderPose, h: 1 | -1, f: number): void {
+    p.fist[h === 1 ? 0 : 1] = f;
   }
 
   /** One move at progress `u` (0..1) toward `target` (the cast point, in the wielder's frame). */
@@ -511,108 +664,126 @@ export class WielderAnimator {
     u: number,
     target: THREE.Vector3,
     hot: boolean,
+    h: 1 | -1,
     t: number,
   ): void {
     const L = this.lead;
-    const shoulder = tmp2.set(L * RIG.shoulderHalf, RIG.shoulderY, 0);
+    const shoulder = tmp2.set(h * RIG.shoulderHalf, RIG.shoulderY, 0);
     dirT.copy(target).sub(shoulder);
     if (dirT.lengthSq() < 1e-6) dirT.set(0, 0, 1);
-    dirT.normalize();
+    level(dirT.normalize());
     const turn = THREE.MathUtils.clamp(Math.atan2(target.x, target.z), -0.7, 0.7);
     switch (kind) {
       case 'throw': {
-        // A short cock back, the thrust at the cast point, a held follow-through.
-        const cock = smooth(0, 0.06, u) * (1 - smooth(0.06, 0.18, u));
-        const thrust = smooth(0.06, 0.18, u);
-        const hand = this.leadHand(p);
-        hand.copy(shoulder).addScaledVector(dirT, ARM_REACH * (0.35 + 0.63 * thrust));
-        hand.add(tmp.set(L * 0.08, -0.04, -0.14).multiplyScalar(cock));
-        this.leadPalm(p).copy(dirT);
-        this.fistLead(p, 0.05);
-        this.glowLead(p, 0.4 + 0.6 * thrust * (1 - smooth(0.3, 0.9, u)));
-        this.offHand(p).set(-L * 0.32, 1.12, -0.1);
-        this.offPalm(p).set(-L, -0.3, -0.4).normalize();
-        p.yaw = turn * 0.45 * thrust;
-        p.pitch = 0.18 * thrust;
-        p.hips.set(L * 0.03 * thrust, -0.02 * thrust, 0.05 * thrust);
-        p.crouch = 0.15 + 0.15 * thrust;
+        // The hand cocked up and back beside the head, the thrust to full reach at the cast
+        // point with the body behind it, the other arm drawn back, a held follow-through.
+        // The event is the release, so the wind-up is a flick (30 ms) and the arm is out by 100.
+        const cock = smooth(0, 0.05, u) * (1 - smooth(0.05, 0.16, u));
+        const thrust = smooth(0.05, 0.16, u);
+        const hand = this.handOf(p, h);
+        hand.copy(shoulder).addScaledVector(dirT, ARM_REACH * (0.3 + 0.68 * thrust));
+        hand.lerp(tmp.set(h * 0.26, RIG.shoulderY + 0.14, -0.2), cock);
+        this.palmOf(p, h).copy(dirT);
+        this.setFist(p, h, 0.05);
+        this.setGlow(p, h, 0.4 + 0.6 * thrust * (1 - smooth(0.3, 0.9, u)));
+        this.otherHand(p, h).set(-h * 0.36, 1.16, -0.18);
+        this.otherPalm(p, h).set(-h, -0.3, -0.5).normalize();
+        p.yaw = turn * 0.6 * thrust - h * 0.3 * cock;
+        p.pitch = 0.2 * thrust - 0.06 * cock;
+        p.hips.set(h * 0.04 * thrust, -0.02 * thrust, 0.06 * thrust);
+        p.crouch = 0.15 + 0.2 * thrust;
         return;
       }
       case 'sweep': {
-        // Both arms carry an arc across the front of the body, lead side to the other.
+        // Both arms, spread, carry a wide arc across the front of the body, lead side to the
+        // other, the torso turning through it.
         const a = smooth(0.05, 0.65, u);
-        const phi = L * (1.2 - 2.4 * a);
+        const phi = L * (1.25 - 2.5 * a);
         for (let i = 0; i < 2; i++) {
-          const k = L * (this.role(i) === 0 ? 0.1 : -0.1);
-          p.hand[i]!.set(Math.sin(phi + k) * 0.55, 1.18, Math.cos(phi + k) * 0.45 + 0.05);
+          const k = L * (this.role(i) === 0 ? 0.22 : -0.22);
+          p.hand[i]!.set(Math.sin(phi + k) * 0.6, 1.24, Math.cos(phi + k) * 0.5 + 0.05);
           p.palm[i]!.set(-L * Math.cos(phi), 0, L * Math.sin(phi)).normalize();
           p.fist[i] = 0.1;
           p.glow[i] = 0.8;
         }
         p.yaw = phi * 0.45;
         p.pitch = 0.08;
-        p.crouch = 0.2;
+        p.crouch = 0.25;
         return;
       }
       case 'guard': {
-        // Wrists cross before the chest, then drive down and apart: the wall rises.
-        const cross = smooth(0, 0.28, u);
-        const drive = smooth(0.28, 0.48, u);
+        // The cross block: forearms crossed high before the face, elbows out, the lead wrist in
+        // front; then driven down and apart, palms to the floor: the wall rises.
+        const cross = smooth(0, 0.24, u);
+        const drive = smooth(0.3, 0.5, u);
         for (let i = 0; i < 2; i++) {
           const side = i === 0 ? 1 : -1;
-          tmp.set(-side * 0.06, 1.32 - this.role(i) * 0.04, 0.24); // crossed, lead wrist on top
-          p.hand[i]!.lerp(tmp, cross).lerp(tmp.set(side * 0.32, 0.92, 0.42), drive);
-          p.palm[i]!.set(0, -drive, 1 - drive).normalize();
-          p.fist[i] = 0.3 * (1 - drive);
+          const r = this.role(i);
+          tmp.set(-side * 0.07, 1.56 - r * 0.05, 0.32 - r * 0.05);
+          p.hand[i]!.lerp(tmp, cross).lerp(tmp.set(side * 0.4, 1.0, 0.42), drive);
+          p.pole[i]!.set(side * 0.9, 1.0, 0.2);
+          p.palm[i]!.set(0, 0, -1)
+            .lerp(tmp.set(side * 0.25, -0.8, 0.55), drive)
+            .normalize();
+          p.fist[i] = 0.6 * (1 - drive);
           p.glow[i] = 0.4 + 0.5 * drive;
         }
-        p.pitch = 0.2 * drive;
-        p.crouch = 0.1 + 0.3 * drive;
+        p.pitch = 0.2 * drive - 0.05 * cross * (1 - drive);
+        p.crouch = 0.1 + 0.35 * drive;
         return;
       }
       case 'infuse': {
         // The lead palm out toward the cast, the other hand gripping that forearm.
         const k = smooth(0, 0.2, u);
-        const hand = this.leadHand(p);
+        const hand = this.handOf(p, h);
         hand.lerp(tmp.copy(shoulder).addScaledVector(dirT, ARM_REACH * 0.8), k);
-        this.leadPalm(p).copy(dirT);
+        this.palmOf(p, h).copy(dirT);
         tmp.copy(shoulder).addScaledVector(dirT, ARM_REACH * 0.45);
-        this.offHand(p).lerp(tmp.add(offset.set(-L * 0.05, -0.04, 0)), k);
-        this.offPalm(p).set(L, 0, 0);
-        this.glowLead(p, (hot ? 0.95 : 0.85) * k);
+        this.otherHand(p, h).lerp(tmp.add(offset.set(-h * 0.05, -0.04, 0)), k);
+        this.otherPalm(p, h).set(h, 0, 0);
+        this.setGlow(p, h, (hot ? 0.95 : 0.85) * k);
         p.yaw = turn * 0.4 * k;
         p.pitch = 0.1 * k;
         return;
       }
       case 'freeze': {
-        // Both palms press forward and down over the floor.
-        const k = smooth(0, 0.22, u);
+        // Both palms raised before the shoulders, then pressed out and down toward the cast,
+        // side by side: frost driven into the floor.
+        const raise = smooth(0, 0.2, u);
+        const press = smooth(0.2, 0.42, u);
         for (let i = 0; i < 2; i++) {
           const side = i === 0 ? 1 : -1;
-          p.hand[i]!.lerp(tmp.set(side * 0.22, 1.02, 0.5), k);
-          p.palm[i]!.set(0, -0.6, 0.8).normalize();
+          p.hand[i]!.lerp(tmp.set(side * 0.2, 1.42, 0.36), raise);
+          tmp
+            .set(side * RIG.shoulderHalf, RIG.shoulderY - 0.12, 0)
+            .addScaledVector(dirT, ARM_REACH * 0.92);
+          tmp.x += side * 0.05;
+          p.hand[i]!.lerp(tmp, press);
+          p.palm[i]!.copy(dirT)
+            .add(tmp.set(0, -0.6, 0))
+            .normalize();
           p.fist[i] = 0;
-          p.glow[i] = 0.85 * k;
+          p.glow[i] = 0.5 * raise + 0.45 * press;
         }
-        p.yaw = turn * 0.3 * k;
-        p.pitch = 0.18 * k;
-        p.crouch = 0.1 + 0.25 * k;
+        p.yaw = turn * 0.5 * press;
+        p.pitch = 0.25 * press;
+        p.crouch = 0.15 + 0.35 * press;
         return;
       }
       case 'charge': {
         // The lead hand raised high, then snapped down at the cast: a lightning call.
         const raise = smooth(0, 0.3, u) * (1 - smooth(0.3, 0.42, u));
         const snap = smooth(0.3, 0.42, u);
-        const hand = this.leadHand(p);
+        const hand = this.handOf(p, h);
         hand
-          .set(L * 0.12, 2.04, 0.12)
+          .set(h * 0.12, 2.04, 0.12)
           .lerp(tmp.copy(shoulder).addScaledVector(dirT, ARM_REACH), snap);
-        hand.lerp(tmp.set(L * 0.12, 2.04, 0.12), raise * (1 - snap));
-        this.leadPalm(p)
+        hand.lerp(tmp.set(h * 0.12, 2.04, 0.12), raise * (1 - snap));
+        this.palmOf(p, h)
           .set(0, 1 - snap, snap)
           .normalize();
-        this.offHand(p).set(-L * 0.24, 1.0, 0.1);
-        this.glowLead(p, 0.6 + 0.4 * snap + 0.2 * Math.sin(t * 60) * raise);
+        this.otherHand(p, h).set(-h * 0.24, 1.0, 0.1);
+        this.setGlow(p, h, 0.6 + 0.4 * snap + 0.2 * Math.sin(t * 60) * raise);
         p.pitch = -0.1 * raise + 0.15 * snap;
         p.yaw = turn * 0.4 * snap;
         return;
@@ -681,6 +852,20 @@ function celebrate(p: WielderPose, u: number, t: number, role: (i: number) => nu
   p.pitch = -0.1 * up;
   p.look.set(0, 3.2, 4);
   p.crouch = 0;
+}
+
+/** A hard hit near its goal: the torso snaps back and the hands come up before the chest. */
+function flinch(p: WielderPose, u: number, strength: number): void {
+  const hit = smooth(0, 0.12, u) * (1 - smooth(0.35, 1, u)) * strength;
+  for (let i = 0; i < 2; i++) {
+    const side = i === 0 ? 1 : -1;
+    p.hand[i]!.lerp(tmp.set(side * 0.16, 1.5, 0.3), hit);
+    p.palm[i]!.lerp(tmp.set(0, 0.2, 1).normalize(), hit).normalize();
+    p.fist[i] = p.fist[i]! + (0.5 - p.fist[i]!) * hit;
+  }
+  p.pitch -= 0.14 * hit;
+  p.hips.z -= 0.05 * hit;
+  p.crouch += 0.08 * hit;
 }
 
 /** Knocked back, arms thrown out: a goal conceded. */
