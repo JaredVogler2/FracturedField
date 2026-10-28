@@ -4,7 +4,7 @@
  * Nothing is injected: each page only uses its own mouse/keyboard and reads its own public view.
  */
 import { expect, test } from '@playwright/test';
-import { autopilotUntilGoal, debug, openRoom, project, readyUp, snapshot } from './helpers';
+import { debug, mouseAutopilotInPage, openRoom, project, readyUp, snapshot } from './helpers';
 
 test('online duel: create → invite → join → ready → both act → goals → identical result → rematch', async ({
   browser,
@@ -38,7 +38,7 @@ test('online duel: create → invite → join → ready → both act → goals �
 
   // Player 1 scores with real mouse input until the (fast-rules) match is decided.
   for (let i = 0; i < 4; i++) {
-    const outcome = await autopilotUntilGoal(a, 0, 150_000);
+    const outcome = await mouseAutopilotInPage(a, 0, 150_000);
     if (outcome === 'end') break;
     await expect
       .poll(

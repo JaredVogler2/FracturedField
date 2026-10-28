@@ -289,8 +289,13 @@ rounds, and each failure was reproduced here with the page's CPU throttled
     a goal goes to whichever half the core is in when the golden rift ends: a coin flip. A
     headless model of this duel (the real sim, the player's rule with its page delays, 30 matches
     each) has the host winning 2–0 in 27 of 30 matches on a busy page and 23 of 30 on a slower
-    one. The fix is the next CI item: run this player inside the page, deciding every frame, as
-    the touch and camera players already do.
+    one. The player now runs inside the page (`mouseAutopilotInPage`), deciding on every rendered
+    frame as the touch and camera players do, and leads the core by a frame plus the force point's
+    travel; its lineup and shot rule are unchanged. In the model (40 matches each) it wins 2–0 in
+    40 of 40 at frames of 0.2 s and of 0.33 s, where the old player won 32 of 40 at its slower
+    pace; a tighter lineup was worse on slow frames (33 of 40), so it was not adopted. Pinned to
+    two cores here the duel test then passed 3 of 3 runs (2.6, 2.3 and 2.1 min; the old player
+    took 2.8–2.9 min when it passed).
 
   Joining still compiles every program a second time, because each match view creates its own
   WebGL context. Keeping one renderer across the menu and matches would remove that freeze too.
