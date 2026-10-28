@@ -36,8 +36,8 @@ const EMBERS: Record<Tier, number> = { low: 10, medium: 18, high: 28 };
 const MAX_TONGUES = SLOTS * TONGUES.high;
 const MAX_EMBERS = SLOTS * EMBERS.high;
 /** How far a tongue's tip leans per unit of crosswind (m per m/s²), and the most it leans. */
-const LEAN_PER_ACCEL = 0.075;
-const MAX_LEAN = 1.2;
+const LEAN_PER_ACCEL = 0.11;
+const MAX_LEAN = 1.4;
 /** How far an ember drifts downwind over its life per unit of crosswind (m per m/s²). */
 const EMBER_DRIFT = 0.16;
 /** Seconds a doused flame takes to go out. */
