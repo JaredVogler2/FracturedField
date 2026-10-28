@@ -506,7 +506,11 @@ export function WaterAndIce({ tier = 'high' }: { tier?: 'low' | 'medium' | 'high
         v.water.visible = v.ice.visible = v.iceRim.visible = false;
         continue;
       }
-      if (fx) v.last = { x: fx.p[0], z: fx.p[2], r: fx.r };
+      if (fx) {
+        v.last.x = fx.p[0];
+        v.last.z = fx.p[2];
+        v.last.r = fx.r;
+      }
       const { x, z, r } = v.last;
 
       // Water: visible while the pool is water (fading back in during a thaw).

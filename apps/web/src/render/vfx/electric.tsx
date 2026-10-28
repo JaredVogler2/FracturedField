@@ -227,7 +227,7 @@ export function ChargeArcs() {
           tmp.s.cross(tmp.t).normalize().multiplyScalar(w);
           // Forks taper to nothing; the main arc keeps its width.
           const taper = p === 0 ? 1 : 1 - i / count;
-          for (const sgn of [-1, 1]) {
+          for (let sgn = -1; sgn <= 1; sgn += 2) {
             pos[v * 3] = pts[k]! + tmp.s.x * sgn * taper;
             pos[v * 3 + 1] = pts[k + 1]! + tmp.s.y * sgn * taper;
             pos[v * 3 + 2] = pts[k + 2]! + tmp.s.z * sgn * taper;

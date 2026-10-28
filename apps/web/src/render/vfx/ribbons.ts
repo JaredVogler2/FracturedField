@@ -131,7 +131,8 @@ export class RibbonBatch {
       const end = taper ? Math.min(1, (Math.min(i, count - 1 - i) + 0.5) / 2) : 1;
       this.s.multiplyScalar((width * 0.5 * end) / len);
       const op = Math.max(0, Math.min(1, alpha(i))) * a;
-      for (const sgn of [-1, 1]) {
+      // Two vertices across the ribbon (no per-point allocation: this runs every frame).
+      for (let sgn = -1; sgn <= 1; sgn += 2) {
         const v = this.v++;
         this.pos[v * 3] = pts[k]! + this.s.x * sgn;
         this.pos[v * 3 + 1] = pts[k + 1]! + this.s.y * sgn;

@@ -233,8 +233,9 @@ function Lodestone({ id }: { id: number }) {
 }
 
 const GUARD_COLUMNS = guardColumns();
-/** Seconds one column takes to rise. */
+/** Seconds one column takes to rise, and when the last one is up. */
 const COLUMN_RISE_S = 0.2;
+const RISE_DONE_S = Math.max(...GUARD_COLUMNS.map((c) => c.delay)) + COLUMN_RISE_S + 0.05;
 
 function Guard({ id, owner }: { id: number; owner: PlayerSlot | -1 }) {
   const ref = useRef<THREE.Group>(null);
@@ -270,6 +271,8 @@ function Guard({ id, owner }: { id: number; owner: PlayerSlot | -1 }) {
     return {
       columns,
       seams,
+      /** The final (risen) matrices have been uploaded. */
+      settled: false,
       dispose: () => {
         prism.dispose();
         ring.dispose();
@@ -296,7 +299,11 @@ function Guard({ id, owner }: { id: number; owner: PlayerSlot | -1 }) {
     if (born.current === 0) born.current = now;
     const age = (now - born.current) / 1000;
     const base = -def.halfHeight;
-    for (let i = 0; i < GUARD_COLUMNS.length; i++) {
+    // Up and still: after one last pass at the final pose, the columns' matrices need no more
+    // uploads (the seams' glow still changes).
+    const rising = age < RISE_DONE_S;
+    const update = rising || !meshes.settled;
+    for (let i = 0; update && i < GUARD_COLUMNS.length; i++) {
       const c = GUARD_COLUMNS[i]!;
       const k = Math.max(0, Math.min(1, (age - c.delay) / COLUMN_RISE_S));
       const rise = 1 - (1 - k) * (1 - k) * (1 - k);
@@ -308,8 +315,11 @@ function Guard({ id, owner }: { id: number; owner: PlayerSlot | -1 }) {
       tmp.s.set(c.radius, 1, c.radius);
       meshes.seams.setMatrixAt(i, tmp.m.compose(tmp.p, tmp.q, tmp.s));
     }
-    meshes.columns.instanceMatrix.needsUpdate = true;
-    meshes.seams.instanceMatrix.needsUpdate = true;
+    if (update) {
+      meshes.columns.instanceMatrix.needsUpdate = true;
+      meshes.seams.instanceMatrix.needsUpdate = true;
+      meshes.settled = !rising;
+    }
     const fade = e.ttl > 0 ? Math.min(1, e.ttl / 20) : 1;
     // A soaked or charged guard telegraphs that a discharge could overload it.
     const crackle = e.charge > 0 ? 1.5 * Math.abs(Math.sin(now * 0.05)) : 0;
