@@ -531,7 +531,9 @@ state (snapshot effects, entity element state, events) and decides nothing.
   mirrors its falloff and fades). Embers convect and drift downwind, and a glowing bed stands in
   for a light (a light that came and went would recompile every lit shader). A flame that leaves
   while still burning goes out over 0.45 s; online the snapshot drops it before the douse event
-  is due, so leaving is enough.
+  is due, so leaving is enough. On high, the air above each flame shimmers (`HeatHaze.tsx`,
+  `heat-haze.ts`, 3 tests): the composer's pass bends the frame in a plume over up to four
+  authoritative flames, by about three pixels at most, in thin bands drifting upward.
 - **Steam and smoke** (`plumes.tsx`): lit, depth-sorted puffs in one draw call. Steam regions rise
   toward the height where their updraft ends, smoke rises above flames, and douse, quench and boil
   throw steam. Fractures and crumbling guards throw dust that settles.
@@ -613,22 +615,27 @@ frame, so the moment is exact.
      ricochet comes from R3's control variant (no steam: the shot hits the guard at tick 71,
      impulse 199) with a camera placed by hand (`ELEMENT_VIEW`), and the goal from a camera in
      front of the gate.
+6. **After ev: heat refraction and phone views.** The fire now has D09's restrained heat
+   refraction on high (above). It joins the composer's existing pass: a match still links 52
+   programs on high. Side by side at R6 tick 40, the core's band and a wind streak above the flame
+   ripple; nothing else in the frame moves. The ten conditions were also shot on a landscape
+   phone (iPhone 13 at 2×, low tier, `ELEMENT_DEVICE=landscape`): every one stays identifiable,
+   the core small but the brightest thing in view.
 
 Frames (headless SwiftShader; inspected; not GPU or phone evidence) are in
 `docs/visual-evidence/phase-07/7c-el/`: ice e1 → e2 → e5 (low and high), air e2 against e5,
 the charge chain and the fracture e4 against e5, and fire and wind beside ice, steam, the gravity
 well, the quench and the melt. Round ev is in `docs/visual-evidence/phase-07/7c-ev/`: the ten
-conditions on high and on low (one sheet each), the charge chain, the stone impact, the ricochet
-and the goal full size on high, and the charge chain as e5 captured it against round ev.
+conditions on high, on low and on a landscape phone (one sheet each), the charge chain, the stone
+impact, the ricochet and the goal full size on high, the charge chain as e5 captured it against
+round ev, and the fire at R6 before and with heat refraction.
 
 Open (element systems):
-- Heat refraction above flames (D09: "restrained heat refraction") is not drawn, and the steam
-  has no vision veil (optional in D09).
-- The steam reads as a soft column rather than distinct rolling billows, on both tiers.
+- The steam reads as a soft column rather than distinct rolling billows, on both tiers; it has no
+  vision veil (optional in D09).
 - Air is a directional gust in this ruleset, so "air vortex" is shown as its streamlines; there
   is no rotating vortex to draw.
-- Shader compatibility in Safari is not tested (no WebKit here), and the element moments are
-  captured at 1920 × 1080 only, not in phone views.
+- Shader compatibility in Safari is not tested (no WebKit here).
 - The element systems' draw calls are not measured (one or two per active effect by
   construction; the Physics Lab page reports no render counts). Their shader programs are
   counted below.
@@ -704,12 +711,9 @@ vertex-colour programs of the old effects are gone.
 ## Next instruction
 
 **7C, continued** (prompts/deep-dives/D09-CORE-ELEMENTAL-VFX.md): the ten-condition evidence is
-assembled (round ev; frames in `docs/visual-evidence/phase-07/7c-ev/`), drawn frame by frame on
-high and low. Before the 7C gate review:
-- heat refraction above flames (D09's fire asks for it; restrained, high tier only);
+assembled (round ev; frames in `docs/visual-evidence/phase-07/7c-ev/`) on high, low and a
+landscape phone, and the fire has its heat refraction. Before the 7C gate review:
 - the steam as rolling billows rather than a soft column;
-- the element moments in phone views on the low tier (the capture script's element section needs
-  a phone viewport option);
 - Safari: shader compatibility needs a Safari browser (WebKit is not installed here) — a limit to
   record, or a check for the owner on a device;
 - then the gate review against D09's gate statement, and 7D.
@@ -719,5 +723,6 @@ The plan (docs/3D_IMPLEMENTATION_PLAN.md, WP8) adds rune circles where casts lan
 Capture with `node scripts/capture-arena.mjs <url> <dir> <round>`: `ONLY=elements` with
 `ELEMENT_TICKS` (`R5:11+1` an event moment, `~14` a spin, `*400` a play-on, `R3/control:71` a
 control variant), `ELEMENT_STEP_MS` (render time after the event), `ELEMENT_QUALITY`, `ELEMENT_CAM`
-and `ELEMENT_VIEW` (a camera placed by hand); `ONLY=core,phones` for the core. Compare against the
+`ELEMENT_VIEW` (a camera placed by hand) and `ELEMENT_DEVICE` (`landscape` or `portrait`, a
+phone); `ONLY=core,phones` for the core. Compare against the
 ev, c9 and b6 frames.

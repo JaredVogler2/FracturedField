@@ -247,7 +247,8 @@ if (want('phones')) {
 // seeks to tick 10, then steps one tick (its events play) and shoots ELEMENT_STEP_MS of render
 // time later (default 150; the page draws frame by frame, so this is exact). ELEMENT_QUALITY picks the tier (default high) and
 // ELEMENT_CAM the camera (close, the default, or broadcast: the whole field, e.g. for a goal);
-// ELEMENT_VIEW="px,py,pz,tx,ty,tz" places the close camera by hand (a guard, a goal mouth).
+// ELEMENT_VIEW="px,py,pz,tx,ty,tz" places the close camera by hand (a guard, a goal mouth), and
+// ELEMENT_DEVICE=landscape or portrait shoots on a phone (iPhone 13 at 2x) instead of 1920 x 1080.
 // "R9:20~12" sets the core spinning at 12 rad/s at that tick first (Physics Lab debug setter);
 // "R1:150*700" plays on for 700 ms before the shot (the trail, a goal's collapse); "R3/control:71"
 // replays the fixture's control variant (no reaction: e.g. the shot that hits the guard).
@@ -273,10 +274,13 @@ if (want('elements')) {
   const cam = process.env.ELEMENT_CAM ?? 'close';
   const stepMs = Number(process.env.ELEMENT_STEP_MS ?? 150);
   const view = process.env.ELEMENT_VIEW ? `&view=${process.env.ELEMENT_VIEW}` : '';
+  const deviceName = process.env.ELEMENT_DEVICE ?? 'desktop';
+  const device = { desktop, landscape, portrait }[deviceName];
+  if (!device) throw new Error(`ELEMENT_DEVICE: no device ${deviceName}`);
   const TICK_MS = 1000 / 30;
   const FRAME_MS = 1000 / 60;
   for (const [fx, variant, t, steps, spin, playMs] of elementTicks) {
-    const ctx = await browser.newContext(desktop);
+    const ctx = await browser.newContext(device);
     const page = await ctx.newPage();
     watch(page);
     await page.goto(
@@ -318,7 +322,7 @@ if (want('elements')) {
     }
     const shown = await page.evaluate(() => window.__ffLab.state().t);
     console.log(`${fx} ${variant}: the frame shows tick ${shown}`);
-    const name = `element-${fx}${variant === 'reaction' ? '' : `-${variant}`}-t${t}${steps ? `+${steps}` : ''}${spin === null ? '' : `-spin${spin}`}${playMs ? `-play${playMs}` : ''}${quality === 'high' ? '' : `-${quality}`}${cam === 'close' ? '' : `-${cam}`}${view ? '-view' : ''}`;
+    const name = `element-${fx}${variant === 'reaction' ? '' : `-${variant}`}-t${t}${steps ? `+${steps}` : ''}${spin === null ? '' : `-spin${spin}`}${playMs ? `-play${playMs}` : ''}${quality === 'high' ? '' : `-${quality}`}${cam === 'close' ? '' : `-${cam}`}${view ? '-view' : ''}${deviceName === 'desktop' ? '' : `-${deviceName}`}`;
     await shot(page, name);
     await ctx.close();
   }
