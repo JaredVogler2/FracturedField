@@ -206,23 +206,35 @@ if (want('phones')) {
 // chain. Set ELEMENT_TICKS="R6:30,R1:120" to choose other moments.
 // D09 (7C): an event's effect lasts a fraction of a second and a seek is silent, so "R5:10+1"
 // seeks to tick 10, lets the page settle, then steps one tick (its events play) and shoots
-// ELEMENT_STEP_MS later (default 150). ELEMENT_QUALITY picks the tier (default high).
+// ELEMENT_STEP_MS later (default 150). ELEMENT_QUALITY picks the tier (default high) and
+// ELEMENT_CAM the camera (close, the default, or broadcast: the whole field, e.g. for a goal).
+// "R9:20~12" sets the core spinning at 12 rad/s at that tick first (Physics Lab debug setter);
+// "R1:150*700" plays on for 700 ms before the shot (the trail, a goal's collapse).
 if (want('elements')) {
   const elementTicks = (process.env.ELEMENT_TICKS ?? 'R6:30,R1:120,R3:90,R5:20')
     .split(',')
     .map((s) => {
       const [fx, rest] = s.split(':');
-      const [t, steps] = rest.split('+');
-      return [fx, t, Number(steps ?? 0)];
+      const [timed, playMs] = rest.split('*');
+      const [tick, spin] = timed.split('~');
+      const [t, steps] = tick.split('+');
+      return [
+        fx,
+        t,
+        Number(steps ?? 0),
+        spin === undefined ? null : Number(spin),
+        playMs === undefined ? 0 : Number(playMs),
+      ];
     });
   const quality = process.env.ELEMENT_QUALITY ?? 'high';
+  const cam = process.env.ELEMENT_CAM ?? 'close';
   const stepMs = Number(process.env.ELEMENT_STEP_MS ?? 150);
-  for (const [fx, t, steps] of elementTicks) {
+  for (const [fx, t, steps, spin, playMs] of elementTicks) {
     const ctx = await browser.newContext(desktop);
     const page = await ctx.newPage();
     watch(page);
     await page.goto(
-      `${base}/lab?fx=${fx}&t=${t}&cam=close&vectors=0&regions=0&impacts=0&quality=${quality}&test=1`,
+      `${base}/lab?fx=${fx}&t=${t}&cam=${cam}&vectors=0&regions=0&impacts=0&quality=${quality}&test=1`,
     );
     for (let i = 0; i < 240; i++) {
       const at = await page.evaluate(() => window.__ffLab?.state().t ?? -1);
@@ -230,10 +242,17 @@ if (want('elements')) {
       await page.waitForTimeout(250);
     }
     await page.addStyleTag({ content: '.lab-panel,.lab-tick{display:none!important}' });
+    // "~12": the core spinning at 12 rad/s at that tick (a debug-only setter, as a twist would).
+    if (spin !== null) await page.evaluate((v) => window.__ffLab.spin(v), spin);
     await page.waitForTimeout(2500);
     for (let i = 0; i < steps; i++) await page.keyboard.press('ArrowRight');
     if (steps > 0) await page.waitForTimeout(stepMs);
-    const name = `element-${fx}-t${t}${steps ? `+${steps}` : ''}${quality === 'high' ? '' : `-${quality}`}`;
+    // "*700": play on for 700 ms first (motion: the trail, a goal's collapse).
+    if (playMs > 0) {
+      await page.keyboard.press('Space');
+      await page.waitForTimeout(playMs);
+    }
+    const name = `element-${fx}-t${t}${steps ? `+${steps}` : ''}${spin === null ? '' : `-spin${spin}`}${playMs ? `-play${playMs}` : ''}${quality === 'high' ? '' : `-${quality}`}${cam === 'close' ? '' : `-${cam}`}`;
     await shot(page, name);
     await ctx.close();
   }

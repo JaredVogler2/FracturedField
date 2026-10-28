@@ -321,6 +321,21 @@ describe('energy, limits and authority', () => {
     c.w.dispose();
   });
 
+  it('the Physics Lab can set the core spinning (debug only): clamped, shown in the snapshot', async () => {
+    const b = await bench();
+    b.w.debugSetCoreSpin(9);
+    expect(b.w.debugCoreSpin()).toBe(9);
+    const core = b.w.snapshot().entities.find((e) => e.kind === 'core')!;
+    expect(core.s).toBe(9);
+    b.w.debugSetCoreSpin(1e9);
+    expect(b.w.debugCoreSpin()).toBe(H.maxSpin);
+    b.w.debugSetCoreSpin(-1e9);
+    expect(b.w.debugCoreSpin()).toBe(-H.maxSpin);
+    b.w.debugSetCoreSpin(Number.NaN);
+    expect(b.w.debugCoreSpin()).toBe(0);
+    b.w.dispose();
+  });
+
   it('is deterministic, and a checkpoint taken mid-grip continues identically', async () => {
     const run = async () => {
       const b = await bench(-9, 2);

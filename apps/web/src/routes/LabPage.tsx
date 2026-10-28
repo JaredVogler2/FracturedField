@@ -64,7 +64,11 @@ export function LabPage() {
     });
     const w = window as unknown as Record<string, unknown>;
     if (p.has('test'))
-      w.__ffLab = { state: () => lab.getState(), seek: (n: number) => lab.seek(n) };
+      w.__ffLab = {
+        state: () => lab.getState(),
+        seek: (n: number) => lab.seek(n),
+        spin: (v: number) => lab.setCoreSpin(v),
+      };
     return () => {
       delete w.__ffLab;
       lab.dispose();
