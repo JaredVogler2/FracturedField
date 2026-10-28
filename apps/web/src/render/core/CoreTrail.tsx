@@ -1,7 +1,8 @@
 /**
- * The Rift Core's trail (7C / D09): a ribbon behind the core, facing the camera, as wide and as
- * bright as the core is fast (its authoritative speed; nothing invented). A hot white line runs
- * down its middle and fades out along its length into the core's seam colour (violet, warmed by
+ * The Rift Core's trail (7C / D09): a ribbon behind the core along the path it took (the same
+ * length at any frame rate), facing the camera, as wide and as bright as the core is fast (its
+ * authoritative speed; nothing invented). It tapers to a point, and a hot white line runs down its
+ * middle and fades out along its length into the core's seam colour (violet, warmed by
  * heat, whitened by charge). On the high tier its edges carry a slight chromatic fringe. Steam
  * veils it (the server hides the core's path there), a goal fades it, and a teleport (the kickoff
  * reset) never draws a streak across the arena. One draw.
@@ -11,11 +12,16 @@ import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useGameClient, useRenderFrame } from '../frame-context';
 import { useDisposable } from '../hooks';
+import { advanceTrail, newTrailPath, restartTrail } from './trail-path';
 
 /** Samples along the trail (the newest first). */
 const N = 32;
-/** A new sample once the core has moved this far (m). */
+/** Spacing of the samples along the core's path (m): the trail is at most N steps long. */
 const STEP = 0.18;
+/** The shortest jump treated as a teleport (the kickoff reset), whatever the speed (m). */
+const TELEPORT = 3;
+/** Slower than this (m/s) the core is at rest: its next shot starts a new trail. */
+const REST_SPEED = 0.3;
 /** Speed (m/s) at which the trail is fully bright. */
 const FULL_SPEED = 16;
 
@@ -27,8 +33,8 @@ export function CoreTrail({ tier }: { tier: 'low' | 'medium' | 'high' }) {
   const frame = useRenderFrame();
   const client = useGameClient();
   const camera = useThree((s) => s.camera);
-  const history = useMemo(() => Array.from({ length: N }, () => new THREE.Vector3()), []);
-  const state = useRef({ count: 0, fade: 1, coreId: -1 });
+  const path = useMemo(() => newTrailPath(N), []);
+  const state = useRef({ fade: 1, coreId: -1 });
 
   const geo = useDisposable(() => {
     const g = new THREE.BufferGeometry();
@@ -56,6 +62,7 @@ export function CoreTrail({ tier }: { tier: 'low' | 'medium' | 'high' }) {
         uniforms: {
           uColor: { value: new THREE.Color('#b394ff') },
           uStrength: { value: 0 },
+          uSpan: { value: 1 },
           uFringe: { value: tier === 'high' ? 0.35 : 0 },
         },
         transparent: true,
@@ -72,11 +79,13 @@ export function CoreTrail({ tier }: { tier: 'low' | 'medium' | 'high' }) {
         fragmentShader: /* glsl */ `
           uniform vec3 uColor;
           uniform float uStrength;
+          uniform float uSpan;
           uniform float uFringe;
           varying vec2 vAlong;
           void main() {
             float across = abs(vAlong.x);
-            float t = vAlong.y;
+            // 0 at the core .. 1 at the oldest sample laid so far.
+            float t = min(1.0, vAlong.y * uSpan);
             // Soft cross-section, fading along the length.
             float a = (1.0 - across * across) * pow(1.0 - t, 1.6) * uStrength;
             // A hot line down the middle near the core.
@@ -123,21 +132,18 @@ export function CoreTrail({ tier }: { tier: 'low' | 'medium' | 'high' }) {
       return;
     }
     probe.set(core.px, core.py, core.pz);
-    const h = history;
-    // A teleport (the kickoff reset): start over where the core is now, at full strength.
-    if (st.count === 0 || h[0]!.distanceTo(probe) > 3) {
-      for (const v of h) v.copy(probe);
-      st.count = 1;
+    const speed = Math.hypot(core.vx, core.vy, core.vz);
+    // A jump far beyond what its speed covers in a frame is a teleport (the kickoff reset): start
+    // over where the core is now, at full strength. At rest the path starts over too, so the next
+    // shot draws its own trail rather than one bent back along the last.
+    const teleport = Math.max(TELEPORT, speed * dt * 3);
+    if (path.count === 0 || path.points[0]!.distanceTo(probe) > teleport) {
+      restartTrail(path, probe);
       st.fade = 1;
-    } else if (h[0]!.distanceTo(probe) > STEP) {
-      for (let i = N - 1; i > 0; i--) h[i]!.copy(h[i - 1]!);
-      st.count = Math.min(N, st.count + 1);
-    }
-    // The head always sits on the core.
-    h[0]!.copy(probe);
+    } else if (speed < REST_SPEED) restartTrail(path, probe);
+    else advanceTrail(path, probe, STEP, teleport);
     if (st.fade < 1) st.fade = Math.max(0, st.fade - dt * 3);
 
-    const speed = Math.hypot(core.vx, core.vy, core.vz);
     const width = Math.min(0.75, 0.1 + speed * 0.03);
     const heat = Math.max(0, Math.min(1, (core.temp - 40) / 120));
     color
@@ -148,17 +154,22 @@ export function CoreTrail({ tier }: { tier: 'low' | 'medium' | 'high' }) {
     // Inside steam the server veils the core: its trail fades so the path is not given away.
     u.uStrength!.value = core.veiled ? 0 : Math.min(1, speed / FULL_SPEED) * st.fade;
 
+    // The fade and the taper run the trail's actual length: it ends in a point at its oldest
+    // sample, however few it has laid yet.
+    const h = path.points;
+    const last = path.count - 1;
+    u.uSpan!.value = (N - 1) / last;
     const pos = geo.attributes.position!.array as Float32Array;
     for (let i = 0; i < N; i++) {
-      const p = h[Math.min(i, st.count - 1)]!;
-      const q = h[Math.min(i + 1, st.count - 1)]!;
+      const p = h[Math.min(i, last)]!;
+      const q = h[Math.min(i + 1, last)]!;
       tangent.subVectors(p, q);
       if (tangent.lengthSq() < 1e-8) tangent.set(1, 0, 0);
       view.subVectors(p, camera.position);
       // Across the ribbon: perpendicular to its direction and to the line of sight.
       side.crossVectors(tangent, view).normalize();
       if (!Number.isFinite(side.x)) side.set(0, 0, 1);
-      const w = width * (1 - i / N) ** 0.8;
+      const w = width * Math.max(0, 1 - i / last) ** 0.8;
       const o = i * 6;
       pos[o] = p.x - side.x * w;
       pos[o + 1] = p.y - side.y * w;
