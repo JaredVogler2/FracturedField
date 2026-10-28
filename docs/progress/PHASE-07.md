@@ -1,6 +1,6 @@
 # PHASE 07 — Visual production (art gates 7A–7E)
 
-**Status: IN PROGRESS — 7A and 7B COMPLETE (local; phone frame rate not measured); 7C, 7D, 7E NOT STARTED.**
+**Status: IN PROGRESS — 7A, 7B and 7C COMPLETE (local; phone frame rate and GPU cost not measured); 7D IN PROGRESS; 7E NOT STARTED.**
 Phase 07 is five separately gated art stages (docs/BUILD_ORDER.md). Each is judged on frames
 captured from the running game (production build, headless Chromium with SwiftShader software
 WebGL), critiqued against docs/CREATIVE_TARGET.md and revised, never on standalone mock-ups.
@@ -412,13 +412,12 @@ Unit tests:
 - The tier log for the adaptive-quality test, the CI notes above and the 7B hash in the build
   status: the commits that follow `11267c9`.
 
-## 7C — Rift Core and elemental VFX (D09) — IN PROGRESS
+## 7C — Rift Core and elemental VFX (D09) — COMPLETE (local)
 
-7C runs in two parts: the Rift Core hero asset first (D09 §Rift Core), then the element systems
-(D09 §Ability VFX) and the ten-condition evidence. This section is being written as the work
-goes; nothing here is complete until its gate is met.
+7C ran in two parts: the Rift Core hero asset first (D09 §Rift Core), then the element systems
+(D09 §Ability VFX) and the ten-condition evidence. The gate review closes the section.
 
-### The Rift Core (in progress)
+### The Rift Core
 
 Built (`apps/web/src/render/core/`):
 
@@ -512,7 +511,7 @@ Honest limits (the core):
 - The collapse into the gate and the trail are now seen in frames (the ten-condition evidence
   below); the forming at kickoff is tested as numbers only.
 
-### The element systems (in progress)
+### The element systems
 
 Each system is its own module under `apps/web/src/render/vfx/`. It reads only authoritative
 state (snapshot effects, entity element state, events) and decides nothing.
@@ -536,7 +535,10 @@ state (snapshot effects, entity element state, events) and decides nothing.
   authoritative flames, by about three pixels at most, in thin bands drifting upward.
 - **Steam and smoke** (`plumes.tsx`): lit, depth-sorted puffs in one draw call. Steam regions rise
   toward the height where their updraft ends, smoke rises above flames, and douse, quench and boil
-  throw steam. Fractures and crumbling guards throw dust that settles.
+  throw steam. Fractures and crumbling guards throw dust that settles. Each puff is a billow: a
+  dense body whose edge the noise cuts into lobes and a slow warp bends out of round, lit from the
+  key with its underside in shadow and a bright lining where the light grazes it (on medium and
+  high the noise's slope also makes its lighting lumpy).
 - **Electric** (`electric.tsx`; `bolt-path.ts`, 5 tests): branching arcs along each CHARGE event's
   conduction links, between the authority's own node positions. They are seeded from the event,
   so both devices draw the same lightning, bow well up between conductors, brighter than the
@@ -621,6 +623,23 @@ frame, so the moment is exact.
    ripple; nothing else in the frame moves. The ten conditions were also shot on a landscape
    phone (iPhone 13 at 2×, low tier, `ELEMENT_DEVICE=landscape`): every one stays identifiable,
    the core small but the brightest thing in view.
+7. **Steam billows (st1–st3).** Round ev's steam read as a soft column. st1 made each puff a dense
+   body with noise-cut edges, a shadowed underside and a lit lining: the cloud read as billows
+   but showed clean circular card edges and hid the fire and the core. st2 cut the edges harder
+   and lowered the opacity (0.55 → 0.48): the core showed through again, but on low, without the
+   lumpy lighting, the puffs were layered discs. st3 bends each card's circle with a slow warp
+   (two value-noise reads a pixel): on both tiers irregular, cauliflower billows with wisps, the
+   fire glowing through at their base and the core visible inside.
+8. **The gate round: the medium tier, the counts, Safari's engine.** The ten conditions on medium
+   (what a tablet starts on) read as they do on high. Capturing them turned up a fault in the
+   capture script: a blank shot was retaken without drawing again, and the Physics Lab draws only
+   when asked, so every retake shot the same blank canvas (six of fifteen medium frames, all taken
+   while other work loaded the CPU). A retake now draws the same moment once more; all six came
+   back. The draw-call counts (below) put the low tier's gameplay view at 97 of its 100 at the
+   discharge. Each of the event rings (cast, strike, shock and score rings) was a mesh and a draw
+   call of its own; they are now instances of one mesh, and the discharge frame draws the same,
+   pixel for pixel, with six draw calls fewer. The shaders were also checked in WebKit, the
+   engine Safari uses (below).
 
 Frames (headless SwiftShader; inspected; not GPU or phone evidence) are in
 `docs/visual-evidence/phase-07/7c-el/`: ice e1 → e2 → e5 (low and high), air e2 against e5,
@@ -628,22 +647,18 @@ the charge chain and the fracture e4 against e5, and fire and wind beside ice, s
 well, the quench and the melt. Round ev is in `docs/visual-evidence/phase-07/7c-ev/`: the ten
 conditions on high, on low and on a landscape phone (one sheet each), the charge chain, the stone
 impact, the ricochet and the goal full size on high, the charge chain as e5 captured it against
-round ev, and the fire at R6 before and with heat refraction.
+round ev, the fire at R6 before and with heat refraction, the steam at R3 and R10 as round ev
+showed it against the billows, the ten conditions on medium, and the clipped pixels of the
+discharge frame marked in red (`clip-charge-R5-high.jpg`).
 
-Open (element systems):
-- The steam reads as a soft column rather than distinct rolling billows, on both tiers; it has no
-  vision veil (optional in D09).
-- Air is a directional gust in this ruleset, so "air vortex" is shown as its streamlines; there
-  is no rotating vortex to draw.
-- Shader compatibility in Safari is not tested (no WebKit here).
-- The element systems' draw calls are not measured (one or two per active effect by
-  construction; the Physics Lab page reports no render counts). Their shader programs are
-  counted below.
+Not built (recorded in the gate review): the steam's vision veil (optional in D09); a rotating air
+vortex (air is a directional gust in this ruleset, so "air vortex" is shown as its streamlines).
 
 ### The ten conditions (D09 evidence)
 
-Physics Lab fixtures, drawn frame by frame (`frames=manual`) on high and low; the tick each frame
-shows is logged by the capture script. Frames in `docs/visual-evidence/phase-07/7c-ev/`.
+Physics Lab fixtures, drawn frame by frame (`frames=manual`) on high, medium and low and on a
+landscape phone (low); the tick each frame shows is logged by the capture script. Frames in
+`docs/visual-evidence/phase-07/7c-ev/`.
 
 | D09 condition | Moment | What the frames show |
 | --- | --- | --- |
@@ -671,7 +686,7 @@ The first version of this test (pushed in `56db850`) only waited for that warnin
 round trips (13 contexts) can never trigger. The new test passed locally in 4.9 min (with the
 CPU shared with a capture batch); the six-trip version took 1.2 min on CI.
 
-### Shader programs (counts, not timings)
+### Shader programs, draw calls and shader compatibility (counts, not timings)
 
 `node scripts/probe-programs.mjs` lists every program a page links in 45 s of a bot match (a
 match view compiles all of them when it mounts: the join freeze on a slow device). Before 7C (the
@@ -680,6 +695,52 @@ high; with the 7C core and the element systems it links 45 and 52. By their defi
 ones are four double-sided shader materials, the physical ice material (clearcoat and
 iridescence on high), a textured sprite material and two plain shader materials; three
 vertex-colour programs of the old effects are gone.
+
+**Draw calls.** The Physics Lab now reports the renderer's counters for the frame it draws
+(`__ffLab.stats()`, all passes; a capture draws the shot's moment once more and reads them), and
+`scripts/probe-draws.mjs` samples them through live play. The render budget
+(docs/3D_VISUAL_STANDARD.md) is for the gameplay view: 100 draw calls on low, 170 on medium, 210 on
+high. In the gameplay framing at the element moments (Physics Lab fixtures, `cam=broadcast`):
+
+| Gameplay view | Low (phone landscape) | High (1920 × 1080) |
+| --- | --- | --- |
+| Charge chain: before it (R5, tick 11) → 50 ms after | 90 → 91 (97 before the rings were instanced) | 143 → 143 (149) |
+| Fracture: before it (R8, tick 5) → 50 ms after | 85 → 93 | 115 → 115 |
+| Fire and wind melting the ice (R6, tick 40) | 90 | 121 |
+| Steam over fire (R3, tick 40) | 88 | 118 |
+| Ice plate and guard (R1, tick 60) | 89 | 118 |
+| Gravity well (R7, tick 18) | 89 | 119 |
+
+Through a minute of live play: the attract match behind the menu (two bots) on low on a landscape
+phone, a median of 85, 89 at the 95th percentile and 95 at the peak; a match against the hard bot
+on low, 87 throughout; the attract match on high at 1920 × 1080, a median of 165 and a peak of 173
+(23 frames: software GL draws slowly at that size). The bots cast only the base moves (no element
+loadouts before Phase 10's bot), so live play exercises the core, the trail and the event effects,
+not the element regions; the fixtures do. In the lab's close-ups the element moments differ from
+their fixture's start by 4 to 9 draw calls on low and by −14 to +12 on high; a difference includes
+anything else that changed between the two frames (a guard rising; at R1 on high, the core leaving
+the frame).
+
+The low tier had the least room: 97 of 100 at the discharge, before 7D adds two wielders. The
+event rings were a mesh and a draw call each; one instanced mesh now draws them all: the
+discharge frame is the same pixel for pixel (no pixel differs) and takes 91 draw calls on low and
+143 on high. The busiest moment on low is now the fracture, at 93.
+
+**Shader compatibility** (D09: "test shader compatibility in Chrome and Safari").
+`scripts/probe-shaders.mjs` opens a bot match on each tier and the Physics Lab at the moment of
+each fixture's effect (R1 and R3–R10, on high), and checks every shader compiled and every
+program linked one by one (with the driver's log on a failure), along with console and page
+errors. On the gate build (the instanced rings included):
+- Chromium 153 (SwiftShader): all twelve views compiled every shader (90 to 106 a view) and
+  linked every program (45 to 53), with no console or page error. Four lab views gave back no
+  data on a first visit (the probe's own script was absent from the page; Chromium only, cause not
+  found) and passed on the next; no visit recorded a failed shader.
+- WebKit 26.6, Playwright's build of the engine Safari uses, in its Linux port on software GL: the
+  same twelve views, every shader compiled and every program linked on the first visit, the same
+  counts (one view four shaders more), no console or page error.
+
+That checks the game's shaders against WebKit's WebGL; it is not Safari on Apple hardware (Metal),
+which still needs a device.
 
 ### Tests (round ev)
 
@@ -693,6 +754,29 @@ vertex-colour programs of the old effects are gone.
 - The evidence captures exit non-zero on a page error, a shader or WebGL console error, or a
   frame that never rendered; all ten capture runs (30 frames) exited 0.
 
+### Tests (gate round)
+
+- Unit: 369 tests pass (43 files), among them the heat-haze sources (3); typecheck, lint and
+  format are clean.
+- CI on `d230038`: 44 of 45 browser tests passed, among them the ten-match context test (3.3
+  min). The camera player's goal test (`e2e/phase05-goal.spec.ts`) failed: its closed-loop
+  stand-in neither scored nor saw the match end within one 150 s stretch of play. That stretch was
+  shorter than a goalless match: under the fast rules a round runs 25 s and a 10 s golden rift
+  before territory decides it, so two rounds take some 160 s at the test's half speed. The runner
+  was also slower than usual throughout (the mouse duel took 58 s against 41 s on the green
+  `56db850`, the camera hands-on goal 3.4 min against 1.4). A stretch that ends with the match
+  still running now plays on, within 9 minutes of play (the test's limit is 20 minutes), and each
+  stretch logs its palm pushes, the camera's frame rate, the score and the rounds, so a failure
+  says why. The goal itself is still required, with gesture input only, within four matches.
+- Browser, local (headless SwiftShader, four cores): 11 of 11 in 12.3 min, the gate build with the
+  instanced rings: the local duel, the bot and keyboard tests, the menu over the attract match, the
+  loadout and Physics Lab tests, the online loadout test, the camera player's goal (2.2 min), the
+  ten-match context test (3.8 min) and both quality tests. The camera goal test again as committed
+  (its new log line): passed in 2.5 min, scoring in its first stretch after 6 palm pushes, 6
+  accepted PULSE casts and 6 hits on the core.
+- The captures: every capture run exits non-zero on a page error, a shader or WebGL console
+  error, or a frame that never rendered.
+
 ### Commits (7C)
 
 - The Rift Core hero asset (the section above through c9): "Phase 7C: the Rift Core, a crystal
@@ -704,25 +788,153 @@ vertex-colour programs of the old effects are gone.
   frames for evidence captures", "Render: water stays under a freeze front; the core trail reads
   against the floor" and "Browser test: ten matches from the menu, each view releasing its WebGL
   context".
+- After round ev: "Render: restrained heat refraction above flames, high tier only", "Docs and
+  capture: the ten conditions on a phone; heat refraction recorded" and "Render: steam as rolling
+  billows".
+- The gate round: "Render: the event rings drawn as one instanced mesh", "Browser test: the camera
+  player plays on while its match is still running", "Capture and probes: render counts from the
+  Physics Lab, retakes that draw again, shader and draw-call probes" and "Docs: the 7C gate review;
+  the medium tier, the counts and WebKit".
 
-## 7D — Wielder characters and IK (D10) — NOT STARTED
+### 7C gate review (D09)
+
+D09's gate: "Core is an iconic premium asset and eight systems are identifiable, physically
+reactive and visually coherent on both desktop and tiered mobile settings." Judged on the frames
+above (headless SwiftShader, inspected), the tests and the counts; what was not built and what
+could not be tested here follow.
+
+**The Rift Core** (D09 §Rift Core):
+1. Authored geometry: a broken shell of crystal plates over a plasma heart inside an aura (three
+   layers); seams, hairlines and cracks that brighten with spin; the heart shaded as a volume and
+   seen through each facet; two engraved gyroscope bands.
+2. Shader inputs from the authority only: speed, spin, temperature, charge, wetness, impulse and
+   the goal and kickoff events (`core-look.ts`, 10 tests); nothing is invented.
+3. The trail follows the authoritative speed and is laid by distance (6 tests), with a chromatic
+   fringe on high only. Motion blur (allowed on high only) is not built.
+4. An impact flares the core and parts its plates as hard as the impulse, throws sparks in
+   proportion (a shock ring above a threshold) and plays the impact sound at the impulse's volume
+   (the event audio of Phase 02); on medium and high the bloom catches the flare. A goal collapses
+   the core into the gate in 0.6 s (tested: under 1.5 s), and it forms again on the kickoff event.
+5. The low tier keeps the volume (one step), the aura's halo and the trail (the low sheet).
+
+Whether the core is "iconic" is a judgment. In the frames it is the signature object D09 asks for,
+a dark crystal geode with light inside close up and the brightest thing on the field far away, not
+a plain sphere. Two weaknesses stay open: some speckle at phone size, and part of c8's
+dark-crystal contrast lost close up. 7E scores it again on the golden screenshots.
+
+**Identifiable.** In the ten-condition frames on high, medium (what a tablet starts on), low (what
+a phone starts on) and a landscape phone (low; an iPhone 13 at 2× emulated in Chromium, not a
+phone), every system reads as itself: flame tongues leaning downwind, steam billows, branching
+arcs, the faceted ice plate, the basalt guard, the dark well with its lensing ring, the gust's
+streamlines, the chips and dust of a fracture. On the phone the core is small but the brightest
+thing in view.
+
+**Physically reactive.** Every module reads only authoritative state (snapshot effects, entity
+element state, events) and decides nothing. The frames show reactions, not decorations: the flames
+lean in the crosswind the authority applies; the arcs run along the conduction links between the
+authority's node positions; the core rebounds off the guard's collider (R3 control, impulse 199);
+the ice plate is the collider's own shape; the well bends the core's trail. The pure parts are
+tested (ice state 7, wind 4, bolt path 5, guard columns 4, heat haze 3, trail path 6, core look
+10, core geometry 4, water 3).
+
+**Visually coherent.** One light story (the key and the core's light); player hue only as accents
+(cast rings, guard seams, the trail's seam colour); materials that keep their identity under every
+effect; effects lit by the key (the steam's lining, the ice's rim). Clipped pixels stay at or under
+0.016 % in 32 of the 34 frames measured. The other two are the discharge 50 ms after it struck
+(0.51 % on high, 0.17 % on low), and the clipped pixels there are the bolt's white core line and
+one glint on the lodestone, not a washed-out area (`clip-charge-R5-high.jpg`). No effect lights
+the whole screen.
+
+**Desktop and tiered mobile.** High, medium and low, and a phone viewport on low; the counts
+against the render budget are above.
+
+**D09's failure criteria.**
+- Chrome: every capture fails on a shader or WebGL console error or a page error, and all exited
+  0; the shader probe found every shader compiled and every program linked in all twelve views.
+- Safari: WebKit 26.6 (Playwright's build, Linux port, software GL) compiles and links every
+  shader in the same twelve views; Safari itself (Apple hardware) is not tested.
+- NaN uniforms: the core's look is tested with NaN and Infinity inputs; the other modules are not
+  tested for NaN separately.
+- Overbright highlights: above (the discharge's core line).
+- Particle explosion: every emitter draws from a fixed pool (rings 20, arcs 16, sparks 96; puffs,
+  embers and fragments by the authority's own caps), so no event can grow a buffer.
+- WebGL context leak after ten rematches: `e2e/phase07-rematch.spec.ts` (ten matches from the
+  menu and back, exactly one live context after each switch) passed on CI (3.3 min, on
+  `d230038`).
+
+**D09's reject criteria.** No flat coloured cones (the fire is noise flowing up camera-facing
+tongues). No snowstorm over the ball: embers, motes and dust are sparse, and steam veils the core
+by design (the authority withholds aim reads inside it), but at 0.48 opacity the core shows
+through. No effect without a server cause (each module's inputs are listed above).
+
+**Not built (recorded):**
+- Air: the air ability is a directional gust in this ruleset, so it draws streamlines, edge wisps
+  and dust, not ring spirals or a vortex.
+- The core's motion blur (allowed on high only) and the steam's vision veil (optional).
+- Water is the authority's pools (the ability lays a pool; nothing flows in flight), so there is
+  no spline ribbon; no droplets are thrown at contacts (ripples and foam only), and no wet trace
+  outlasts a pool.
+- No soft fade where a puff or the water meets geometry (no depth texture); water and ice never
+  fight in sorting, because the water fades out under the closing plate.
+- Telegraphing: each cast is drawn at the authoritative cast event (a ring in the caster's colour
+  where it lands, one look per ability) and the local seat gets instant reticle feedback. The
+  anticipation an opponent sees before a release belongs to the wielders' casting animations
+  (7D, D10) and the rune circles (WP8).
+
+**Limits.** Software-rendered stills only: no GPU, no phone, no video. Shader cost on a phone GPU
+is not measured; Safari on Apple hardware is not tested.
+
+**Verdict: COMPLETE (local)** on the evidence above, with those limits. The open items move to 7E
+(the core's phone speckle) and to Phase 11's device checks (GPU cost, Safari on a device).
+
+## 7D — Wielder characters and IK (D10) — IN PROGRESS
+
+Started in `apps/web/src/render/wielder/`; not yet drawn in the game (no captures).
+
+- **IK** (`wielder-ik.ts`, 8 tests): two-bone IK solved analytically, with a pole that picks the
+  plane the elbow or knee bends in, and a least and a most bend, so a joint never locks straight,
+  hyperextends or folds through itself; out of reach, the limb points at the target. `aimBone`
+  turns the solved joints into bone rotations without roll flips.
+- **Animation** (`wielder-anim.ts`, 11 tests; proportions in `wielder-rig.ts`): each wielder's
+  pose comes only from authoritative state: the cast, grip, goal, kickoff and match-end events and
+  the snapshot's manipulator, held ability, grip and connection. One-shot moves (throw, sweep,
+  guard, infuse, freeze, charge, magnetize, gravity, focus) play over held layers (lift, draw, the
+  hand's grip), which play over the base (hovering energy, aiming at the manipulator, bracing when
+  the core bears down on its goal, downcast after conceding, dormant while disconnected). The
+  hands follow their targets on critically damped springs, so layers never snap and remote
+  updates never twitch. Every pose is written against the lead hand (the one nearer the field's
+  centre), so the two plinths mirror exactly. The tests cover mirrored play, the throw at the cast
+  point, lift then guard, a lost hand, a celebration over a move, stagger then downcast until the
+  kickoff, a won match, dormancy on disconnect, bracing and garbage input.
+- **Body** (`wielder-body.ts`, 6 tests): an original wielder, faceless behind a lacquered mask
+  with a visor slit that glows the seat's colour, in a long coat (open at the front, its sides
+  following the thighs) with a sash, a brass belt, metal pauldrons, conductor gauntlets whose lines
+  glow with each hand's cast, gloved mitten hands (the fingers on their own bone, for a fist) and
+  boots planted on the plinth. Every part is lofted along a 22-bone skeleton and skinned to it in
+  one mesh with per-vertex colour, roughness, metalness and glow: one draw call per wielder.
+  Amber and copper for EMBER, cyan and silver for TIDE.
+
 ## 7E — Golden screenshots and art critique (D11) — NOT STARTED
 
 ## Next instruction
 
-**7C, continued** (prompts/deep-dives/D09-CORE-ELEMENTAL-VFX.md): the ten-condition evidence is
-assembled (round ev; frames in `docs/visual-evidence/phase-07/7c-ev/`) on high, low and a
-landscape phone, and the fire has its heat refraction. Before the 7C gate review:
-- the steam as rolling billows rather than a soft column;
-- Safari: shader compatibility needs a Safari browser (WebKit is not installed here) — a limit to
-  record, or a check for the owner on a device;
-- then the gate review against D09's gate statement, and 7D.
+**7D — Wielder characters and IK** (prompts/deep-dives/D10-CHARACTERS-IK.md): two original
+wielders on the plinths behind the far wall (x = ±11.5), driven only by authoritative state. The
+IK solver, the animation layer and the body are built and tested (§7D). Next:
+- the scene component: the IK applied to the skeleton each frame, feet planted, the head following
+  the core, the gauntlets' glow from the pose; one draw call per wielder on low (the low tier's
+  busiest gameplay moment measured is 93 of its 100);
+- capture rounds w1… against D10: four poses per wielder in the arena, high, low and a phone;
+  critique and at least two revisions;
+- the draw-call check against the low budget, then D10's animation tests in the browser.
 
-The plan (docs/3D_IMPLEMENTATION_PLAN.md, WP8) adds rune circles where casts land.
+Open from 7C, moved on: the core's speckle at phone size (7E); GPU cost and Safari on a device
+(Phase 11's device checks); rune circles where casts land (WP8's leftover, with 7D's casting).
 
 Capture with `node scripts/capture-arena.mjs <url> <dir> <round>`: `ONLY=elements` with
 `ELEMENT_TICKS` (`R5:11+1` an event moment, `~14` a spin, `*400` a play-on, `R3/control:71` a
-control variant), `ELEMENT_STEP_MS` (render time after the event), `ELEMENT_QUALITY`, `ELEMENT_CAM`
-`ELEMENT_VIEW` (a camera placed by hand) and `ELEMENT_DEVICE` (`landscape` or `portrait`, a
-phone); `ONLY=core,phones` for the core. Compare against the
-ev, c9 and b6 frames.
+control variant), `ELEMENT_STEP_MS` (render time after the event), `ELEMENT_QUALITY`,
+`ELEMENT_CAM` (`close` or `broadcast`), `ELEMENT_VIEW` (a camera placed by hand) and
+`ELEMENT_DEVICE` (`landscape` or `portrait`, a phone); `ONLY=core,phones` for the core. Counts:
+`node scripts/probe-draws.mjs <url> <seconds> <device>` (draw calls through live play) and
+`node scripts/probe-shaders.mjs <chromium|webkit> <base-url>` (every shader compiled and linked).
