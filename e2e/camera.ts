@@ -117,7 +117,7 @@ export async function learnAim(page: Page): Promise<AimMap> {
     }
     if (W.length < H.length) {
       // A goal interrupted the probe (kickoff resets force points): start over.
-      await playing(page);
+      await resumePlay(page);
       continue;
     }
     const [w0, w1, w2] = W as [Vec, Vec, Vec];
@@ -138,6 +138,19 @@ export async function learnAim(page: Page): Promise<AimMap> {
     };
   }
   throw new Error('could not learn the hand → force point mapping');
+}
+
+/**
+ * Back to open play after a goal interrupted the aim probe. Against the bot, the match can be over
+ * by then (fast rules: two goals win it, and a slow page learns its aim slowly; PR #3, CI on
+ * 23bc3f8): the player presses REMATCH, as a person would and as the tests' own loops do.
+ */
+async function resumePlay(page: Page): Promise<void> {
+  await expect
+    .poll(async () => (await snap(page))?.match.phase, { timeout: 30_000 })
+    .toMatch(/^(playing|matchEnd)$/);
+  if ((await snap(page))?.match.phase === 'matchEnd') await page.getByTestId('rematch').click();
+  await playing(page);
 }
 
 /** Hand position that puts seat 0's force point at (x, z), inside the default calibrated range. */
