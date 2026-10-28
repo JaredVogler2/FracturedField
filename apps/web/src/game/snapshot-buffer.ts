@@ -23,6 +23,8 @@ export interface RenderEntity {
   veiled: boolean;
   shocked: boolean;
   energized: number;
+  /** The core's deliberate spin (rad/s about +y) from the newer snapshot; 0 for other bodies. */
+  spin: number;
 }
 
 export interface RenderManipulator {
@@ -200,6 +202,7 @@ export class SnapshotBuffer {
           veiled: false,
           shocked: false,
           energized: 0,
+          spin: 0,
         };
         map.set(eb.id, r);
       }
@@ -231,6 +234,7 @@ export class SnapshotBuffer {
       r.veiled = eb.veil === 1;
       r.shocked = eb.sh === 1;
       r.energized = eb.en ?? 0;
+      r.spin = eb.s ?? 0;
     }
     for (const id of map.keys()) if (!seen.has(id)) map.delete(id);
     for (const slot of [0, 1] as const) {

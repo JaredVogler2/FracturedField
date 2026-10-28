@@ -7,7 +7,7 @@
  * Chromium + SwiftShader (software WebGL): visuals only — never performance evidence.
  *
  * usage: node scripts/capture-arena.mjs <baseUrl> <outDir> [tag]
- * ONLY=menu,kickoff,shots,light,phones,elements limits the sections captured.
+ * ONLY=menu,kickoff,shots,core,light,phones,elements limits the sections captured.
  */
 import { chromium, devices } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -120,6 +120,46 @@ if (want('shots')) {
     });
     await page.waitForTimeout(400);
     await shot(page, name);
+    await ctx.close();
+  }
+}
+
+// The Rift Core close up (7C) with a camera that follows it, on the high and low tiers: at rest in
+// the Hands Lab (no opponent, no kickoff nudge), then moving in a match once the bot has struck it.
+// Its reacting states (heat, charge, wet) come from the Physics Lab (elements).
+const hideUi = (page) =>
+  page.addStyleTag({
+    content:
+      '.hud,.mode-chip,.pause-btn,.dev-hud,.touch-controls,.banner,.hands-lab{display:none!important}',
+  });
+const coreState = (page) =>
+  page.evaluate(() => {
+    const s = window.__ffDebug?.snapshot();
+    const c = s?.entities.find((e) => e.kind === 'core');
+    return s && c ? { phase: s.match.phase, speed: Math.hypot(...c.v) } : null;
+  });
+if (want('core')) {
+  for (const q of ['high', 'low']) {
+    {
+      const ctx = await browser.newContext(desktop);
+      const page = await ctx.newPage();
+      watch(page);
+      await page.goto(`${base}/lab/hands?test=1&shot=core&quality=${q}`);
+      await startMatch(page);
+      await hideUi(page);
+      await page.waitForTimeout(3000);
+      await shot(page, `core-${q}`);
+      await ctx.close();
+    }
+    const { ctx, page } = await open(desktop, `quality=${q}&shot=core`);
+    await startMatch(page);
+    await hideUi(page);
+    for (let i = 0; i < 120; i++) {
+      const s = await coreState(page);
+      if (s?.phase === 'playing' && s.speed > 4) break;
+      await page.waitForTimeout(150);
+    }
+    await shot(page, `core-moving-${q}`);
     await ctx.close();
   }
 }

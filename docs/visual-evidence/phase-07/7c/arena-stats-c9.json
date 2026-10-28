@@ -1,0 +1,58 @@
+{
+  "core-high": {
+    "drawCalls": 101,
+    "triangles": 163879,
+    "geometries": 81,
+    "textures": 41,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 845
+  },
+  "core-moving-high": {
+    "drawCalls": 107,
+    "triangles": 162057,
+    "geometries": 76,
+    "textures": 41,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 887
+  },
+  "core-low": {
+    "drawCalls": 49,
+    "triangles": 44209,
+    "geometries": 71,
+    "textures": 17,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 239
+  },
+  "core-moving-low": {
+    "drawCalls": 47,
+    "triangles": 42723,
+    "geometries": 69,
+    "textures": 17,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 308
+  },
+  "phone-landscape-low": {
+    "drawCalls": 90,
+    "triangles": 63823,
+    "geometries": 88,
+    "textures": 18,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 251
+  },
+  "phone-landscape-medium": {
+    "drawCalls": 136,
+    "triangles": 190525,
+    "geometries": 89,
+    "textures": 41,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 857
+  },
+  "phone-portrait-low": {
+    "drawCalls": 80,
+    "triangles": 55799,
+    "geometries": 85,
+    "textures": 18,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 254
+  }
+}

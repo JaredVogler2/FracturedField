@@ -412,14 +412,120 @@ Unit tests:
 - The tier log for the adaptive-quality test, the CI notes above and the 7B hash in the build
   status: the commits that follow `11267c9`.
 
-## 7C — Rift Core and elemental VFX (D09) — NOT STARTED
+## 7C — Rift Core and elemental VFX (D09) — IN PROGRESS
+
+7C runs in two parts: the Rift Core hero asset first (D09 §Rift Core), then the element systems
+(D09 §Ability VFX) and the ten-condition evidence. This section is being written as the work
+goes; nothing here is complete until its gate is met.
+
+### The Rift Core (in progress)
+
+Built (`apps/web/src/render/core/`):
+
+- **Look from state** (`core-look.ts`, pure, tested): smoothed energy from speed (full at
+  18 m/s), the deliberate spin, heat from temperature (40 → 160 °C), charge, wetness, an impact
+  flare from the impulse (decays in about 0.25 s), and the goal → collapse (0.6 s, D09: under
+  1.5 s) → gone → kickoff → form (0.5 s, a slight overshoot) cycle. A collapsed core forms again
+  after 6 s if the kickoff event is lost. Reduced motion keeps the plates nearly still and halves
+  the flashes. Nothing here decides an outcome.
+- **Geometry** (`core-geometry.ts`, tested): a broken shell of crystal plates (the faces of an
+  icosahedron, shrunk so seams open between them, corners jittered so neighbours still meet,
+  each plate tilted and lifted on its own, about a fifth left out) with outer and inner faces and
+  side walls; per-vertex attributes for the shader (plate direction, wall/face, depth across a
+  wall, barycentric corners, a seed). Two engraved gyroscope bands with a rectangular section;
+  the runes map onto the outer face only.
+- **Materials** (`core-materials.ts`): the plasma heart, shaded as a volume (filaments where two
+  drifting noise fields cross, sampled at depth along the view ray: 3 steps on medium and high,
+  1 on low); the plates as polished dark crystal you look into — each facet refracts the view
+  ray, meets the heart and shows its plasma there, displaced per facet as in a cut gem, clear
+  face-on and mirror-like toward grazing; light from the seams, a hairline round each facet and
+  cracks across some plates, all brightening with spin; and an aura, the far side of a slightly
+  larger sphere, which rings the silhouette with a halo on every tier.
+- **Behaviour** (`CoreVisual.tsx`): the plates part along their own directions with spin and on
+  an impact; the bands turn with energy and spin; heat warms, charge whitens (and flickers) and
+  water dulls the light. While the core is small on screen (a phone, a far camera) the heart
+  brightens and swells into the shell and fine lines fade, so it does not alias into speckle;
+  a rift spark (the heart's hot centre) gives a phone a focal point. Its light is the scene's
+  always-mounted core light, so a goal's collapse never changes the light count (which would
+  recompile every lit shader).
+- **Trail** (`CoreTrail.tsx`, replacing the flat ribbon of Phase 02): a camera-facing ribbon as
+  wide and bright as the core's authoritative speed, a hot line down its middle, the core's seam
+  colour, a slight chromatic fringe on high only; steam veils it, a goal fades it, a teleport
+  never streaks across the arena.
+
+Capture → critique → revision (`node scripts/capture-arena.mjs` with `ONLY=core,phones`: a still
+of the core in the Hands Lab with a camera that follows it, the core moving in a match, high and
+low; the phones):
+
+1. **c1 (baseline, the core before 7C).** A white ball that read as a soap bubble, with two plain
+   brass hoops.
+2. **c2.** The first plate shell: a black geodesic "disco ball" that hid the heart entirely.
+3. **c3.** Missing plates open windows onto the heart, but the shell still read as a geodesic.
+4. **c4.** Tilted, jittered plates read as a fractured violet geode close up, but the core was
+   dark and hard to find on the phone.
+5. **c5.** A brightness boost while the core is small on screen. Side by side on the phone with
+   the b6 core, the old white core read at once; the new one aliased into speckle.
+6. **c6.** The rift spark and an even glow over the faces when small. Close up, the plates read
+   as pale lavender plastic tiles, each with a dark centre and a broad glow along its edges: the
+   regular geodesic look again.
+7. **c7.** The look-through crystal (above), hairline edges and cracks instead of the broad
+   glow, the aura, one plasma function and phase shared by heart and plates. Close up, far richer:
+   each facet shows its own piece of the plasma, as cut glass does. But face-on everything was
+   bright violet, the filaments read as marble veins rather than light behind glass, and the
+   polished reflections were washed out. On the phone a smooth bright disc, with some dark speckle
+   left.
+8. **c8.** The view through the plates keeps the bright filaments but only about a third of the
+   heart's base violet (dark glass, light inside); clarity 0.7; while small, the heart swells
+   into the shell. Close up, dark crystal with the plasma showing through. In motion the aura
+   rings the core and the seams light into a bright lattice around dark facets: the strongest
+   look yet. But the filaments were thin even lines (marbled stone rather than light in glass),
+   the reflections faint, and on the phone the darker faces made the speckle worse, not better.
+9. **c9.** Filaments as a bright line in a soft glow; on medium and high a second, fainter layer
+   deeper in the heart behind each facet; stronger reflections; and while the core is small the
+   heart's own violet comes through (a bright ball far away, dark crystal close up). Close up the
+   plasma reads as light inside faceted glass; on the phone the core is the brightest object on
+   the field, with less speckle (some remains).
+
+Open on the core: some speckle at phone size; c9 lost part of c8's dark-crystal contrast close
+up.
+
+Frames (headless SwiftShader; inspected, not GPU or phone evidence) are in
+`docs/visual-evidence/phase-07/7c/`: the close-up in rounds c1, c4, c6, c7, c8 and c9 and
+side by side c1 against c9; c9 on the low tier, moving on high and low, and on the phones (with
+`arena-stats-c9.json`); the phone close-ups c5 against b6 and c7 against c8 and c9. Render
+counts in c9 (all passes): the Hands Lab close-up 101 draws and 164 k triangles on high, 49
+and 44 k on low; phone landscape on low 90 and 64 k.
+
+Tests: `core-look.test.ts` (10: rest, energy smoothing, spin either way, impact decay and a
+weaker hit during a stronger one, heat/charge/wet, the goal → collapse in under 1.5 s → kickoff →
+form cycle with its overshoot, a kickoff during the collapse, a lost kickoff, reduced motion,
+NaN/Infinity input) and `core-geometry.test.ts` (4: plate counts with and without holes and
+per seed, attribute ranges, outer faces facing out and inner faces facing the heart, the band's
+glyph strip on its outer face). The look and the geometry fail these tests if they regress; the
+shaders are judged on frames only.
+
+Honest limits (the core):
+- Every frame is a software render. Shader cost on a phone GPU (the plates sample the plasma
+  per pixel, twice on medium and high) is not measured.
+- The collapse into the gate and the forming at kickoff are tested as numbers, not yet seen in
+  a captured goal; the trail is built but not yet judged in a frame; they come with the
+  ten-condition evidence.
+
+### Commits (7C)
+
+- The Rift Core hero asset (this section through c9): the commit that adds
+  `apps/web/src/render/core/`.
+
 ## 7D — Wielder characters and IK (D10) — NOT STARTED
 ## 7E — Golden screenshots and art critique (D11) — NOT STARTED
 
 ## Next instruction
 
-**7C** (prompts/deep-dives/D09-CORE-ELEMENTAL-VFX.md): the Rift Core hero asset and the element
-systems, rooted in authoritative state. The plan (docs/3D_IMPLEMENTATION_PLAN.md, WP8) adds rune
-circles where casts land and luminous hands (WP9, 7D) bound to the hand channel. Capture with
-`node scripts/capture-arena.mjs <url> <dir> <round>` (add element moments with `ELEMENT_TICKS`)
-and compare against the b6 frames.
+**7C, second part** (prompts/deep-dives/D09-CORE-ELEMENTAL-VFX.md): the element systems (water,
+fire, air, earth, ice, electric, gravity, steam, magnet, guard), each a separate module rooted in
+authoritative state, then the ten-condition evidence (fast spin, stone impact, wet/freeze,
+steam burst, charge chain, air vortex, gravity curve, fire + wind, shield ricochet, scored goal),
+which also shows the core's collapse and trail. The plan (docs/3D_IMPLEMENTATION_PLAN.md, WP8)
+adds rune circles where casts land. Capture with
+`node scripts/capture-arena.mjs <url> <dir> <round>` (`ONLY=core,phones` for the core; element
+moments with `ELEMENT_TICKS`) and compare against the c9 and b6 frames.

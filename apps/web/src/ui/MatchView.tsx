@@ -77,6 +77,8 @@ const REVIEW_SHOTS = {
   under: { position: [-34, -5, 44], target: [-8, -4, 8], fov: 48 },
   /** Behind the +X gate: the carved channel and its inlay, the gyroscope's hanger and axle. */
   channel: { position: [37, 7.5, 9], target: [25, 2.5, 0], fov: 50 },
+  /** Close on the Rift Core, following it (7C): shells, halo rings, trail, the light it casts. */
+  core: { position: [2.6, 1.2, 3.4], target: [0, 0, 0], fov: 36, follow: 'core' },
 } as const satisfies Record<string, CameraOverride>;
 
 export type MatchMode =

@@ -5,7 +5,7 @@ import { DEFAULT_ABILITIES, DEFAULT_RULES } from '@ff/game-data';
 import type { EntityKind, PlayerSlot } from '@ff/protocol';
 import { useRenderFrame } from './frame-context';
 import { useDisposable, useStandardMaterial } from './hooks';
-import { createCorePlasmaMaterial, createCoreShellMaterial } from './shaders';
+import { CoreVisual } from './core/CoreVisual';
 import { LIGHTING, MATERIALS, PALETTE, TEAM_COLORS } from './art-tokens';
 import { mulberry32 } from './procedural';
 
@@ -16,8 +16,9 @@ interface EntityKey {
 }
 
 /** Mounts one visual per authoritative entity; transforms update per frame without re-render. */
-export function Entities() {
+export function Entities({ tier = 'high' }: { tier?: 'low' | 'medium' | 'high' }) {
   const frame = useRenderFrame();
+  const coreLight = useRef<THREE.PointLight>(null);
   const [list, setList] = useState<EntityKey[]>([]);
   const sig = useRef('');
   useFrame(() => {
@@ -32,11 +33,22 @@ export function Entities() {
   });
   return (
     <group>
-      <CoreLight />
+      {/* The core's light, mounted for as long as the scene is: three.js compiles the number of
+          point lights into every lit material, so a light that came and went with the core (its
+          first snapshot, a rematch, a goal's collapse) recompiled all of them, a hitch of
+          seconds on a slow GPU and of tens of seconds on software WebGL. The core drives it and
+          leaves it dark while there is none. */}
+      <pointLight
+        ref={coreLight}
+        color={PALETTE.riftViolet}
+        intensity={0}
+        distance={LIGHTING.coreLightDistance}
+        decay={2}
+      />
       {list.map((e) => {
         switch (e.kind) {
           case 'core':
-            return <CoreVisual key={e.id} id={e.id} />;
+            return <CoreVisual key={e.id} id={e.id} tier={tier} light={coreLight} />;
           case 'boulder':
             return <Boulder key={e.id} id={e.id} />;
           case 'guard':
@@ -72,109 +84,6 @@ function useEntityTransform(
   });
 }
 
-export function CoreVisual({ id }: { id: number }) {
-  const group = useRef<THREE.Group>(null);
-  const spin = useRef<THREE.Group>(null);
-  const ringA = useRef<THREE.Mesh>(null);
-  const ringB = useRef<THREE.Mesh>(null);
-  const frame = useRenderFrame();
-  const plasma = useDisposable(() => createCorePlasmaMaterial(), []);
-  const shell = useDisposable(() => createCoreShellMaterial(), []);
-  const brass = useStandardMaterial({
-    color: PALETTE.brass,
-    roughness: 0.3,
-    metalness: 1,
-    emissive: '#3a2410',
-    emissiveIntensity: 0.4,
-  });
-  const r = DEFAULT_RULES.core.radius;
-  useEntityTransform(id, group, false);
-  useFrame((_, dt) => {
-    const e = frame.current?.entities.get(id);
-    plasma.uniforms.uTime.value += dt;
-    shell.uniforms.uTime.value += dt;
-    const speed = e ? Math.hypot(e.vx, e.vy, e.vz) : 0;
-    const energy = Math.min(1, speed / 18);
-    plasma.uniforms.uEnergy.value = energy;
-    shell.uniforms.uIntensity.value = 0.9 + energy * 0.8;
-    if (spin.current && e) spin.current.quaternion.set(e.qx, e.qy, e.qz, e.qw);
-    if (ringA.current) ringA.current.rotation.z += dt * (0.6 + energy * 3);
-    if (ringB.current) ringB.current.rotation.x += dt * (0.45 + energy * 2.4);
-    if (e) shell.uniforms.uIntensity.value *= 1 - e.wet * 0.25;
-  });
-  return (
-    <group ref={group}>
-      <group ref={spin}>
-        <mesh material={plasma}>
-          <icosahedronGeometry args={[r * 0.64, 5]} />
-        </mesh>
-        <mesh material={shell}>
-          <icosahedronGeometry args={[r, 5]} />
-        </mesh>
-      </group>
-      <mesh ref={ringA} rotation-x={Math.PI / 2.3} material={brass} castShadow>
-        <torusGeometry args={[r * 1.32, 0.05, 8, 64]} />
-      </mesh>
-      <mesh ref={ringB} rotation-y={Math.PI / 2.6} material={brass} castShadow>
-        <torusGeometry args={[r * 1.5, 0.035, 8, 64]} />
-      </mesh>
-    </group>
-  );
-}
-
-/**
- * The core's light, mounted for as long as the scene is: three.js compiles the number of point
- * lights into every lit material, so a light that came and went with the core (its first
- * snapshot, a rematch) recompiled all of them, a hitch of seconds on a slow GPU and of tens of
- * seconds on software WebGL. It follows the core and is dark while there is none.
- */
-function CoreLight() {
-  const frame = useRenderFrame();
-  const light = useRef<THREE.PointLight>(null);
-  const coreId = useRef(-1);
-  useFrame(() => {
-    const l = light.current;
-    const entities = frame.current?.entities;
-    if (!l) return;
-    let e = entities?.get(coreId.current);
-    if (!e && entities) {
-      for (const x of entities.values()) {
-        if (x.kind !== 'core') continue;
-        coreId.current = x.id;
-        e = x;
-        break;
-      }
-    }
-    if (!e) {
-      l.intensity = 0;
-      return;
-    }
-    l.position.set(e.px, e.py, e.pz);
-    // Element state reads on the core itself: heat warms the glow, charge crackles blue.
-    const energy = Math.min(1, Math.hypot(e.vx, e.vy, e.vz) / 18);
-    const heat = Math.max(0, Math.min(1, (e.temp - 40) / 120));
-    const flicker = e.charge > 0 ? 0.6 + 0.4 * Math.sin(performance.now() * 0.09) : 1;
-    l.color
-      .copy(CORE_VIOLET)
-      .lerp(CORE_HEAT, heat)
-      .lerp(CORE_ARC, e.charge * 0.8);
-    l.intensity =
-      LIGHTING.coreLightIntensity * (0.8 + energy * 0.7) * (1 + e.charge * 0.6) * flicker;
-  });
-  return (
-    <pointLight
-      ref={light}
-      color={PALETTE.riftViolet}
-      intensity={0}
-      distance={LIGHTING.coreLightDistance}
-      decay={2}
-    />
-  );
-}
-
-const CORE_VIOLET = new THREE.Color(PALETTE.riftViolet);
-const CORE_HEAT = new THREE.Color('#ff7a2a');
-const CORE_ARC = new THREE.Color('#9fd8ff');
 const STONE_DRY = new THREE.Color(MATERIALS.boulderColor);
 const STONE_WET = new THREE.Color(MATERIALS.boulderColor).multiplyScalar(0.55);
 const HEAT_GLOW = new THREE.Color('#ff5a1a');

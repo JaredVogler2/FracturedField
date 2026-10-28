@@ -6,18 +6,12 @@ import { ToneMappingMode } from 'postprocessing';
 import { MERIDIAN_ARENA } from '@ff/game-data';
 import { Arena } from './Arena';
 import { Entities, Manipulators } from './Entities';
-import { FrameDriver, useGameClient } from './frame-context';
+import { FrameDriver, useGameClient, useRenderFrame } from './frame-context';
 import { view } from './view';
 import { useSettings } from '../game/settings';
 import { EventEffects } from './vfx/EventEffects';
-import {
-  AimPreview,
-  CoreTrail,
-  GripFeedback,
-  LiftTethers,
-  Reticles,
-  SweepFields,
-} from './vfx/FieldEffects';
+import { AimPreview, GripFeedback, LiftTethers, Reticles, SweepFields } from './vfx/FieldEffects';
+import { CoreTrail } from './core/CoreTrail';
 import { ChargeBolts, ElementRegions, MagnetFields, WaterAndIce } from './vfx/ElementEffects';
 import type { PlayerSlot } from '@ff/protocol';
 import {
@@ -72,6 +66,8 @@ export interface CameraOverride {
   readonly position: readonly [number, number, number];
   readonly target: readonly [number, number, number];
   readonly fov: number;
+  /** Review shots of a moving subject: position and target are offsets from the core. */
+  readonly follow?: 'core';
 }
 
 /** The 3D arena canvas: lighting, atmosphere, arena, authoritative entities and post. */
@@ -132,12 +128,12 @@ export function GameScene({
       {tier.shafts && renders('shafts') && <LightShafts />}
       {tier.dust > 0 && renders('dust') && <DustMotes count={tier.dust} />}
       {renders('contact') && <ContactShadows strength={tier.shadows ? 0.38 : 0.62} />}
-      {renders('entities') && <Entities />}
+      {renders('entities') && <Entities tier={tier.name} />}
       <Manipulators />
       {renders('vfx') && (
         <>
           <WaterAndIce />
-          <CoreTrail />
+          <CoreTrail tier={tier.name} />
           <SweepFields />
           <ElementRegions density={tier.particles} />
           <MagnetFields />
@@ -192,9 +188,24 @@ function CameraRig({
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
   const size = useThree((s) => s.size);
   const client = useGameClient();
+  const frame = useRenderFrame();
   const reducedMotion = useSettings((s) => s.reducedMotion);
   const base = useRef(new THREE.Vector3());
   const shake = useRef(0);
+  // A review camera that follows the core keeps its offset from the displayed (interpolated) core.
+  useFrame(() => {
+    if (override?.follow !== 'core') return;
+    const f = frame.current;
+    if (!f) return;
+    for (const e of f.entities.values()) {
+      if (e.kind !== 'core') continue;
+      const [ox, oy, oz] = override.position;
+      const [tx, ty, tz] = override.target;
+      camera.position.set(e.px + ox, e.py + oy, e.pz + oz);
+      camera.lookAt(e.px + tx, e.py + ty, e.pz + tz);
+      break;
+    }
+  });
   // The cinematic camera's clock, its smoothed focus (the core, eased so it never jerks) and the
   // pose it writes each frame.
   const film = useRef({
@@ -294,8 +305,8 @@ function CameraRig({
     [client],
   );
   useFrame(({ clock }, dt) => {
-    // The cinematic camera never shakes (it is not the player's view of the play).
-    if (cinematic || shake.current <= 0) return;
+    // The cinematic and following review cameras never shake (they are not the player's view).
+    if (cinematic || override?.follow || shake.current <= 0) return;
     shake.current = Math.max(0, shake.current - dt * 0.9);
     const amp = reducedMotion ? 0 : shake.current * shake.current;
     const t = clock.elapsedTime * 38;
