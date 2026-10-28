@@ -102,7 +102,7 @@ export function boltPaths(
   out.weight.length = 0;
   const pts = out.points;
   // Bowed well up: a discharge jumps through the air between conductors, clear of the water.
-  const main = subdivide(pts, 0, a, b, MAIN_LEVELS, 0.22, 0.2, rnd);
+  const main = subdivide(pts, 0, a, b, MAIN_LEVELS, 0.22, 0.28, rnd);
   out.paths.push([0, main]);
   out.weight.push(1);
   const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);

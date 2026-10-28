@@ -147,10 +147,11 @@ function createWaterMaterial(): THREE.ShaderMaterial & { uniforms: WaterUniforms
           float mask = smoothstep(0.42, 0.68, noise(q * 0.55 + tq * 0.37));
           float arc = pow(clamp(ridge, 0.0, 1.0), 34.0) * mask * uElectric;
           float halo = pow(clamp(ridge, 0.0, 1.0), 9.0) * mask * uElectric;
-          // Electrified water reads violet-blue even between arcs (distinct from glints).
+          // Electrified water reads violet-blue even between arcs (distinct from glints). Its crackle
+          // is a state, kept under the discharge arcs (an event) that leap between conductors.
           col += vec3(0.05, 0.04, 0.15) * uElectric;
-          col += vec3(0.55, 0.75, 1.0) * arc * 5.0 + vec3(0.42, 0.3, 1.0) * halo * 0.9;
-          alpha = max(alpha, clamp(arc * 1.4 + halo * 0.3, 0.0, 1.0) * edge);
+          col += vec3(0.55, 0.75, 1.0) * arc * 2.4 + vec3(0.42, 0.3, 1.0) * halo * 0.6;
+          alpha = max(alpha, clamp(arc * 0.9 + halo * 0.25, 0.0, 1.0) * edge);
         }
         gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
       }`,

@@ -23,7 +23,7 @@ const MAX_ARCS = 16;
 const ARC_S = 0.35;
 const RESTRIKE_S = 0.07;
 /** Ribbon width (m): the glow; the core is its middle fifth. */
-const WIDTH = 0.6;
+const WIDTH = 0.75;
 const MAX_VERTS = MAX_ARCS * BOLT_POINTS * 2;
 const MAX_INDEX = MAX_ARCS * BOLT_POINTS * 6;
 const MAX_SPARKS = 96;
@@ -77,8 +77,9 @@ function arcMaterial(): THREE.ShaderMaterial {
         float d = abs(vSide);
         float core = smoothstep(0.2, 0.04, d);
         float glow = exp(-d * 4.5) * (1.0 - d);
-        // Whiter and more violet than the water's own surface arcs, so the discharge reads above them.
-        vec3 col = vec3(0.92, 0.94, 1.0) * core * 3.4 + vec3(0.5, 0.36, 1.0) * glow * 1.2;
+        // Whiter, brighter and more violet than the water's own surface crackle: the discharge is
+        // the event, the crackle only the state it leaves.
+        vec3 col = vec3(0.92, 0.94, 1.0) * core * 5.0 + vec3(0.5, 0.36, 1.0) * glow * 1.8;
         float a = (core + glow * 0.8) * vI;
         if (a < 0.004) discard;
         gl_FragColor = vec4(col, a);
