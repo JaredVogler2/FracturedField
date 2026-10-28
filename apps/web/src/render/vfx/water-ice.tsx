@@ -184,14 +184,14 @@ function createIceMaterial(physical: boolean): {
     uCracks: { value: Array.from({ length: MAX_CRACKS }, () => new THREE.Vector4()) },
   };
   const base: THREE.MeshStandardMaterialParameters = {
-    color: '#a9d8f2',
-    roughness: 0.1,
+    color: '#74b9dc',
+    roughness: 0.08,
     metalness: 0,
     transparent: true,
-    opacity: 0.74,
-    emissive: '#1b5873',
-    emissiveIntensity: 0.32,
-    envMapIntensity: 1.9,
+    opacity: 0.62,
+    emissive: '#0f4560',
+    emissiveIntensity: 0.28,
+    envMapIntensity: 1.1,
     flatShading: true,
   };
   const material = physical
@@ -199,7 +199,7 @@ function createIceMaterial(physical: boolean): {
         ...base,
         clearcoat: 1,
         clearcoatRoughness: 0.06,
-        iridescence: 0.85,
+        iridescence: 0.6,
         iridescenceIOR: 1.31,
         iridescenceThicknessRange: [180, 560],
       })
@@ -229,7 +229,8 @@ function createIceMaterial(physical: boolean): {
         // The freeze front crosses the plate from the rim inward.
         float front = 1.0 - uFreeze;
         float ragged = (fbm(vIcePos.xz * 5.0) - 0.5) * 0.16;
-        if (iceRad + ragged < front - 0.01) discard;
+        // (Fully frozen, nothing is cut away: the ragged edge would otherwise hole the centre.)
+        if (front > 0.001 && iceRad + ragged < front - 0.01) discard;
         float frontLine = smoothstep(0.1, 0.0, iceRad + ragged - front) * step(0.001, front);
         vec2 icp = vIcePos.xz * 2.6 + vec2(vIcePos.y * 0.9, 0.0);
         float crackD = voronoiEdge(icp + (fbm(icp * 1.7) - 0.5) * 0.35);
@@ -249,8 +250,10 @@ function createIceMaterial(physical: boolean): {
           strike += spokes * smoothstep(reach, 0.0, rr) + smoothstep(0.06 * k.z + 0.02, 0.0, rr);
         }
         strike = clamp(strike, 0.0, 1.0);
+        // Thicker toward the middle: a deeper blue there, as in a real slab.
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.14, 0.38, 0.56), (1.0 - min(iceRad, 1.0)) * 0.35);
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93, 0.98, 1.0),
-          clamp(cracks * 0.7 + fine * 0.25 + frost * 0.45 + frontLine * 0.8 + strike * 0.9, 0.0, 1.0));
+          clamp(cracks * 0.55 + fine * 0.12 + frost * 0.45 + frontLine * 0.8 + strike * 0.9, 0.0, 1.0));
         // Warm ice darkens and wets; a thaw turns it to water and away.
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.32, 0.5, 0.6), uWarmth * 0.45 + uMelt * 0.5);
         diffuseColor.a = clamp(diffuseColor.a + cracks * 0.18 + frost * 0.12 + strike * 0.2 + frontLine * 0.2, 0.0, 1.0);

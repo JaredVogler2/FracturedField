@@ -44,7 +44,7 @@ export function SweepFields({ tier = 'high' }: { tier?: 'low' | 'medium' | 'high
       lateral: r() * 2 - 1,
       phase: r(),
       speed: 0.7 + r() * 0.6,
-      len: 1.4 + r() * 1.2,
+      len: 2.0 + r() * 1.4,
       height: 0.3 + r() * 1.4,
       curl: r() * 6.283,
     }));
@@ -91,27 +91,27 @@ export function SweepFields({ tier = 'high' }: { tier?: 'low' | 'medium' | 'high
         const head = (((t * o.speed * 0.9 + o.phase) % 1) * 2.2 - 1.1) * R;
         for (let j = 0; j < LINE_POINTS; j++) {
           const along = head - o.len * (1 - j / (LINE_POINTS - 1));
-          const chord = Math.sqrt(Math.max(0, 1 - (along / R) ** 2));
-          const lat = o.lateral * R * 0.92 * chord + Math.sin(along * 1.3 + o.curl) * 0.18;
+          // Straight and parallel (a sweep is a uniform crosswind); the push fades them at the edge.
+          const lat = o.lateral * R * 0.85 + Math.sin(along * 1.1 + o.curl) * 0.07;
           pts[j * 3] = fx.p[0] + dx * along + px * lat;
           pts[j * 3 + 1] = o.height + Math.sin(along * 0.9 + o.curl) * 0.12;
           pts[j * 3 + 2] = fx.p[2] + dz * along + pz * lat;
         }
-        lines.add(pts, 0, LINE_POINTS, 0.07, tint.r, tint.g, tint.b, 0.6 * life, (j) => {
+        lines.add(pts, 0, LINE_POINTS, 0.08, tint.r, tint.g, tint.b, 0.7 * life, (j) => {
           // Bright at the head, fading toward the tail.
           const fromTail = j / (LINE_POINTS - 1);
           return push(pts[j * 3]!, pts[j * 3 + 2]!) * Math.pow(fromTail, 0.7);
         });
       }
-      // The two edges of the current: dashed wisps flowing downwind.
+      // The two edges of the current: dashed wisps running downwind, parallel to the streamlines
+      // (an arc round the field read as a vortex, which a sweep is not).
       for (const side of [-1, 1]) {
+        const lat = side * R * 0.72;
+        const half = Math.sqrt(1 - 0.72 * 0.72) * R * 0.95;
         for (let j = 0; j < WISP_POINTS; j++) {
-          const u = j / (WISP_POINTS - 1) - 0.5;
-          const ang = u * 1.9;
-          const along = Math.sin(ang) * R * 0.97;
-          const lat = side * Math.cos(ang) * R * 0.97;
+          const along = (j / (WISP_POINTS - 1) - 0.5) * 2 * half;
           pts[j * 3] = fx.p[0] + dx * along + px * lat;
-          pts[j * 3 + 1] = 0.35 + 0.1 * Math.sin(t * 2 + j);
+          pts[j * 3 + 1] = 0.4 + 0.08 * Math.sin(t * 2 + j);
           pts[j * 3 + 2] = fx.p[2] + dz * along + pz * lat;
         }
         lines.add(pts, 0, WISP_POINTS, 0.06, tint.r, tint.g, tint.b, 0.4 * life, () => 1, 2.2);

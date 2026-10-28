@@ -133,9 +133,9 @@ function bedMaterial(): THREE.ShaderMaterial {
         float r = length(vC);
         float n = fbm(vWorld * 2.4 + vec2(uTime * 0.7, -uTime * 0.5));
         float glow = smoothstep(1.0, 0.0, r + (n - 0.5) * 0.35);
-        float coals = smoothstep(0.55, 0.8, fbm(vWorld * 6.0 + uTime * 0.3)) * smoothstep(0.7, 0.15, r);
+        float coals = smoothstep(0.6, 0.85, fbm(vWorld * 9.0 + uTime * 0.3)) * smoothstep(0.6, 0.1, r);
         float flick = 0.85 + 0.15 * sin(uTime * 11.0 + n * 6.0);
-        vec3 col = vec3(1.0, 0.36, 0.08) * glow * glow * 0.55 + vec3(1.0, 0.62, 0.22) * coals * 0.9;
+        vec3 col = vec3(1.0, 0.36, 0.08) * glow * glow * 0.55 + vec3(1.0, 0.62, 0.22) * coals * 0.5;
         float a = vHeat * flick;
         if (a * (glow + coals) < 0.003) discard;
         gl_FragColor = vec4(col, a);

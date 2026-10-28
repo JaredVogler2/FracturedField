@@ -131,9 +131,10 @@ export function EventEffects() {
   );
   const nextParticle = useRef(0);
 
-  const shardGeo = useMemo(() => new THREE.TetrahedronGeometry(0.22, 0), []);
+  const shardGeo = useMemo(() => chipGeometry(), []);
   const shardMat = useMemo(
-    () => new THREE.MeshStandardMaterial({ color: '#4a4f58', roughness: 0.6, flatShading: true }),
+    // Lit stone chips (they read as black confetti when darker).
+    () => new THREE.MeshStandardMaterial({ color: '#7a736c', roughness: 0.85, flatShading: true }),
     [],
   );
   const shardMesh = useMemo(() => {
@@ -324,7 +325,7 @@ export function EventEffects() {
               break;
             case 'fracture':
               // Chips and a few hot sparks; the dust is a plume (plumes.tsx).
-              shatter(x, y, z, 12);
+              shatter(x, y, z, 8);
               burst(x, y, z, '#ffd2a0', 14, 7, 0.4, 12, 1.0);
               break;
             case 'shock':
@@ -510,4 +511,26 @@ function makeSoftSprite(): THREE.DataTexture {
   tex.magFilter = THREE.LinearFilter;
   tex.needsUpdate = true;
   return tex;
+}
+
+/**
+ * A stone chip: a dodecahedron about 0.3 m across with its corners pushed in or out by up to a
+ * third (shared corners move together, so it stays closed), flat-shaded like broken rock rather
+ * than a regular solid.
+ */
+function chipGeometry(): THREE.BufferGeometry {
+  const g = new THREE.DodecahedronGeometry(0.16, 0);
+  const pos = g.attributes.position as THREE.BufferAttribute;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    let h = Math.imul(Math.round(v.x * 1000), 73856093);
+    h ^= Math.imul(Math.round(v.y * 1000), 19349663);
+    h ^= Math.imul(Math.round(v.z * 1000), 83492791);
+    h = Math.imul(h ^ (h >>> 13), 0x5bd1e995);
+    const k = 0.7 + (((h ^ (h >>> 15)) >>> 0) / 4294967296) * 0.6;
+    pos.setXYZ(i, v.x * k, v.y * k * 0.8, v.z * k);
+  }
+  g.computeVertexNormals();
+  return g;
 }

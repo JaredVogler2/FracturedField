@@ -23,7 +23,7 @@ const MAX_ARCS = 16;
 const ARC_S = 0.35;
 const RESTRIKE_S = 0.07;
 /** Ribbon width (m): the glow; the core is its middle fifth. */
-const WIDTH = 0.42;
+const WIDTH = 0.6;
 const MAX_VERTS = MAX_ARCS * BOLT_POINTS * 2;
 const MAX_INDEX = MAX_ARCS * BOLT_POINTS * 6;
 const MAX_SPARKS = 96;
@@ -77,7 +77,8 @@ function arcMaterial(): THREE.ShaderMaterial {
         float d = abs(vSide);
         float core = smoothstep(0.2, 0.04, d);
         float glow = exp(-d * 4.5) * (1.0 - d);
-        vec3 col = vec3(0.86, 0.93, 1.0) * core * 2.6 + vec3(0.36, 0.42, 1.0) * glow * 0.9;
+        // Whiter and more violet than the water's own surface arcs, so the discharge reads above them.
+        vec3 col = vec3(0.92, 0.94, 1.0) * core * 3.4 + vec3(0.5, 0.36, 1.0) * glow * 1.2;
         float a = (core + glow * 0.8) * vI;
         if (a < 0.004) discard;
         gl_FragColor = vec4(col, a);
@@ -157,7 +158,7 @@ export function ChargeArcs() {
             if (sparks.current.length >= MAX_SPARKS) sparks.current.shift();
             sparks.current.push(s);
           };
-          add({ x: p[0], y: p[1], z: p[2], vx: 0, vy: 0, vz: 0, age: 0, life: 0.28, flare: true });
+          add({ x: p[0], y: p[1], z: p[2], vx: 0, vy: 0, vz: 0, age: 0, life: 0.32, flare: true });
           for (let s = 0; s < Math.round(SPARKS_PER_NODE * (0.5 + q * 0.5)); s++) {
             const a = rnd() * Math.PI * 2;
             const v = 3 + rnd() * 5;
@@ -268,7 +269,7 @@ export function ChargeArcs() {
       }
       const k = s.age / s.life;
       if (s.flare) {
-        parts.sparks.set(n++, s.x, s.y, s.z, 1.1 + 0.8 * k, (1 - k) * 0.9, 0.55, 0.65, 1.0);
+        parts.sparks.set(n++, s.x, s.y + 0.15, s.z, 1.5 + 1.0 * k, (1 - k) * 0.9, 0.62, 0.6, 1.0);
       } else {
         s.vy -= 12 * dt;
         s.x += s.vx * dt;
