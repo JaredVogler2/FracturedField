@@ -300,3 +300,21 @@ rounds, and each failure was reproduced here with the page's CPU throttled
   Joining still compiles every program a second time, because each match view creates its own
   WebGL context. Keeping one renderer across the menu and matches would remove that freeze too.
   That is a performance item for later (D15), not part of this fix.
+- `23bc3f8`: 43 of 44 passed, the duel test among them (2.6 min). The camera test against the
+  bot ("camera, hands-on by default…") failed inside `learnAim`: the match was over. Under the
+  fast test rules two goals win a match, and on a slow page the stand-in learns its aim slowly.
+  When a goal interrupted the aim probe, `learnAim` waited for play to resume and timed out at
+  `matchEnd`; it never pressed REMATCH, though the test's own loop does. Fixed in `567aa71`:
+  `learnAim` presses REMATCH when the match is over and probes again. No assertion changed.
+  Reproduced with a throwaway spec that lets the bot win before `learnAim` runs: it failed as
+  on CI (`Expected: "playing"`, `Received: "matchEnd"` at `camera.ts:190`), and with the fix it
+  got past the match end. The same test passed on `864bb15`'s CI run and in the local suite.
+  CI then passed all 44 browser tests on `567aa71` (40.1 min) and the live room checks.
+
+  Two-core runs here stopped being a guide after this container restarted: the machine came
+  back about three times slower (the same production build took 5.7 s on four cores, against
+  3.5 s on two before). On it, the pushed head fails the six online tests pinned to two cores
+  at page load, before any join. A probe of the join (`scripts/probe-join.mjs`, pinned to two
+  cores) measured the pushed head and the 7C Rift Core build alike: the guest's seat appeared
+  75–80 s after it opened the invite on the head and 73–77 s on 7C (two runs each). So the 7C
+  core does not add a measurable compile freeze.
