@@ -50,7 +50,7 @@ interface Shard {
 
 /**
  * Transient feedback effects spawned only from authoritative events (cast, impact, goal,
- * despawn, kickoff). Pooled meshes / particle buffers: no per-event allocation in steady state.
+ * despawn, kickoff; an ice plate's break is drawn with the plate, in water-ice.tsx). Pooled meshes / particle buffers: no per-event allocation in steady state.
  */
 export function EventEffects() {
   const client = useGameClient();
@@ -244,8 +244,15 @@ export function EventEffects() {
       }
     };
     const pulseRadius = DEFAULT_ABILITIES.pulse.radius;
+    // Ice plates break and thaw in WaterAndIce (crystal fragments, the pool back), not as stone.
+    const icePlates = new Set<number>();
+    const guards = new Set<number>();
     return client.events.on((e: GameEvent) => {
       switch (e.type) {
+        case 'spawn':
+          if (e.kind === 'ice') icePlates.add(e.entity);
+          else if (e.kind === 'guard') guards.add(e.entity);
+          break;
         case 'cast': {
           const hex = TEAM_COLORS[e.slot];
           if (e.ability === 'pulse') {
@@ -262,7 +269,10 @@ export function EventEffects() {
             );
             burst(e.p[0], 1.0, e.p[2], hex, 18, 6, 0.35, 0, 0.2);
           } else if (e.ability === 'guard') {
-            burst(e.p[0], 0.4, e.p[2], hex, 30, 4, 0.6, 6, 1.2);
+            // The wall comes up through the floor: a ripple, stone chips shed, a few motes.
+            spawnRing(e.p[0], 0.05, e.p[2], hex, 0.6, 3.2, 0.45, 0.6);
+            shatter(e.p[0], 0.4, e.p[2], 8);
+            burst(e.p[0], 0.3, e.p[2], hex, 10, 2.5, 0.5, 6, 1.0);
           } else if (e.ability === 'sweep') {
             spawnRing(e.p[0], 0.05, e.p[2], hex, 1, DEFAULT_ABILITIES.sweep.radius, 0.45, 0.5);
           } else if (e.ability === 'lift' && e.phase === 'start') {
@@ -307,20 +317,15 @@ export function EventEffects() {
             case 'melt':
               burst(x, 0.2, z, '#7fd3ff', 30, 3, 0.6, 6, 1.0);
               break;
-            case 'boil':
-              burst(x, 0.5, z, '#f2f6fa', 60, 3.5, 1.1, -3, 2.2);
-              break;
-            case 'douse':
-            case 'quench':
-              burst(x, Math.max(0.3, y), z, '#dfe6ec', 28, 2.5, 0.8, -2.5, 1.8);
-              break;
+            // boil, douse and quench throw steam: plumes.tsx draws it.
             case 'shatter':
               spawnRing(x, 0.06, z, '#dff8ff', 0.4, 3.6, 0.4, 0.9);
               burst(x, y, z, '#eafcff', 70, 8, 0.8, 10, 1.4);
               break;
             case 'fracture':
+              // Chips and a few hot sparks; the dust is a plume (plumes.tsx).
               shatter(x, y, z, 12);
-              burst(x, y, z, '#c9a27e', 40, 6, 0.7, 9, 1.2);
+              burst(x, y, z, '#ffd2a0', 14, 7, 0.4, 12, 1.0);
               break;
             case 'shock':
               spawnRing(x, 0.06, z, '#8fd0ff', 0.3, 2.8, 0.25, reducedFlashes ? 0.25 : 0.8);
@@ -370,9 +375,15 @@ export function EventEffects() {
           break;
         }
         case 'despawn': {
+          const ice =
+            icePlates.delete(e.entity) || frame.current?.entities.get(e.entity)?.kind === 'ice';
+          if (ice) break;
           if (e.reason === 'broken') {
             shatter(e.p[0], e.p[1], e.p[2], 14);
-            burst(e.p[0], e.p[1] + 0.4, e.p[2], '#cdd6e0', 40, 6, 0.7, 8, 1.2);
+            burst(e.p[0], e.p[1] + 0.4, e.p[2], '#cdd6e0', 12, 6, 0.5, 8, 1.2);
+          } else if (e.reason === 'expired' && guards.delete(e.entity)) {
+            // A guard that runs out crumbles back into the floor.
+            shatter(e.p[0], e.p[1], e.p[2], 10);
           } else if (e.reason === 'expired') {
             burst(e.p[0], e.p[1], e.p[2], '#9aaab7', 16, 2, 0.6, -1, 0.5);
           }

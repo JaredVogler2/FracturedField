@@ -1,136 +1,139 @@
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { DEFAULT_ABILITIES, DEFAULT_RULES } from '@ff/game-data';
 import type { PlayerSlot } from '@ff/protocol';
 import { useRenderFrame } from '../frame-context';
 import { TEAM_COLORS } from '../art-tokens';
 import { mulberry32 } from '../procedural';
 import { localAim, localHand } from './local-aim';
+import { RegionPoints, createRegionPointsMaterial, softSprite } from './points';
+import { RibbonBatch, ribbonMaterial } from './ribbons';
 
 const MAX_SWEEPS = 6;
-const STREAKS = 36;
+const STREAMLINES: Record<'low' | 'medium' | 'high', number> = { low: 10, medium: 16, high: 22 };
+const DUST: Record<'low' | 'medium' | 'high', number> = { low: 14, medium: 26, high: 40 };
+const LINE_POINTS = 9;
+const WISP_POINTS = 14;
+const AIR = new THREE.Color(0.82, 0.9, 1.0);
 
 /**
- * Crosswind fields from authoritative snapshot effects: a faint boundary ring plus streaks that
- * flow along the real wind direction, so players can read and predict the deflection.
+ * Crosswind fields (7C / D09) from authoritative snapshot effects, so players can read and predict
+ * the deflection: thin streamlines that flow downwind through the field, brightest where the push
+ * is strongest (the authority's own falloff), two dashed wisps tracing its edges, and fine dust
+ * carried along. Pale air with only a hint of the caster's colour.
  */
-export function SweepFields() {
+export function SweepFields({ tier = 'high' }: { tier?: 'low' | 'medium' | 'high' }) {
   const frame = useRenderFrame();
+  const camera = useThree((s) => s.camera);
+  const size = useThree((s) => s.size);
+  const parts = useMemo(() => {
+    const lines = new RibbonBatch(
+      MAX_SWEEPS * (STREAMLINES.high * LINE_POINTS + 2 * WISP_POINTS),
+      ribbonMaterial(true),
+    );
+    lines.mesh.renderOrder = 4;
+    const sprite = softSprite();
+    const dust = new RegionPoints(MAX_SWEEPS * DUST.high, createRegionPointsMaterial(true, sprite));
+    dust.points.renderOrder = 4;
+    return { lines, dust, sprite, pts: new Float32Array(Math.max(LINE_POINTS, WISP_POINTS) * 3) };
+  }, []);
   const offsets = useMemo(() => {
     const r = mulberry32(5);
-    return Array.from({ length: STREAKS }, () => ({
+    return Array.from({ length: Math.max(STREAMLINES.high, DUST.high) }, () => ({
       lateral: r() * 2 - 1,
       phase: r(),
       speed: 0.7 + r() * 0.6,
-      len: 0.5 + r() * 0.9,
+      len: 1.4 + r() * 1.2,
+      height: 0.3 + r() * 1.4,
+      curl: r() * 6.283,
     }));
   }, []);
-  const pools = useMemo(
-    () =>
-      Array.from({ length: MAX_SWEEPS }, () => {
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute(
-          'position',
-          new THREE.BufferAttribute(new Float32Array(STREAKS * 6), 3).setUsage(
-            THREE.DynamicDrawUsage,
-          ),
-        );
-        geo.setAttribute(
-          'color',
-          new THREE.BufferAttribute(new Float32Array(STREAKS * 6), 3).setUsage(
-            THREE.DynamicDrawUsage,
-          ),
-        );
-        const mat = new THREE.LineBasicMaterial({
-          vertexColors: true,
-          transparent: true,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-        });
-        const lines = new THREE.LineSegments(geo, mat);
-        lines.frustumCulled = false;
-        lines.visible = false;
-        const ringMat = new THREE.MeshBasicMaterial({
-          transparent: true,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-        });
-        const ring = new THREE.Mesh(new THREE.RingGeometry(0.97, 1, 72), ringMat);
-        ring.rotation.x = -Math.PI / 2;
-        ring.visible = false;
-        return { geo, mat, lines, ringMat, ring };
-      }),
-    [],
-  );
   const group = useRef<THREE.Group>(null);
   useEffect(() => {
     const g = group.current;
     if (!g) return;
-    for (const p of pools) g.add(p.lines, p.ring);
+    g.add(parts.lines.mesh, parts.dust.points);
     return () => {
-      for (const p of pools) {
-        g.remove(p.lines, p.ring);
-        p.geo.dispose();
-        p.mat.dispose();
-        p.ring.geometry.dispose();
-        p.ringMat.dispose();
-      }
+      g.remove(parts.lines.mesh, parts.dust.points);
+      parts.lines.dispose();
+      parts.dust.dispose();
+      parts.sprite.dispose();
     };
-  }, [pools]);
+  }, [parts]);
 
-  const color = useMemo(() => new THREE.Color(), []);
+  const tint = useMemo(() => new THREE.Color(), []);
+  const shown = useRef(0);
   useFrame(({ clock }) => {
-    const effects = (frame.current?.latest?.effects ?? []).filter((e) => e.kind === 'sweep');
     const t = clock.elapsedTime;
-    for (let i = 0; i < MAX_SWEEPS; i++) {
-      const pool = pools[i]!;
-      const fx = effects[i];
-      if (!fx) {
-        pool.lines.visible = false;
-        pool.ring.visible = false;
-        continue;
-      }
-      const life = Math.min(1, fx.ttl / 8, (fx.maxTtl - fx.ttl + 1) / 3);
-      color.set(TEAM_COLORS[fx.owner]);
-      pool.ring.visible = true;
-      pool.ring.position.set(fx.p[0], 0.05, fx.p[2]);
-      pool.ring.scale.setScalar(fx.r);
-      pool.ringMat.color.copy(color);
-      pool.ringMat.opacity = 0.35 * life;
+    const effects = frame.current?.latest?.effects ?? [];
+    const { lines, dust, pts } = parts;
+    (lines.material.uniforms.uTime as THREE.IUniform).value = t;
+    dust.mat.uniforms.uScale!.value = (size.height * camera.projectionMatrix.elements[5]) / 2;
+    lines.begin(camera);
+    let nd = 0;
+    let count = 0;
+    for (const fx of effects) {
+      if (fx.kind !== 'sweep' || count++ >= MAX_SWEEPS) continue;
+      const life = Math.max(0, Math.min(1, fx.ttl / 8, (fx.maxTtl - fx.ttl + 1) / 3));
+      tint.set(TEAM_COLORS[fx.owner]).lerp(AIR, 0.75);
       const [dx, dz] = fx.d;
       const px = -dz;
       const pz = dx;
-      const pos = pool.geo.attributes.position!.array as Float32Array;
-      const col = pool.geo.attributes.color!.array as Float32Array;
-      for (let s = 0; s < STREAKS; s++) {
+      const R = fx.r;
+      // The authority's falloff at a point: smoothstep of the distance in from the edge.
+      const push = (x: number, z: number) => {
+        const k = Math.max(0, 1 - Math.hypot(x - fx.p[0], z - fx.p[2]) / R);
+        return k * k * (3 - 2 * k);
+      };
+      for (let s = 0; s < STREAMLINES[tier]; s++) {
         const o = offsets[s]!;
-        const along = (((t * o.speed * 1.6 + o.phase) % 1) * 2 - 1) * fx.r;
-        const lat = o.lateral * fx.r * Math.sqrt(Math.max(0, 1 - (along / fx.r) ** 2));
-        const cx = fx.p[0] + dx * along + px * lat;
-        const cz = fx.p[2] + dz * along + pz * lat;
-        const half = o.len * 0.5;
-        const y = 0.35 + (s % 5) * 0.28;
-        pos.set([cx - dx * half, y, cz - dz * half, cx + dx * half, y, cz + dz * half], s * 6);
-        const edge = 1 - Math.min(1, Math.hypot(cx - fx.p[0], cz - fx.p[2]) / fx.r);
-        const a = life * edge * 0.9;
-        col.set(
-          [
-            color.r * a * 0.2,
-            color.g * a * 0.2,
-            color.b * a * 0.2,
-            color.r * a,
-            color.g * a,
-            color.b * a,
-          ],
-          s * 6,
-        );
+        const head = (((t * o.speed * 0.9 + o.phase) % 1) * 2.2 - 1.1) * R;
+        for (let j = 0; j < LINE_POINTS; j++) {
+          const along = head - o.len * (1 - j / (LINE_POINTS - 1));
+          const chord = Math.sqrt(Math.max(0, 1 - (along / R) ** 2));
+          const lat = o.lateral * R * 0.92 * chord + Math.sin(along * 1.3 + o.curl) * 0.18;
+          pts[j * 3] = fx.p[0] + dx * along + px * lat;
+          pts[j * 3 + 1] = o.height + Math.sin(along * 0.9 + o.curl) * 0.12;
+          pts[j * 3 + 2] = fx.p[2] + dz * along + pz * lat;
+        }
+        lines.add(pts, 0, LINE_POINTS, 0.07, tint.r, tint.g, tint.b, 0.6 * life, (j) => {
+          // Bright at the head, fading toward the tail.
+          const fromTail = j / (LINE_POINTS - 1);
+          return push(pts[j * 3]!, pts[j * 3 + 2]!) * Math.pow(fromTail, 0.7);
+        });
       }
-      pool.geo.attributes.position!.needsUpdate = true;
-      pool.geo.attributes.color!.needsUpdate = true;
-      pool.lines.visible = true;
+      // The two edges of the current: dashed wisps flowing downwind.
+      for (const side of [-1, 1]) {
+        for (let j = 0; j < WISP_POINTS; j++) {
+          const u = j / (WISP_POINTS - 1) - 0.5;
+          const ang = u * 1.9;
+          const along = Math.sin(ang) * R * 0.97;
+          const lat = side * Math.cos(ang) * R * 0.97;
+          pts[j * 3] = fx.p[0] + dx * along + px * lat;
+          pts[j * 3 + 1] = 0.35 + 0.1 * Math.sin(t * 2 + j);
+          pts[j * 3 + 2] = fx.p[2] + dz * along + pz * lat;
+        }
+        lines.add(pts, 0, WISP_POINTS, 0.06, tint.r, tint.g, tint.b, 0.4 * life, () => 1, 2.2);
+      }
+      // Dust carried along, faster where the push is stronger.
+      for (let k = 0; k < DUST[tier]; k++) {
+        const o = offsets[k]!;
+        const along = (((t * o.speed * 1.2 + o.phase * 1.7) % 1) * 2 - 1) * R;
+        const chord = Math.sqrt(Math.max(0, 1 - (along / R) ** 2));
+        const lat = o.lateral * R * chord;
+        const x = fx.p[0] + dx * along + px * lat;
+        const z = fx.p[2] + dz * along + pz * lat;
+        const a = push(x, z) * life * 0.35;
+        dust.set(nd++, x, 0.15 + o.height * 0.7, z, 0.07, a, 0.92, 0.9, 0.84);
+      }
     }
+    lines.end();
+    if (nd > 0 || shown.current > 0) {
+      dust.hide(nd);
+      dust.commit();
+    }
+    shown.current = nd;
   });
   return <group ref={group} />;
 }

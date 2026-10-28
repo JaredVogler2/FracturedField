@@ -12,7 +12,12 @@ import { useSettings } from '../game/settings';
 import { EventEffects } from './vfx/EventEffects';
 import { AimPreview, GripFeedback, LiftTethers, Reticles, SweepFields } from './vfx/FieldEffects';
 import { CoreTrail } from './core/CoreTrail';
-import { ChargeBolts, ElementRegions, MagnetFields, WaterAndIce } from './vfx/ElementEffects';
+import { MagnetFields } from './vfx/magnet';
+import { GravityWells } from './vfx/gravity';
+import { ChargeArcs } from './vfx/electric';
+import { Fire } from './vfx/fire';
+import { Plumes } from './vfx/plumes';
+import { WaterAndIce } from './vfx/water-ice';
 import type { PlayerSlot } from '@ff/protocol';
 import {
   CLOUD_SHADOWS,
@@ -132,12 +137,14 @@ export function GameScene({
       <Manipulators />
       {renders('vfx') && (
         <>
-          <WaterAndIce />
+          <WaterAndIce tier={tier.name} />
           <CoreTrail tier={tier.name} />
-          <SweepFields />
-          <ElementRegions density={tier.particles} />
+          <SweepFields tier={tier.name} />
+          <GravityWells tier={tier.name} />
+          <Fire tier={tier.name} />
+          <Plumes tier={tier.name} />
           <MagnetFields />
-          <ChargeBolts />
+          <ChargeArcs />
           <LiftTethers />
           <GripFeedback />
         </>

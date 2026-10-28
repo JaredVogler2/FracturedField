@@ -204,16 +204,25 @@ if (want('phones')) {
 // (close camera, overlays off, a fixed tick): highlights must not clip and the materials must stay
 // distinguishable. Defaults: R6 heat beside ice, R1 the ice ramp, R3 steam, R5 charge on the wet
 // chain. Set ELEMENT_TICKS="R6:30,R1:120" to choose other moments.
+// D09 (7C): an event's effect lasts a fraction of a second and a seek is silent, so "R5:10+1"
+// seeks to tick 10, lets the page settle, then steps one tick (its events play) and shoots
+// ELEMENT_STEP_MS later (default 150). ELEMENT_QUALITY picks the tier (default high).
 if (want('elements')) {
   const elementTicks = (process.env.ELEMENT_TICKS ?? 'R6:30,R1:120,R3:90,R5:20')
     .split(',')
-    .map((s) => s.split(':'));
-  for (const [fx, t] of elementTicks) {
+    .map((s) => {
+      const [fx, rest] = s.split(':');
+      const [t, steps] = rest.split('+');
+      return [fx, t, Number(steps ?? 0)];
+    });
+  const quality = process.env.ELEMENT_QUALITY ?? 'high';
+  const stepMs = Number(process.env.ELEMENT_STEP_MS ?? 150);
+  for (const [fx, t, steps] of elementTicks) {
     const ctx = await browser.newContext(desktop);
     const page = await ctx.newPage();
     watch(page);
     await page.goto(
-      `${base}/lab?fx=${fx}&t=${t}&cam=close&vectors=0&regions=0&impacts=0&quality=high&test=1`,
+      `${base}/lab?fx=${fx}&t=${t}&cam=close&vectors=0&regions=0&impacts=0&quality=${quality}&test=1`,
     );
     for (let i = 0; i < 240; i++) {
       const at = await page.evaluate(() => window.__ffLab?.state().t ?? -1);
@@ -222,7 +231,10 @@ if (want('elements')) {
     }
     await page.addStyleTag({ content: '.lab-panel,.lab-tick{display:none!important}' });
     await page.waitForTimeout(2500);
-    await shot(page, `element-${fx}-t${t}`);
+    for (let i = 0; i < steps; i++) await page.keyboard.press('ArrowRight');
+    if (steps > 0) await page.waitForTimeout(stepMs);
+    const name = `element-${fx}-t${t}${steps ? `+${steps}` : ''}${quality === 'high' ? '' : `-${quality}`}`;
+    await shot(page, name);
     await ctx.close();
   }
 }
