@@ -13,8 +13,10 @@ const PARTICLES = 640;
 const SHARDS = 32;
 
 interface Ring {
-  mesh: THREE.Mesh;
-  mat: THREE.MeshBasicMaterial;
+  p: THREE.Vector3;
+  color: THREE.Color;
+  /** Opacity at birth (the ring fades from it). */
+  base: number;
   age: number;
   life: number;
   r0: number;
@@ -60,24 +62,44 @@ export function EventEffects() {
   const rand = useMemo(() => mulberry32(99), []);
 
   const ringGeo = useMemo(() => new THREE.RingGeometry(0.92, 1, 64, 1), []);
+  // Every ring in one draw call: an instance each, its colour scaled by its fade (additive
+  // blending adds colour × alpha, so a faded colour at full alpha draws the same).
+  const ringMat = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        color: '#ffffff',
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    [],
+  );
+  const ringMesh = useMemo(() => {
+    const m = new THREE.InstancedMesh(ringGeo, ringMat, RING_POOL);
+    // The colour buffer exists from the start, so the first ring never recompiles the material.
+    m.setColorAt(0, new THREE.Color(0, 0, 0));
+    m.instanceColor!.setUsage(THREE.DynamicDrawUsage);
+    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    m.count = 0;
+    m.visible = false;
+    m.frustumCulled = false;
+    m.renderOrder = 5;
+    return m;
+  }, [ringGeo, ringMat]);
   const rings = useMemo<Ring[]>(
     () =>
-      Array.from({ length: RING_POOL }, () => {
-        const mat = new THREE.MeshBasicMaterial({
-          color: '#ffffff',
-          transparent: true,
-          opacity: 0,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-        });
-        const mesh = new THREE.Mesh(ringGeo, mat);
-        mesh.rotation.x = -Math.PI / 2;
-        mesh.visible = false;
-        mesh.renderOrder = 5;
-        return { mesh, mat, age: 0, life: 1, r0: 0.3, r1: 3, active: false };
-      }),
-    [ringGeo],
+      Array.from({ length: RING_POOL }, () => ({
+        p: new THREE.Vector3(),
+        color: new THREE.Color(),
+        base: 0,
+        age: 0,
+        life: 1,
+        r0: 0.3,
+        r1: 3,
+        active: false,
+      })),
+    [],
   );
 
   const particles = useMemo<Particle[]>(
@@ -148,27 +170,26 @@ export function EventEffects() {
   useEffect(() => {
     const g = group.current;
     if (!g) return;
-    for (const r of rings) g.add(r.mesh);
+    g.add(ringMesh);
     g.add(shardMesh);
     return () => {
-      for (const r of rings) {
-        g.remove(r.mesh);
-        r.mat.dispose();
-      }
+      g.remove(ringMesh);
       g.remove(shardMesh);
     };
-  }, [rings, shardMesh]);
+  }, [ringMesh, shardMesh]);
 
   useEffect(
     () => () => {
       ringGeo.dispose();
+      ringMat.dispose();
+      ringMesh.dispose();
       pointsGeo.dispose();
       pointsMat.dispose();
       sprite.dispose();
       shardGeo.dispose();
       shardMat.dispose();
     },
-    [ringGeo, pointsGeo, pointsMat, shardGeo, shardMat, sprite],
+    [ringGeo, ringMat, ringMesh, pointsGeo, pointsMat, shardGeo, shardMat, sprite],
   );
 
   useEffect(() => {
@@ -189,10 +210,9 @@ export function EventEffects() {
       r.life = life;
       r.r0 = r0;
       r.r1 = r1;
-      r.mat.color.set(hex);
-      r.mat.userData.base = opacity;
-      r.mesh.position.set(x, y, z);
-      r.mesh.visible = true;
+      r.color.set(hex);
+      r.base = opacity;
+      r.p.set(x, y, z);
     };
     const burst = (
       x: number,
@@ -403,22 +423,35 @@ export function EventEffects() {
   const tmpMatrix = useMemo(() => new THREE.Matrix4(), []);
   const tmpQuat = useMemo(() => new THREE.Quaternion(), []);
   const tmpScale = useMemo(() => new THREE.Vector3(), []);
+  const tmpColor = useMemo(() => new THREE.Color(), []);
+  const flat = useMemo(
+    () => new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2),
+    [],
+  );
 
   useFrame((_, rawDt) => {
     const dt = Math.min(rawDt, 0.05);
+    // The live rings packed into the first instances; the count draws only those.
+    let live = 0;
     for (const r of rings) {
       if (!r.active) continue;
       r.age += dt;
       const t = r.age / r.life;
       if (t >= 1) {
         r.active = false;
-        r.mesh.visible = false;
         continue;
       }
       const ease = 1 - (1 - t) * (1 - t);
       const s = r.r0 + (r.r1 - r.r0) * ease;
-      r.mesh.scale.set(s, s, s);
-      r.mat.opacity = (r.mat.userData.base as number) * (1 - t) * (1 - t);
+      ringMesh.setMatrixAt(live, tmpMatrix.compose(r.p, flat, tmpScale.set(s, s, s)));
+      ringMesh.setColorAt(live, tmpColor.copy(r.color).multiplyScalar(r.base * (1 - t) * (1 - t)));
+      live++;
+    }
+    ringMesh.count = live;
+    ringMesh.visible = live > 0;
+    if (live > 0) {
+      ringMesh.instanceMatrix.needsUpdate = true;
+      ringMesh.instanceColor!.needsUpdate = true;
     }
 
     const pos = pointsGeo.attributes.position as THREE.BufferAttribute;
