@@ -1,6 +1,6 @@
 # PHASE 07 — Visual production (art gates 7A–7E)
 
-**Status: IN PROGRESS — 7A, 7B and 7C COMPLETE (local; phone frame rate and GPU cost not measured); 7D IN PROGRESS; 7E NOT STARTED.**
+**Status: IN PROGRESS — 7A, 7B, 7C and 7D COMPLETE (local; phone frame rate and GPU cost not measured); 7E NOT STARTED.**
 Phase 07 is five separately gated art stages (docs/BUILD_ORDER.md). Each is judged on frames
 captured from the running game (production build, headless Chromium with SwiftShader software
 WebGL), critiqued against docs/CREATIVE_TARGET.md and revised, never on standalone mock-ups.
@@ -887,7 +887,7 @@ is not measured; Safari on Apple hardware is not tested.
 **Verdict: COMPLETE (local)** on the evidence above, with those limits. The open items move to 7E
 (the core's phone speckle) and to Phase 11's device checks (GPU cost, Safari on a device).
 
-## 7D — Wielder characters and IK (D10) — IN PROGRESS
+## 7D — Wielder characters and IK (D10) — COMPLETE (local)
 
 Two original wielders stand on the plinths behind the far wall (x = ±11.5), drawn in the game
 since round w0 (`apps/web/src/render/wielder/`, mounted by `Scene.tsx`; `?test=1&off=wielders`
@@ -900,7 +900,7 @@ collide with nothing, and no cast ever waits for them.
   plane the elbow or knee bends in, and a least and a most bend, so a joint never locks straight,
   hyperextends or folds through itself; out of reach, the limb points at the target. `aimBone`
   turns the solved joints into bone rotations without roll flips.
-- **Animation** (`wielder-anim.ts`, 16 tests; proportions in `wielder-rig.ts`): the pose comes
+- **Animation** (`wielder-anim.ts`, 18 tests; proportions in `wielder-rig.ts`): the pose comes
   only from the cast, grip, goal, kickoff and match-end events and the snapshot's manipulator,
   held ability, grip and connection. One-shot moves (throw, sweep, guard, infuse, freeze, charge,
   magnetize, gravity, focus) play over held layers (lift, draw, the hand's grip), over the base
@@ -911,7 +911,15 @@ collide with nothing, and no cast ever waits for them.
   flick and the arm is out by 100 ms. The hands follow their targets on critically damped
   springs (no snap between layers, no twitch at the snapshot rate); the coat's tails trail the
   body on a soft underdamped spring (back on a lunge or a drop, aside on a turn, a little wind).
-  Every pose is written against the lead hand, so the two plinths mirror exactly.
+  Every pose is written against the lead hand, so the two plinths mirror exactly. A hard hit near
+  its own goal — an impact of at least 260 N·s (the one that shakes the camera) within 14 m of its
+  goal line, its guard's usual ground — makes it flinch for 0.45 s: the torso snaps back, the
+  hands come up before the chest, the knees give (not over a goal's own reaction). Bot matches
+  land such a hit about twice a minute (15 in 9 minutes of three matches; the hardest near a goal
+  260–285 N·s), so the flinch is rare and plain: 0.7 of the full reaction at 260, all of it at
+  350. Every cast also flashes the acting gauntlet from the event itself (the release, when its
+  effect and sound start) to mid-move, so the flare marks the caster at once even while a move
+  winds up: a freeze presses out only 0.2–0.4 s after its event, a charge snaps down at 0.3 s.
 - **Body** (`wielder-body.ts`, 7 tests): faceless behind a lacquered mask with a visor slit that
   glows the seat's colour; a long coat (open at the front, its sides following the thighs, its
   back in two tails on their own bones) over darker trousers, a sash, a brass belt, plated
@@ -941,6 +949,17 @@ collide with nothing, and no cast ever waits for them.
   across the arena), its light spread over the extra width and its flowing pulses shallower, so
   it reads as a line, not dashes. Both wielders' arms, motes and flares are one mesh: one draw
   call.
+- **The loadout's motif** (`wielder-motif.ts`, 3 tests; D10: "the chosen loadout controls small
+  icon motif and emitter particle shape"): each advanced move has a spark shape and a tint — a
+  six-armed snowflake for freeze, a four-armed spark for charge, two bars like filings for
+  magnetize, a ring for gravity, a diamond for focus. Half a wielder's motes take each of its two
+  picks', so the energy about its hands says what it can do; its gauntlet flare takes the shape
+  and tint of the advanced move it casts (round, in the seat's colour, for the base moves). The
+  shapes are drawn in the motes' own shader: no new draw call, and each shape gives at least as
+  much light as the round spark it replaces (1.2–2× over the quad), so a flare too small on a
+  phone for its shape still marks the cast as brightly. The picks come from the match's seats as
+  this device knows them (the default pair, freeze and charge, otherwise); in the Physics Lab,
+  from the fixture's world (R7's seat 0 picks gravity and charge).
 - **Spectral hands** (`spectral-hand.ts`, 7 tests): the hand each wielder reaches across the
   field with (WP9; ADR-0009's luminous hands), translucent in its seat's colour at the force
   point: open, palm down over the force point, reaching from its wielder's side with the acting
@@ -965,7 +984,10 @@ collide with nothing, and no cast ever waits for them.
 - **Physics Lab: a held hand** (`__ffLab.hand(slot, grip, push, twist)`; in captures
   `R4:8+4^0=1_0_0`): from the next tick a seat describes that hand as a camera would, toward its
   own aim, so the spectral hands' states can be shot at an exact moment. A what-if outside the
-  fixture's script, like a material change.
+  fixture's script, like a material change. Likewise **a harder shot**: `__ffLab.push(x, y, z)`
+  adds an impulse to the core at the current tick (in captures `R3/control:69+2!40_0_0`) and the
+  physics decides what it hits — no fixture strikes hard enough to make a wielder flinch (R3's
+  guard hit is 199 N·s; pushed 40 N·s harder at tick 69 it is 274 N·s at tick 71).
 
 ### Capture → critique → revision (frames in `docs/visual-evidence/phase-07/7d/`)
 
@@ -1078,6 +1100,30 @@ frames.
     flaring gauntlet) and the push read as EMBER's; the pull's claw is small. In a live portrait
     match both hands read in their colours, the cyan arm a faint line back to TIDE's plinth at the
     screen's left edge.
+11. **w10 — the loadout's motif, a flinch, and a flash at the cast** (`motif-w10.jpg`,
+    `flinch-w10.jpg`, `flash-w10.jpg`). Built: the motif and the flinch (§ What is built), and
+    the Physics Lab's scene now shows the fixture's loadouts (it had shown none). Found, close up
+    on high: EMBER's motes, reaching, are six-armed snowflakes and four-armed sparks — the default
+    picks, freeze and charge — and in R7 (gravity and charge) the gravity cast's flare is a soft
+    violet ring at the gauntlet among ring and spark motes. The motes now carry the picks' pale
+    tints, so EMBER's are no longer amber; its colour stays on the coat, visor, ring, gauntlets,
+    arm and hand. The first flinch capture showed none: R3's guard hit is 199 N·s, under the
+    threshold, and no fixture strikes harder than 219 N·s. Rather than lower the threshold to the
+    fixtures (bot matches land 7 hits a minute of at least 200 N·s near a goal, which would twitch)
+    the Physics Lab gained a harder shot (`!40_0_0`): at 274 N·s TIDE's hands come up before its
+    chest and it dips back at 160 ms, and stands in its guard again by 400 ms; at 199 N·s it does
+    not move (`flinch-w10.jpg`, both strips; in the gameplay view the bright gauntlet rises from
+    the waist to the chest). The flinch's strength, first 0.4 + (impulse − 260) / 600, would have
+    stayed at about 0.4 for every hit bot play lands (none reached 290): now 0.7 at the threshold.
+    And a fault the motif shots exposed: TIDE's freeze, 120 ms after its event, showed no flare
+    at all — the ice already on the field — because the flare followed the gauntlet's glow, and a
+    freeze presses out only 0.2–0.4 s after its event (a charge snaps down at 0.3 s). On a phone
+    the flare is what marks the caster, so it marked it late. Now every cast flashes the acting
+    gauntlet from the event (`flash-w10.jpg`, before and after at +120 ms): close up, a bright
+    snowflake at TIDE's hand; on a low landscape phone, a white-cyan star over TIDE's plinth with
+    its arm dropping to the field, and a × over EMBER's for the charge with its amber arm drawn
+    clearly — the two shapes tell apart even there. Desktop's gameplay view shows the same flares,
+    small beside the figures.
 
 ### D10 checklist
 
@@ -1090,10 +1136,10 @@ frames.
 | Head/mask, articulated shoulders, elbows, wrists and hands, torso, coat, sash, boots, ambient particles, energy attachments; plausible joint limits | Built; the fingers are one bone per hand (a fist, not single fingers); joint limits in the IK and the head's turn |
 | Clips: idle hover, aim, Pulse throw, Sweep arc, Lift sustain, Guard cross, Infuse channel, stagger, celebrate; upper body over idle | Built as procedural moves (plus freeze, charge, magnetize, gravity, focus, draw, the grip), layered over the base |
 | Procedural IK: constraints, elbow poles, target smoothing, weight shift, secondary cloth and energy strands; no snapping | Built; a test fails any frame that moves a hand 8 cm |
-| Idle breathes, braces against forces, looks at the moving core, reacts to a hit or a win | Built for goals and wins; no reaction to a physical hit near the plinth (nothing reaches them) |
+| Idle breathes, braces against forces, looks at the moving core, reacts to a hit or a win | Built: it flinches at a hard hit near its own goal (at least 260 N·s within 14 m of its goal line; about twice a minute in bot play), celebrates and staggers at goals and wins. Nothing physical reaches the plinths themselves |
 | Pose from the accepted command, aim and state — no streamed skeleton; smoothing hides the network cadence | Built: events and snapshot only; springs; the aim follows the interpolated force point |
-| Animation key, audio and VFX aligned | The release is the event: effects and sound start on it; the arm is out about 100 ms later (a 30 ms flick, then the thrust) |
-| Large enough at the broadcast view to recognise casts; colour and shape on gauntlets; the loadout's motif | ×1.5, rim, ring, glowing gauntlets, the arm and the spectral hand (frames below). The loadout motif is not built (the loadout is not in the snapshot) |
+| Animation key, audio and VFX aligned | The release is the event: effects and sound start on it, and so does a flash of the acting gauntlet (w10); a throw's arm is out about 100 ms later (a 30 ms flick, then the thrust), the slower moves' presses later, but the flash marks the caster at once |
+| Large enough at the broadcast view to recognise casts; colour and shape on gauntlets; the loadout's motif | ×1.5, rim, ring, glowing gauntlets, the arm and the spectral hand (frames below). The loadout's motif (w10): the motes in the two picks' spark shapes and tints, the flare in the cast's; the picks come from the match's seats, not the snapshot |
 | Camera Stand: a local debug silhouette in the HUD | Not built (Phase 05's tracking chip and practice view show the camera's view of the hand) |
 | Privacy: no facial capture | Nothing of the player is drawn on the wielder; its moves come from the game's events |
 | Phones: simpler clothing and bones, an expressive silhouette | Low tier: 10-ring lofts, no relief, no shadows; the same 24 bones. At 17–24 CSS pixels the figures' poses barely read on a phone: the acts are carried by the gauntlet flare, the arm (at least 2 render pixels) and the spectral hand (at least 24, filled in, in its colour) |
@@ -1118,9 +1164,14 @@ The wielders take four draw calls (two bodies, the arms, motes and flares, the h
 
 At the busiest gameplay moments (the Physics Lab's fixtures in the gameplay framing, 50 ms after
 the event; the 7C gate's figures before the wielders in brackets): the charge chain's discharge
-95 draw calls on a low phone (91) and 149 on high (143); the fracture 97 on a low phone (93) and
-72 k triangles. Within the budget, but the low tier now has three draw calls to spare at its
-busiest moment: what 7E or the phone work adds on low must take some away. A minute of the
+95 draw calls on a low phone (91), 149 on a medium phone and on high (143 on high); the fracture
+97 on a low phone (93) and 72 k triangles, 155 on a medium phone and on high. The fracture's
+count on medium and high was first taken in w10: the committed w9 build (`de902e1`) gives the
+same 155 and 149 on high, so it predates w10, and the "149 on high" given as the busiest moment
+before was the discharge's, not the busiest. w10 adds no draw call or program (the same counts on
+the w10 build, with and without the cast flash). Within the budgets (100 / 170 / 210), but the
+low tier has three draw calls to spare at its busiest moment and medium fifteen: what 7E or the
+phone work adds must take some away. A minute of the
 attract match (two bots) on a low landscape phone: a median of 85 draw calls, 89 at the 95th
 percentile and 91 at the peak (the 7C gate's run: 85, 89, 95 — different moments of play).
 
@@ -1135,16 +1186,20 @@ and passed on the next.
 
 ### Tests
 
-- **Unit:** 48 wielder tests in 7 files — IK 8, animation 16, body 7, material 2, spectral arm
-  4, motes and flares 4, spectral hands 7 — and two in the sim (each live hand in the snapshot,
-  rounded, gone once stale or disconnected; the lab's held hand reaches the snapshot every tick
-  while the fixture's script still runs); the whole suite passes (419 tests in 50 files). The
-  ones a browser cannot show: the arm keeps 2 render pixels from far away and says how wide it
-  really is; mirrored play gives the mirrored wielder; a cast at the near field points out over it;
-  the coat trails a lunge and settles; no frame moves a hand 8 cm; every part faces outward (the
-  test fails on the old winding); the material takes every hook it patches in this three; the
-  fist's fingertips meet the palm with every bone its length; a left hand is a right hand's
-  mirror image.
+- **Unit:** 53 wielder tests in 8 files — IK 8, animation 18, body 7, material 2, spectral arm
+  4, motes and flares 4, the loadout's motif 3, spectral hands 7 — and two in the sim (each live
+  hand in the snapshot, rounded, gone once stale or disconnected; the lab's held hand reaches the
+  snapshot every tick while the fixture's script still runs); the whole suite passes (424 tests
+  in 51 files). The ones a browser cannot show: the arm keeps 2 render pixels from far away and
+  says how wide it really is; mirrored play gives the mirrored wielder; a cast at the near field
+  points out over it; the coat trails a lunge and settles; no frame moves a hand 8 cm; every part
+  faces outward (the test fails on the old winding); the material takes every hook it patches in
+  this three; the fist's fingertips meet the palm with every bone its length; a left hand is a
+  right hand's mirror image; a hard hit near its goal makes it flinch and it then stands as one
+  never hit, while a soft or a far hit, one before it knows its goal and the hit that scores do
+  not; a cast flashes the gauntlet at once while a freeze still raises its palms, and the flash
+  is gone after the move; every advanced move has its own spark shape and tint, a cast's flare
+  takes its move's and none for the base moves, and the motes split half and half.
 - **Browser:** `e2e/phase07-wielders.spec.ts` plays a bot match: every pulse cast is one throw
   on its own wielder and the bot's casts play on the bot's wielder. The hands-on match tests
   (`phase06m-match.spec.ts`) check that the gripping seat's spectral hand closes and, online,
@@ -1154,6 +1209,11 @@ and passed on the next.
   wielder threw 2; 0.59 ms of the main thread a frame for both, on this container's CPU, not a
   phone), both hands-on match tests, the camera goal test, the four local-match tests in
   `phase02.spec.ts` and the online loadout test.
+- **Browser, on the w10 code** (local): 8 of 8 passed in 6.2 min — the wielders test (seat 0 cast
+  3 pulses and its wielder threw 3, the bot cast 2 pulses and its wielder threw 2; 0.71 ms of this
+  container's main thread a frame for both), the Physics Lab's R7 replay (whose fixture now
+  shows its loadouts on the wielders), the local and the online loadout tests and the four
+  local-match tests.
 - **CI on PR #4 (`9706e0f`): 44 of 46.** The online loadout and online camera tests failed where
   the guest joins: its lobby was not visible within 30 s. Pinned to two cores, a probe of the
   guest's join (`scripts/probe-join.mjs`, three runs per build) found the guest freezing for
@@ -1164,6 +1224,10 @@ and passed on the next.
   have tipped a slow runner. `openRoom` now gives the guest's join steps 90 s (the steps and their
   checks unchanged); on two cores both tests then passed (2.8 and 2.9 min). One renderer kept
   across the menu and matches would remove the second compile; it stays a recorded limit.
+- **CI on PR #4 (`de902e1`): all 46 browser tests passed** (43.6 min) and the live room checks:
+  the online loadout test in 1.8 min, the online camera test in 1.9 min; the wielders test there
+  saw seat 0 cast 3 pulses and its wielder throw 3, the bot cast 2 and its wielder throw 2 (0.55 ms
+  of the runner's main thread a frame for both).
 - `pnpm typecheck`, `pnpm lint` and `pnpm format:check` are clean.
 
 ### Honest limits
@@ -1181,33 +1245,129 @@ and passed on the next.
   is subtle from a low camera, and a fist on the core half disappears in the core's halo (w9).
 - The fingers are one bone per hand (a fist or an open hand, no single fingers); the body is
   procedural lofts, not an artist's glTF, and its detail is procedural relief, not painted maps.
-- Not built: the loadout's motif on the wielder (the loadout is not in the snapshot), a reaction
-  to physical hits (nothing reaches the plinths), the Camera Stand's debug silhouette in the
-  HUD.
+- The loadout's motif comes from the seats as this device knows them (its own settings, the
+  rival's picks from the lobby), not from the snapshot; a seat it does not know shows the default
+  pair. The flinch answers hard hits near a wielder's own goal, the closest the play comes to it:
+  nothing physical reaches the plinths.
+- Not built: the Camera Stand's optional debug silhouette in the HUD.
 - The motion review is a strip of frames at exact render times, not a video.
+
+### Commits (7D)
+
+- `21f7b12` "7D (in progress): the wielders' IK, animation layer and body" (merged with
+  JaredVogler2/FracturedField#3).
+- `bda012c` "7D: the wielders in the game, with spectral arms and hands" (rounds w0–w6).
+- `de902e1` "7D: the wielders read on phones; the spectral hands mirror the hand channel" (w7–w9).
+- "7D: the loadout's motif, a flinch at hard hits, a flash at the cast; the 7D gate review" (w10
+  and this review).
+
+### 7D gate review (D10)
+
+D10's gate: "Two rendered characters clearly read as powerful players capable of acting on same
+world. Quality exceeds cylinders/capsules; their animations correspond to server ability events
+and don't disrupt 30+FPS mobile tier." Its failure line: "A perfect hero still with rigid combat
+animation is a FAIL." Judged on rounds w0–w10 (headless SwiftShader, every frame inspected), the
+tests and the counts; what was not built and what could not be tested here follow.
+
+**Two characters that read as powerful players acting on the same world.** On a desktop the
+wielders stand 71 CSS pixels tall in the gameplay view, in their seats' colours, each with a
+glowing visor, a conductor ring and gauntlets. A cast throws the acting arm toward the field,
+flashes its gauntlet in the move's shape and brightens a spectral arm that runs from that
+gauntlet across the arena to a translucent hand over the force point — open, a fist round the
+body it grips, pressed down by a push, curled by a pull, turned by a twist. The link from the
+figure to what it moves is drawn, not implied. On phones the figures are 17–24 CSS pixels tall
+(measured from the game's camera fit, w7): their silhouettes and colours read, their poses barely
+do. There the act is carried by the flare at the gauntlet (at least 5 render pixels in radius,
+from the event on), the arm (at least 2 wide) and the hand (at least 24 long, filled in, in its
+colour): w7–w9 and w10's phone frames. Judged met on desktop; on phones met through the flare,
+arm and hand rather than the figures' poses. Larger figures were rejected: beyond ×1.5 they would
+stand as giants on their plinths.
+
+**Quality beyond capsules.** Lofted bodies skinned to 24 bones: a mask with a visor slit, a long
+open coat with a lining and two tails on their own bones, a sash, a belt, plated pauldrons, a
+conductor ring, gauntlets, mitten hands that close into fists, boots planted on the plinths; a
+quilted, grained and hammered relief on medium and high; a character light and a rim in the
+seat's colour. The inside-out lofts found in w4 are fixed and tested. Not an artist's glTF, no
+painted maps, one finger bone per hand: recorded below.
+
+**Animations that correspond to the server's events.** The pose comes only from the authority's
+events (cast, grip, goal, kickoff, match end, impact) and the snapshot (force point, held ability,
+grip, connection, hand); nothing a wielder does decides anything. In a real match every pulse
+cast played one throw on its own wielder, and the bot's casts played on the bot's wielder
+(`e2e/phase07-wielders.spec.ts`, locally and on CI). The release is the event: the gauntlet
+flashes on it as the effect and sound start (w10), and a throw's arm is out within 100 ms.
+
+**Not "a perfect hero still with rigid combat animation."** Breathing and hovering energy at
+rest; aim that follows the interpolated force point with the near hand; one-shot moves eased in
+at once and out over their last part; holds that snap in, moods that settle; hands on critically
+damped springs (a test fails any frame that moves a hand 8 cm); the coat's tails on an
+underdamped spring; a brace when the core bears down on its goal, a flinch at a hard hit near it,
+a celebration and a stagger at goals, dormancy while disconnected. The motion strips (w5, w10)
+show easing, not poses switching.
+
+**30+ fps on the mobile tier.** Not measured: there is no phone or GPU here. Measured instead: the
+wielders take four draw calls (two bodies; the arms, motes and flares; the hands) and 6.5 k
+triangles on low; the busiest gameplay moments are 97 draw calls on a low phone (budget 100), 155
+on a medium phone (170) and 155 on high (210); the wielders take 0.55–0.71 ms of the main thread a
+frame for both (CI's runner and this container, in the browser test), not a phone's. w10 adds no
+draw call and no program. Frame rate on a real phone is Phase 11's device check.
+
+**D10's animation tests.** Mirrored players from the same casts give the mirrored wielder to
+1e-9; both hands correct (the near hand acts and never crosses over while aiming); no
+hyperextension (the IK's least and most bend); lift then guard, a celebration over a move, a lost
+hand, a disconnect: all unit tests. Four poses a player and motion strips as frames; no video
+(only stills can be inspected here).
+
+**D10's readability items.** The loadout's motif: the motes in the two picks' spark shapes and
+tints, the flare in the cast's (w10). Colour and shape on the gauntlets and the cast silhouette:
+the glowing gauntlet lines, the flare, the arm. Privacy: nothing of the player is drawn on a
+wielder. On phones: the low tier's simpler lofts, no relief and no shadows; the same 24 bones.
+
+**Not built (recorded):**
+- The Camera Stand's optional debug silhouette in the HUD (Phase 05's tracking chip and practice
+  view show the camera's view of the hand instead).
+- An artist's glTF with painted maps and single finger bones; the bodies are procedural lofts.
+- A reaction to anything striking the plinths themselves: nothing physical reaches them.
+
+**Limits.** Software-rendered stills only: no GPU, no phone, no video. The figures are small on
+phones; frame rate on a phone is not measured.
+
+**Verdict: COMPLETE (local)** on the evidence above, with those limits. The open items move to 7E
+(the figures' scale on phones and the rim's stripes on the coat's skirt, judged on the golden
+screenshots) and to Phase 11's device checks (frame rate on phones).
 
 ## 7E — Golden screenshots and art critique (D11) — NOT STARTED
 
 ## Next instruction
 
-**7D — Wielder characters and IK** (prompts/deep-dives/D10-CHARACTERS-IK.md): the wielders are in
-the game, posed by IK from authoritative events and snapshot state, with spectral arms, motes,
-gauntlet flares and spectral hands that mirror the hand channel; rounds w0–w9 are critiqued in
-§7D, the phones in w7–w9. Next:
-- **The 7D gate review** against D10's gate ("two rendered characters clearly read as powerful
-  players capable of acting on the same world … don't disrupt 30+ fps on the mobile tier"), its
-  failure line (a perfect hero still with rigid combat animation) and the checklist above. Decide
-  first whether two unbuilt items belong in 7D: the loadout's motif on the wielders (the
-  loadout is known from the lobby, not the snapshot) and a reaction to a hit near one's own
-  goal. Then judge, with the phone figures' size (17–24 CSS pixels) recorded as a limit.
-- Then 7E (D11).
+**7E — Golden screenshots and art critique** (prompts/deep-dives/D11-VISUAL-REVIEW-LOOP.md;
+docs/BUILD_ORDER.md: six golden screenshots, measured critique, revisions). 7A–7D are complete
+(local); the 7D gate review is in §7D. Next:
+- A deterministic capture of D11's eight scenarios, each named with its seed, tick, camera,
+  viewport and tier: the hero arena idle; the core close up at high spin and charge; both
+  wielders casting opposing elements; water on fire with steam; the frozen ramp with a rebound
+  and a fracture; a gravity well bending debris; a goal with the core's collapse; a phone match
+  moment with the live HUD. The Physics Lab's fixtures, manual frames and capture specs already
+  cover most of them; a `/visual-lab` route or a scenario list in `capture-arena.mjs` should name
+  them.
+- D11's five viewports: 1920 × 1080 high, 1365 × 768 medium, 844 × 390 and 390 × 844 phones,
+  1024 × 768 tablet.
+- D11's rubric on every image (C, G, M, L, P, A, U, Q, weighted to 100; a pass needs at least 80
+  and no category under 3), scored honestly, with raw notes apart from measurements; the top three
+  weaknesses fixed, re-captured and re-scored, at least twice.
+- Outputs: docs/visual-evidence/README.md (scenes, viewports, render settings) and
+  docs/ART_AUDIT.md (the first and later reviews, scores, commits, residual issues).
+- Carried into 7E: the core's speckle at phone size (7C); the figures' small size on phones and
+  the rim's stripes on the coat's skirt (7D); the low tier's three spare draw calls at its busiest
+  moment.
 
-Open from 7C, moved on: the core's speckle at phone size (7E); GPU cost and Safari on a device
-(Phase 11's device checks); rune circles where casts land (WP8's leftover, with 7D's casting).
+Open, moved on: GPU cost, phone frame rate and Safari on a device (Phase 11's device checks); rune
+circles where casts land (WP8's leftover).
 
 Capture with `node scripts/capture-arena.mjs <url> <dir> <round>`: `ONLY=elements` with
 `ELEMENT_TICKS` (`R5:11+1` an event moment, `~14` a spin, `*400` a play-on, `R3/control:71` a
-control variant), `ELEMENT_STEP_MS` (render time after the event), `ELEMENT_QUALITY`,
+control variant, `^0=1_0_0.5` a held hand, `!40_0_0` a harder shot), `ELEMENT_STRIP_MS` (a
+motion strip), `ELEMENT_STEP_MS` (render time after the event), `ELEMENT_QUALITY`,
 `ELEMENT_CAM` (`close` or `broadcast`), `ELEMENT_VIEW` (a camera placed by hand) and
 `ELEMENT_DEVICE` (`landscape` or `portrait`, a phone); `ONLY=core,phones` for the core. Counts:
 `node scripts/probe-draws.mjs <url> <seconds> <device>` (draw calls through live play) and

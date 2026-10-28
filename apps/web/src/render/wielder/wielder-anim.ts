@@ -182,6 +182,17 @@ export function moveFor(ability: AbilityId): WielderMove | null {
 
 const CELEBRATE_SECONDS = 1.8;
 const STAGGER_SECONDS = 0.9;
+/**
+ * A hard hit near a wielder's own goal makes it flinch (D10: "reaction to physics hit"): an
+ * impact of at least this impulse (the one that shakes the camera) within this many metres of
+ * its goal line — its third of the field, its guard's usual place — for this long. Bot matches
+ * land such a hit about twice a minute (the hardest near a goal were 260–285), so the flinch is
+ * rare and can be plain: 0.7 of the full reaction at the threshold, all of it at FLINCH_FULL.
+ */
+const FLINCH_IMPULSE = 260;
+const FLINCH_FULL = 350;
+const FLINCH_REACH = 14;
+const FLINCH_SECONDS = 0.45;
 /** Time constants (s) of the layers' weights: holds snap in, moods settle. */
 const HOLD_TAU = 0.08;
 const MOOD_TAU = 0.25;
@@ -227,11 +238,23 @@ export class WielderAnimator {
   readonly pose = newPose();
 
   /** How many times each move and outcome has started (a test can match them to the events). */
-  readonly played: Partial<Record<WielderMove | 'celebrate' | 'stagger', number>> = {};
+  readonly played: Partial<Record<WielderMove | 'celebrate' | 'stagger' | 'flinch', number>> = {};
 
   /** The hand acting now (+1 the left, −1 the right): a move's, else the one that aims. */
   get activeHand(): 1 | -1 {
     return this.move?.hand ?? this.aimHand;
+  }
+  /** The move being played now, if any (its gauntlet flare takes the move's motif). */
+  get currentMove(): WielderMove | null {
+    return this.move?.kind ?? null;
+  }
+  /**
+   * A flash at the acting gauntlet as a move is cast (0..1): whole at the event — the release,
+   * when its effect and sound start — and gone by mid-move, so the flare marks the caster at once
+   * whatever the move's own wind-up (a freeze presses out only 0.2–0.4 s after its event).
+   */
+  get castFlash(): number {
+    return this.flash;
   }
   /** How much the wielder is reaching for the field now (0..1): aiming, gripping or casting. */
   get reaching(): number {
@@ -249,6 +272,10 @@ export class WielderAnimator {
   /** The hand that aims at the manipulator; it changes sides only once the target is across. */
   private aimHand: 1 | -1;
   private outcome: { kind: 'celebrate' | 'stagger'; start: number } | null = null;
+  private flinch: { start: number; strength: number } | null = null;
+  private flash = 0;
+  /** World x of its goal line, as the last state gave it (NaN before the first). */
+  private goalX = Number.NaN;
   private mood: Mood = 'ready';
   private wAim = 0;
   private wLift = 0;
@@ -306,6 +333,14 @@ export class WielderAnimator {
         this.mood = e.scorer === this.slot ? 'ready' : 'dejected';
         this.move = null;
         return;
+      case 'impact': {
+        // A hard hit near its own goal: it flinches (not before it knows where its goal is).
+        if (e.impulse < FLINCH_IMPULSE || !(Math.abs(e.p[0] - this.goalX) <= FLINCH_REACH)) return;
+        const over = (e.impulse - FLINCH_IMPULSE) / (FLINCH_FULL - FLINCH_IMPULSE);
+        this.flinch = { start: t, strength: Math.min(1, 0.7 + 0.3 * over) };
+        this.count('flinch');
+        return;
+      }
       case 'kickoff':
         this.mood = 'ready';
         return;
@@ -329,6 +364,7 @@ export class WielderAnimator {
 
     const playing = state.phase === 'playing';
     const live = state.connected;
+    this.goalX = state.ownGoalX;
     this.wAim = toward(this.wAim, playing && live ? 1 : 0, MOOD_TAU);
     this.wLift = toward(this.wLift, live && state.hold === 'lift' ? 1 : 0, HOLD_TAU);
     this.wDraw = toward(this.wDraw, live && state.hold === 'draw' ? 1 : 0, HOLD_TAU);
@@ -476,10 +512,12 @@ export class WielderAnimator {
 
     // The one-shot move from the last cast.
     const mv = this.move;
+    this.flash = 0;
     if (mv) {
       const u = (t - mv.start) / MOVE_SECONDS[mv.kind];
       if (u >= 1 || u < 0) this.move = null;
       else {
+        this.flash = 1 - smooth(0.3, 0.65, u);
         copyPose(lp, tp);
         this.playMove(lp, mv.kind, u, mv.target, mv.hot, mv.hand, t);
         // In at once (the event is the release), out over the last part.
@@ -500,6 +538,19 @@ export class WielderAnimator {
         if (oc.kind === 'celebrate') celebrate(lp, u, t, (i) => this.role(i));
         else stagger(lp, u);
         blendPose(tp, lp, smooth(0, 0.08, u) * (1 - smooth(0.75, 1, u)));
+      }
+    }
+
+    // A hard hit near its goal: a flinch over whatever it is doing, but not over a goal's own
+    // reaction.
+    const fl = this.flinch;
+    if (fl) {
+      const u = (t - fl.start) / FLINCH_SECONDS;
+      if (u >= 1 || this.outcome) this.flinch = null;
+      else if (u >= 0) {
+        copyPose(lp, tp);
+        flinch(lp, u, fl.strength);
+        blendPose(tp, lp, smooth(0, 0.05, u) * (1 - smooth(0.45, 1, u)));
       }
     }
 
@@ -567,7 +618,7 @@ export class WielderAnimator {
     return out;
   }
 
-  private count(k: WielderMove | 'celebrate' | 'stagger'): void {
+  private count(k: WielderMove | 'celebrate' | 'stagger' | 'flinch'): void {
     this.played[k] = (this.played[k] ?? 0) + 1;
   }
 
@@ -801,6 +852,20 @@ function celebrate(p: WielderPose, u: number, t: number, role: (i: number) => nu
   p.pitch = -0.1 * up;
   p.look.set(0, 3.2, 4);
   p.crouch = 0;
+}
+
+/** A hard hit near its goal: the torso snaps back and the hands come up before the chest. */
+function flinch(p: WielderPose, u: number, strength: number): void {
+  const hit = smooth(0, 0.12, u) * (1 - smooth(0.35, 1, u)) * strength;
+  for (let i = 0; i < 2; i++) {
+    const side = i === 0 ? 1 : -1;
+    p.hand[i]!.lerp(tmp.set(side * 0.16, 1.5, 0.3), hit);
+    p.palm[i]!.lerp(tmp.set(0, 0.2, 1).normalize(), hit).normalize();
+    p.fist[i] = p.fist[i]! + (0.5 - p.fist[i]!) * hit;
+  }
+  p.pitch -= 0.14 * hit;
+  p.hips.z -= 0.05 * hit;
+  p.crouch += 0.08 * hit;
 }
 
 /** Knocked back, arms thrown out: a goal conceded. */

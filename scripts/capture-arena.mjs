@@ -264,6 +264,8 @@ if (want('phones')) {
 // ELEMENT_VIEW="px,py,pz,tx,ty,tz" places the close camera by hand (a guard, a goal mouth), and
 // ELEMENT_DEVICE=landscape or portrait shoots on a phone (iPhone 13 at 2x) instead of 1920 x 1080.
 // "R9:20~12" sets the core spinning at 12 rad/s at that tick first (Physics Lab debug setter);
+// "R3/control:69+2!40_0_0" pushes the core with an impulse of (40, 0, 0) N·s at that tick (a harder
+// shot; the physics decides what it hits: R3's guard hit at 274 N·s, a wielder's flinch);
 // "R4:12+20^0=1_0_0.5" has seat 0 describe a hand (grip 1, push 0, twist 0.5) from that tick on,
 // as a camera would (the spectral hands: a fist on the core, a push, a pull, a twist);
 // "R1:150*700" plays on for 700 ms before the shot (the trail, a goal's collapse); "R3/control:71"
@@ -278,7 +280,8 @@ if (want('elements')) {
       const [fx, variant = 'reaction'] = fxSpec.split('/');
       const [handed, playMs] = rest.split('*');
       const [timed, handSpec] = handed.split('^');
-      const [tick, spin] = timed.split('~');
+      const [spun, pushSpec] = timed.split('!');
+      const [tick, spin] = spun.split('~');
       const [t, steps] = tick.split('+');
       let hand = null;
       if (handSpec !== undefined) {
@@ -294,6 +297,7 @@ if (want('elements')) {
         spin === undefined ? null : Number(spin),
         playMs === undefined ? 0 : Number(playMs),
         hand,
+        pushSpec === undefined ? null : pushSpec.split('_').map(Number),
       ];
     });
   const quality = process.env.ELEMENT_QUALITY ?? 'high';
@@ -308,7 +312,7 @@ if (want('elements')) {
   if (!device) throw new Error(`ELEMENT_DEVICE: no device ${deviceName}`);
   const TICK_MS = 1000 / 30;
   const FRAME_MS = 1000 / 60;
-  for (const [fx, variant, t, steps, spin, playMs, hand] of elementTicks) {
+  for (const [fx, variant, t, steps, spin, playMs, hand, push] of elementTicks) {
     const ctx = await browser.newContext(device);
     const page = await ctx.newPage();
     watch(page);
@@ -355,6 +359,11 @@ if (want('elements')) {
       await page.evaluate((v) => window.__ffLab.spin(v), spin);
       await frame(FRAME_MS);
     }
+    // "!40_0_0": an impulse on the core at that tick (a debug-only setter, as a harder shot).
+    if (push) {
+      await page.evaluate((v) => window.__ffLab.push(v[0], v[1], v[2]), push);
+      await frame(FRAME_MS);
+    }
     // "^0=1_0_0.5": seat 0's hand from here on (it reaches the snapshot on the next step).
     if (hand) {
       await page.evaluate((h) => window.__ffLab.hand(h.slot, h.grip, h.push, h.twist), hand);
@@ -365,7 +374,7 @@ if (want('elements')) {
       await step();
       if (i < steps - 1) await frame(TICK_MS);
     }
-    const name = `element-${fx}${variant === 'reaction' ? '' : `-${variant}`}-t${t}${steps ? `+${steps}` : ''}${spin === null ? '' : `-spin${spin}`}${hand ? `-hand${hand.slot}g${hand.grip}p${hand.push}t${hand.twist}` : ''}${playMs ? `-play${playMs}` : ''}${quality === 'high' ? '' : `-${quality}`}${cam === 'close' ? '' : `-${cam}`}${view ? '-view' : ''}${deviceName === 'desktop' ? '' : `-${deviceName}`}`;
+    const name = `element-${fx}${variant === 'reaction' ? '' : `-${variant}`}-t${t}${steps ? `+${steps}` : ''}${spin === null ? '' : `-spin${spin}`}${push ? `-push${push.join('_')}` : ''}${hand ? `-hand${hand.slot}g${hand.grip}p${hand.push}t${hand.twist}` : ''}${playMs ? `-play${playMs}` : ''}${quality === 'high' ? '' : `-${quality}`}${cam === 'close' ? '' : `-${cam}`}${view ? '-view' : ''}${deviceName === 'desktop' ? '' : `-${deviceName}`}`;
     if (strip && steps > 0) {
       // A motion strip: the same moment at each render time after its event.
       let elapsed = 0;

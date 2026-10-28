@@ -16,7 +16,7 @@ import { MagnetFields } from './vfx/magnet';
 import { GravityWells } from './vfx/gravity';
 import { ChargeArcs } from './vfx/electric';
 import { HeatHaze } from './vfx/HeatHaze';
-import { Wielders } from './wielder/Wielders';
+import { Wielders, type SeatPicks } from './wielder/Wielders';
 import { Fire } from './vfx/fire';
 import { Plumes } from './vfx/plumes';
 import { WaterAndIce } from './vfx/water-ice';
@@ -72,6 +72,8 @@ export interface SceneProps {
    * a software renderer draws.
    */
   readonly frameloop?: 'always' | 'never';
+  /** Each seat's advanced picks, where known: the wielders show them (7D's loadout motif). */
+  readonly loadouts?: SeatPicks;
   readonly children?: ReactNode;
 }
 
@@ -96,6 +98,7 @@ export function GameScene({
   onAdapt,
   cinematic = false,
   frameloop = 'always',
+  loadouts,
   children,
 }: SceneProps) {
   const tier = QUALITY[quality];
@@ -144,7 +147,9 @@ export function GameScene({
       {tier.dust > 0 && renders('dust') && <DustMotes count={tier.dust} />}
       {renders('contact') && <ContactShadows strength={tier.shadows ? 0.38 : 0.62} />}
       {renders('entities') && <Entities tier={tier.name} />}
-      {renders('wielders') && <Wielders tier={tier.name} shadows={tier.shadows} />}
+      {renders('wielders') && (
+        <Wielders tier={tier.name} shadows={tier.shadows} {...(loadouts ? { loadouts } : {})} />
+      )}
       <Manipulators />
       {renders('vfx') && (
         <>

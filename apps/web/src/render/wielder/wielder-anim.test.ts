@@ -298,6 +298,58 @@ describe('wielder animation (7D, D10): poses from authoritative events and state
     );
   });
 
+  it('flashes at the cast itself, however long the move winds up, and not after it', () => {
+    const a = new WielderAnimator(1, P1);
+    run(a, state({ m: [4, 2] }), 0, 1);
+    expect(a.castFlash).toBe(0);
+    a.onEvent(cast(1, 'freeze', [6, 0, 0]), 1);
+    const raised = run(a, state({ m: [4, 2] }), 1 + 1 / 60, 1 + 4 / 60);
+    // The freeze is still raising its palms (its gauntlets dim) but the flash is whole.
+    expect(Math.max(raised.glow[0], raised.glow[1])).toBeLessThan(0.5);
+    expect(a.castFlash).toBe(1);
+    run(a, state({ m: [4, 2] }), 1 + 5 / 60, 1.7);
+    expect(a.castFlash).toBeLessThan(0.05);
+    run(a, state({ m: [4, 2] }), 1.7 + 1 / 60, 2);
+    expect(a.castFlash).toBe(0);
+  });
+
+  it('flinches at a hard hit near its own goal; not at a soft or a far one, nor over a goal', () => {
+    const impact = (x: number, impulse: number) =>
+      ({ type: 'impact', tick: 0, a: 1, b: 2, p: [x, 1, 0], impulse }) as unknown as GameEvent;
+    const calm = run(new WielderAnimator(0, P0), state(), 0, 1.2);
+    // Seat 0 defends x = −21.8: a hard hit at x = −17 (as hard as a play's hardest near a goal),
+    // one ~150 ms on.
+    const a = new WielderAnimator(0, P0);
+    run(a, state(), 0, 1);
+    a.onEvent(impact(-17, 274), 1);
+    const hit = run(a, state(), 1 + 1 / 60, 1.15);
+    expect(a.played.flinch).toBe(1);
+    expect(hit.pitch).toBeLessThan(calm.pitch - 0.05); // the torso snaps back
+    for (const i of [0, 1]) expect(hit.hand[i]!.y).toBeGreaterThan(calm.hand[i]!.y); // hands up
+    // It passes: a second on, it stands as a wielder that was never hit.
+    const after = run(a, state(), 1.15 + 1 / 60, 2.2);
+    const never = run(new WielderAnimator(0, P0), state(), 0, 2.2);
+    expect(Math.abs(after.pitch - never.pitch)).toBeLessThan(1e-6);
+    for (const i of [0, 1]) expect(after.hand[i]!.distanceTo(never.hand[i]!)).toBeLessThan(0.01);
+    // A soft hit, or a hard one at the far end, or one before it knows its goal: no flinch.
+    const b = new WielderAnimator(0, P0);
+    b.onEvent(impact(-17, 600), 0); // no state yet
+    run(b, state(), 0, 1);
+    b.onEvent(impact(-17, 120), 1);
+    b.onEvent(impact(17, 900), 1);
+    expect(b.played.flinch).toBeUndefined();
+    // A goal conceded staggers; the hit that scored it does not add a flinch over the stagger.
+    const c = new WielderAnimator(0, P0);
+    run(c, state(), 0, 1);
+    c.onEvent({ type: 'goal', tick: 0, scorer: 1 } as unknown as GameEvent, 1);
+    c.onEvent(impact(-21, 700), 1);
+    const staggered = run(c, state(), 1 + 1 / 60, 1.2);
+    const d = new WielderAnimator(0, P0);
+    run(d, state(), 0, 1);
+    d.onEvent({ type: 'goal', tick: 0, scorer: 1 } as unknown as GameEvent, 1);
+    expect(staggered.pitch).toBeCloseTo(run(d, state(), 1 + 1 / 60, 1.2).pitch, 9);
+  });
+
   it('stays finite on garbage input', () => {
     const a = new WielderAnimator(0, P0);
     const bad = state({ m: [NaN, Infinity], core: [NaN, NaN, NaN], coreV: [NaN, 0, NaN] });

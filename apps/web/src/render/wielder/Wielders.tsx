@@ -7,7 +7,7 @@
 import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
-import { MERIDIAN_ARENA } from '@ff/game-data';
+import { DEFAULT_LOADOUT, MERIDIAN_ARENA, type AdvancedAbilityId } from '@ff/game-data';
 import type { HandState, PlayerSlot } from '@ff/protocol';
 import { useGameClient, useRenderFrame } from '../frame-context';
 import { TEAM_COLORS } from '../art-tokens';
@@ -31,6 +31,7 @@ import { RIG } from './wielder-rig';
 import { layTether, TETHER_MIN_PX, TETHER_SEGMENTS } from './wielder-tether';
 import { layFlare, layMotes, moteCorner, MOTES } from './wielder-motes';
 import { buildSpectralHand, placeSpectralHand } from './spectral-hand';
+import { moteMotif, moveMotif, SHAPE, type Motif } from './wielder-motif';
 import { wielderMaterial } from './wielder-material';
 
 /** How much larger than life the wielders stand (they are read from across the arena). */
@@ -54,12 +55,16 @@ const energyVertex = /* glsl */ `
   attribute float aKind;
   attribute float aGlow;
   attribute float aPx;
+  attribute float aShape;
+  attribute vec3 aTint;
   varying float vAlong;
   varying float vSide;
   varying float vWho;
   varying float vKind;
   varying float vGlow;
   varying float vPx;
+  varying float vShape;
+  varying vec3 vTint;
   void main() {
     vAlong = aAlong;
     vSide = aSide;
@@ -67,6 +72,8 @@ const energyVertex = /* glsl */ `
     vKind = aKind;
     vGlow = aGlow;
     vPx = aPx;
+    vShape = aShape;
+    vTint = aTint;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
@@ -81,14 +88,42 @@ const energyFragment = /* glsl */ `
   varying float vKind;
   varying float vGlow;
   varying float vPx;
+  varying float vShape;
+  varying vec3 vTint;
+  // The loadout's spark shapes (wielder-motif.ts): 0 round, 1 snowflake, 2 spark, 3 bars, 4 ring,
+  // 5 diamond, in the quad's coordinates (-1..1), fading out by its edge.
+  float sparkShape(vec2 q, float r, float shape) {
+    float fade = 1.0 - smoothstep(0.55, 1.0, r);
+    if (shape < 0.5) {
+      float a = 1.0 - smoothstep(0.0, 1.0, r);
+      return a * a;
+    }
+    if (shape < 2.5) {
+      // A star: a bright heart and arms, six for the snowflake, four (a cross) for the spark.
+      float n = shape < 1.5 ? 6.0 : 4.0;
+      float seg = 6.2831853 / n;
+      float th = atan(q.y, q.x) + (shape < 1.5 ? 0.0 : 0.7853982);
+      float phi = mod(th + seg * 0.5, seg) - seg * 0.5;
+      float arm = 1.0 - smoothstep(0.06, 0.16, r * abs(sin(phi)));
+      return max(arm * fade, 1.0 - smoothstep(0.0, 0.3, r));
+    }
+    if (shape < 3.5) {
+      // Two short bars side by side, like filings.
+      return (1.0 - smoothstep(0.08, 0.18, abs(abs(q.x) - 0.32)))
+        * (1.0 - smoothstep(0.5, 0.7, abs(q.y)));
+    }
+    if (shape < 4.5) return 1.0 - smoothstep(0.08, 0.2, abs(r - 0.6)) + 0.3 * (1.0 - smoothstep(0.0, 0.2, r));
+    return 1.0 - smoothstep(0.45, 0.8, abs(q.x) + abs(q.y));
+  }
   void main() {
     vec3 col = vWho < 0.5 ? uColor0 : uColor1;
     if (vKind > 0.5) {
-      // A mote: a soft spark, white-hot at its heart.
-      float r = length(vec2(vAlong, vSide));
-      float a = 1.0 - smoothstep(0.0, 1.0, r);
-      a *= a * vGlow;
-      gl_FragColor = vec4(col * a * 2.0 + vec3(a * a * 0.6), a);
+      // A mote or a flare: a spark in the shape and tint of a move (round, the seat's colour, by
+      // default), white-hot at its heart.
+      vec2 q = vec2(vAlong, vSide);
+      float a = sparkShape(q, length(q), vShape) * vGlow;
+      vec3 c = mix(col, vTint, 0.55);
+      gl_FragColor = vec4(c * a * 2.0 + vec3(a * a * 0.6), a);
       return;
     }
     float s = vWho < 0.5 ? uStrength.x : uStrength.y;
@@ -117,13 +152,15 @@ const FLARE_BASE = MOTE_BASE + MOTE_VERTS * 2;
 /**
  * Both wielders' spectral arms, energy motes and gauntlet flares in one mesh: one draw call. The
  * arms are ribbons (`aKind` 0); the motes and flares camera-facing quads (`aKind` 1) whose
- * brightness is per vertex.
+ * brightness, spark shape and tint are per vertex (the loadout's motif).
  */
 function makeEnergy(): {
   mesh: THREE.Mesh;
   pos: Float32Array;
   glow: Float32Array;
   px: Float32Array;
+  shape: Float32Array;
+  tint: Float32Array;
   strength: THREE.Vector2;
   time: { value: number };
   dispose: () => void;
@@ -138,6 +175,10 @@ function makeEnergy(): {
   const glow = new Float32Array(count);
   // Each arm vertex's true width on screen (render pixels); wide until the first frame lays it.
   const px = new Float32Array(count).fill(64);
+  // Each spark's shape and tint: round in its seat's colour until a loadout or a cast says more.
+  const shape = new Float32Array(count);
+  const tint = new Float32Array(count * 3);
+  const team = TEAM_COLORS.map((c) => new THREE.Color(c));
   const index: number[] = [];
   for (let w = 0; w < 2; w++) {
     for (let i = 0; i <= TETHER_SEGMENTS; i++) {
@@ -159,6 +200,7 @@ function makeEnergy(): {
         [along[a + c], side[a + c]] = moteCorner(c);
         who[a + c] = w;
         kind[a + c] = 1;
+        team[w]!.toArray(tint, (a + c) * 3);
       }
       index.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
     }
@@ -176,6 +218,14 @@ function makeEnergy(): {
     new THREE.BufferAttribute(glow, 1).setUsage(THREE.DynamicDrawUsage),
   );
   geometry.setAttribute('aPx', new THREE.BufferAttribute(px, 1).setUsage(THREE.DynamicDrawUsage));
+  geometry.setAttribute(
+    'aShape',
+    new THREE.BufferAttribute(shape, 1).setUsage(THREE.DynamicDrawUsage),
+  );
+  geometry.setAttribute(
+    'aTint',
+    new THREE.BufferAttribute(tint, 3).setUsage(THREE.DynamicDrawUsage),
+  );
   geometry.setIndex(index);
   const strength = new THREE.Vector2();
   const time = { value: 0 };
@@ -202,6 +252,8 @@ function makeEnergy(): {
     pos,
     glow,
     px,
+    shape,
+    tint,
     strength,
     time,
     dispose: () => {
@@ -425,6 +477,12 @@ const PULL_LIFT = 0.4;
 const PULL_CURL = 0.45;
 const TWIST_TURN = 0.7;
 const NO_HAND: HandState = { grip: 0, push: 0, twist: 0 };
+const flareTint = new THREE.Color();
+
+/** Each seat's two advanced picks, where this device knows them (the HUD's seats). */
+export type SeatPicks = Partial<
+  Record<PlayerSlot, readonly [AdvancedAbilityId, AdvancedAbilityId]>
+>;
 const handCentre = new THREE.Vector3();
 const buffer = new THREE.Vector2();
 
@@ -532,13 +590,45 @@ function applyPose(rig: Rig, pose: WielderPose): void {
 }
 
 /** The wielders: mount once in the scene (low: no shadows, fewer rings). */
-export function Wielders({ tier, shadows }: { tier: 'low' | 'medium' | 'high'; shadows: boolean }) {
+export function Wielders({
+  tier,
+  shadows,
+  loadouts,
+}: {
+  tier: 'low' | 'medium' | 'high';
+  shadows: boolean;
+  /** The loadouts' motif on the motes (a seat this device does not know shows the default). */
+  loadouts?: SeatPicks;
+}) {
   const client = useGameClient();
   const frame = useRenderFrame();
   const get = useThree((s) => s.get);
   const camera = useThree((s) => s.camera);
   const energy = useMemo(() => makeEnergy(), []);
   useEffect(() => () => energy.dispose(), [energy]);
+  // The loadouts' motif: half of each wielder's motes in each of its picks' shape and tint.
+  const picks0 = loadouts?.[0] ?? DEFAULT_LOADOUT;
+  const picks1 = loadouts?.[1] ?? DEFAULT_LOADOUT;
+  useEffect(() => {
+    const c = new THREE.Color();
+    for (const [w, picks] of [picks0, picks1].entries()) {
+      for (let m = 0; m < MOTES; m++) {
+        const motif = moteMotif(picks, m, MOTES);
+        c.set(motif.tint);
+        for (let k = 0; k < 4; k++) {
+          const v = MOTE_BASE + w * MOTE_VERTS + m * 4 + k;
+          energy.shape[v] = motif.shape;
+          c.toArray(energy.tint, v * 3);
+        }
+      }
+    }
+    const attrs = energy.mesh.geometry.attributes;
+    attrs.aShape!.needsUpdate = true;
+    attrs.aTint!.needsUpdate = true;
+  }, [energy, picks0[0], picks0[1], picks1[0], picks1[1]]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Each flare's motif as last written (undefined: not yet): its shape and tint are uploaded only
+  // when a cast changes them.
+  const flareMotif = useMemo<(Motif | null | undefined)[]>(() => [undefined, undefined], []);
   const hands = useMemo(() => makeHands(tier === 'low' ? 6 : 8), [tier]);
   useEffect(() => () => hands.dispose(), [hands]);
   // Each hand's smoothed place, curl and strength (render state only).
@@ -612,6 +702,7 @@ export function Wielders({ tier, shadows }: { tier: 'low' | 'medium' | 'high'; s
     gl.getDrawingBufferSize(buffer);
     const pixel = 2 / (Math.max(1e-6, camera.projectionMatrix.elements[5]) * Math.max(1, buffer.y));
     let motesLit = false;
+    let motifChanged = false;
     for (const r of rigs) {
       const p = snap.players.find((pl) => pl.slot === r.slot);
       const lifted =
@@ -638,7 +729,12 @@ export function Wielders({ tier, shadows }: { tier: 'low' | 'medium' | 'high'; s
       const h = r.animator.activeHand;
       const acting = modelP.get(r.bone[h === 1 ? 'fingers.L' : 'fingers.R'])!;
       tetherStart.copy(acting).applyMatrix4(r.group.matrixWorld);
-      const flare = THREE.MathUtils.clamp((pose.glow[h === 1 ? 0 : 1] - 0.5) * 2, 0, 1);
+      // The cast: the gauntlet's own glow, and a flash from the event on (a move's wind-up never
+      // delays the mark of who cast it).
+      const flare = Math.max(
+        THREE.MathUtils.clamp((pose.glow[h === 1 ? 0 : 1] - 0.5) * 2, 0, 1),
+        r.animator.castFlash,
+      );
       const reaching = r.animator.reaching;
       // The spectral hand (WP9): over the force point, reaching down onto the field from the
       // wielder's side, the acting hand's own side (a left hand mirrored); closed round the body
@@ -715,6 +811,18 @@ export function Wielders({ tier, shadows }: { tier: 'low' | 'medium' | 'high'; s
         energy.glow,
         FLARE_BASE + r.slot * 4,
       );
+      // The flare takes the motif of the move being cast (an advanced move's shape and tint).
+      const motif = moveMotif(r.animator.currentMove);
+      if (motif !== flareMotif[r.slot]) {
+        flareMotif[r.slot] = motif;
+        flareTint.set(motif ? motif.tint : TEAM_COLORS[r.slot]);
+        for (let k = 0; k < 4; k++) {
+          const v = FLARE_BASE + r.slot * 4 + k;
+          energy.shape[v] = motif ? motif.shape : SHAPE.round;
+          flareTint.toArray(energy.tint, v * 3);
+        }
+        motifChanged = true;
+      }
       // The motes: between the hands at rest, gathering at the acting hand as it reaches, spread
       // wider by a cast; dim with the wielder's aura.
       moteCentre
@@ -743,6 +851,10 @@ export function Wielders({ tier, shadows }: { tier: 'low' | 'medium' | 'high'; s
     attrs.position!.needsUpdate = true;
     attrs.aGlow!.needsUpdate = true;
     attrs.aPx!.needsUpdate = true;
+    if (motifChanged) {
+      attrs.aShape!.needsUpdate = true;
+      attrs.aTint!.needsUpdate = true;
+    }
     energy.time.value = clock.elapsedTime;
     energy.mesh.visible = motesLit || energy.strength.x + energy.strength.y > 0.005;
     hands.curl.set(handState[0]!.curl, handState[1]!.curl);
