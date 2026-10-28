@@ -511,21 +511,106 @@ Honest limits (the core):
   a captured goal; the trail is built but not yet judged in a frame; they come with the
   ten-condition evidence.
 
+### The element systems (in progress)
+
+Each system is its own module under `apps/web/src/render/vfx/`. It reads only authoritative
+state (snapshot effects, entity element state, events) and decides nothing.
+
+- **Water and ice** (`water-ice.tsx`; `ice-state.ts`, pure, 7 tests; `water-ice.test.ts`, 3
+  tests): pools darker toward their depth, ripple rings and foam round the bodies standing in
+  them, a broken shore foam band, branching surface arcs while electrified. The ice plate is the
+  collider's own frustum cut into facets (corners move by at most 4 %, tested). It freezes in
+  from the rim over 0.35 s when the pool's ICE flag sets; the collider exists at once. It has a
+  spectral rim (iridescence) on medium and high, cracks radiating from strikes, frost toward its
+  base and a deeper blue toward its thick middle. A thaw takes it back into the pool over 0.5 s;
+  a break (`shatter`) throws crystal fragments from the strike and the water is back at once.
+- **Fire** (`fire.tsx`; `wind.ts`, 4 tests): flame tongues on camera-facing cards with noise
+  flowing up them. They lean with the crosswind the authority uses to carry the flame (`wind.ts`
+  mirrors its falloff and fades). Embers convect and drift downwind, and a glowing bed stands in
+  for a light (a light that came and went would recompile every lit shader). A flame that leaves
+  while still burning goes out over 0.45 s; online the snapshot drops it before the douse event
+  is due, so leaving is enough.
+- **Steam and smoke** (`plumes.tsx`): lit, depth-sorted puffs in one draw call. Steam regions rise
+  toward the height where their updraft ends, smoke rises above flames, and douse, quench and boil
+  throw steam. Fractures and crumbling guards throw dust that settles.
+- **Electric** (`electric.tsx`; `bolt-path.ts`, 5 tests): branching arcs along each CHARGE event's
+  conduction links, between the authority's own node positions. They are seeded from the event,
+  so both devices draw the same lightning, and restrike within 0.35 s; conductors flare and spark.
+  Reduced flashes halves the restrike flicker, and nothing lights the whole screen.
+- **Air** (`FieldEffects.tsx`, `ribbons.ts`): straight streamlines flowing downwind, brightest
+  where the authority's push is strongest, dashed wisps along the field's two edges and fine dust
+  carried along. Pale, with a hint of the caster's colour.
+- **Gravity** (`gravity.tsx`): a dark heart with a violet rim and a lensing-ring approximation (the
+  frame is not distorted and the camera never warps). Field arcs flow in, shards orbit faster
+  closer in and motes spiral down.
+- **Magnet** (`magnet.tsx`): flux ribbons to each lodestone in range, dashes flowing toward it,
+  brighter the closer it is; field loops turn round the force point.
+- **Earth and the guard** (`Entities.tsx`, `EventEffects.tsx`; `guard-columns.ts`, 4 tests): a
+  guard is basalt columns inside the collider's box (never past it). They rise from the middle out,
+  each within 0.2 s, with a team-coloured seam on each top; the cast throws a ripple and stone
+  chips, and a guard that runs out crumbles. Stones show glowing seams after a hard hit, as bright
+  as the impulse, and pulsing seams while thermally shocked; fractures throw lit, irregular chips,
+  a few sparks and settling dust.
+
+Capture → critique → revision (`ONLY=elements node scripts/capture-arena.mjs`; the Physics
+Lab's reaction fixtures with the close camera). A moment after an event is captured by seeking to
+its tick and stepping one tick, e.g. `ELEMENT_TICKS=R5:11+1`.
+
+1. **e1 (the baseline, on the core build).** R1 at tick 60 on high: the ice was a flat pale disc
+   and the guard a white box with a cyan edge.
+2. **e2 (the first build of the systems, low tier).** Fire read as flame tongues instead of round
+   blobs, steam as soft lit billows, water with depth and a foam edge, the ice as a faceted plate,
+   the guard as basalt columns. Critique: the ice was too white (sky wash, white fine cracks) and
+   had a dark dot at its centre, which was a hole (the ragged freeze front cut pixels even when
+   the plate was frozen); the fire bed read as spilled paint; the air read as a ring, not a
+   crosswind. The event moments came out empty: the stepped tick must be the event's own.
+3. **e3–e4 (the event moments).** The gravity well: a black heart with a bright lensing ring, arcs
+   spiralling in, orbiting shards. The charge chain: electrified pools full of surface arcs, the
+   guard breaking into chips. The fracture: the authority's shards, chips and dust. The quench:
+   steam over the soaked hot stone, with thermal-shock seams. The melt. Critique: the discharge
+   bolts were drawn (five arcs, read back through a temporary debug hook) but ran close to the
+   water and merged with its surface arcs; the chips looked like black confetti.
+4. **e5.** The ice is deeper and translucent (the floor shows through it on high) with no hole;
+   the fire bed is softer; the bolts bow up, wider and more violet; the air streamlines run
+   straight and parallel with edge wisps along the wind; the chips are lit and irregular.
+
+Frames (headless SwiftShader; inspected; not GPU or phone evidence) are in
+`docs/visual-evidence/phase-07/7c-el/`: ice e1 → e2 → e5 (low and high), air e2 against e5,
+the charge chain and the fracture e4 against e5, and fire and wind beside ice, steam, the gravity
+well, the quench and the melt.
+
+Open (element systems):
+- Heat refraction is not drawn, and the steam has no vision veil (optional in D09).
+- The flames lean with the crosswind in code, but the lean is not yet judged in a frame.
+- On high, only R1 is captured; the high-tier fire capture hit SwiftShader's screenshot error.
+- The ten-condition evidence is not yet assembled.
+- The new systems' draw calls and shader programs are not yet measured (one or two draws each,
+  but every program compiles when a match view mounts, which matters on slow devices).
+
 ### Commits (7C)
 
-- The Rift Core hero asset (this section through c9): the commit that adds
-  `apps/web/src/render/core/`.
+- The Rift Core hero asset (the section above through c9): "Phase 7C: the Rift Core, a crystal
+  shell over a plasma heart".
+- The element systems: "Phase 7C (in progress): element systems as modules on authoritative
+  state" and "Phase 7C (in progress): element revisions from capture rounds e2–e5".
 
 ## 7D — Wielder characters and IK (D10) — NOT STARTED
 ## 7E — Golden screenshots and art critique (D11) — NOT STARTED
 
 ## Next instruction
 
-**7C, second part** (prompts/deep-dives/D09-CORE-ELEMENTAL-VFX.md): the element systems (water,
-fire, air, earth, ice, electric, gravity, steam, magnet, guard), each a separate module rooted in
-authoritative state, then the ten-condition evidence (fast spin, stone impact, wet/freeze,
-steam burst, charge chain, air vortex, gravity curve, fire + wind, shield ricochet, scored goal),
-which also shows the core's collapse and trail. The plan (docs/3D_IMPLEMENTATION_PLAN.md, WP8)
-adds rune circles where casts land. Capture with
-`node scripts/capture-arena.mjs <url> <dir> <round>` (`ONLY=core,phones` for the core; element
-moments with `ELEMENT_TICKS`) and compare against the c9 and b6 frames.
+**7C, continued** (prompts/deep-dives/D09-CORE-ELEMENTAL-VFX.md): the element systems are built
+and revised through e5. Next:
+- the full browser suite on the element build, then push;
+- the high tier for the remaining fixtures;
+- the flame lean in a frame;
+- the draw-call and program counts of the new systems;
+- the ten-condition evidence: fast spin, stone impact (R8 `5+1`), wet/freeze (R1), steam burst
+  (R10 `28+1`), charge chain (R5 `11+1`), air vortex (R9), gravity curve (R7 at 18), fire + wind
+  (R6), shield ricochet (R2 `123+1` or R6 `142+1`) and the scored goal, which also shows the
+  core's collapse and trail.
+
+The plan (docs/3D_IMPLEMENTATION_PLAN.md, WP8) adds rune circles where casts land. Capture with
+`node scripts/capture-arena.mjs <url> <dir> <round>` (`ONLY=core,phones` for the core,
+`ONLY=elements` with `ELEMENT_TICKS`, `ELEMENT_QUALITY` and `ELEMENT_STEP_MS` for element
+moments) and compare against the e5, c9 and b6 frames.
