@@ -171,7 +171,7 @@ function Boulder({ id, radius = 0.75 }: { id: number; radius?: number }) {
   useEntityTransform(id, ref);
   // Authoritative element state: wet stone darkens and gleams, hot stone glows, shocked stone
   // shows pulsing cracks (it will break at under half its strength).
-  useFrame((_, dt) => {
+  useFrame(({ clock }, dt) => {
     const e = frame.current?.entities.get(id);
     if (!e) return;
     material.color.copy(STONE_DRY).lerp(STONE_WET, e.wet);
@@ -181,7 +181,7 @@ function Boulder({ id, radius = 0.75 }: { id: number; radius?: number }) {
     material.emissiveIntensity = heat * 1.4 + e.charge * 0.6;
     hit.current *= Math.exp(-Math.min(dt, 0.1) / 0.25);
     if (e.shocked) {
-      const pulse = 0.55 + 0.3 * Math.sin(performance.now() * 0.012);
+      const pulse = 0.55 + 0.3 * Math.sin(clock.elapsedTime * 12);
       cracks.value.copy(SHOCK_GLOW).multiplyScalar(Math.max(pulse, hit.current * 3));
     } else cracks.value.copy(CRACK_GLOW).multiplyScalar(hit.current * 3);
   });
@@ -211,10 +211,10 @@ function Lodestone({ id }: { id: number }) {
     emissiveIntensity: 0,
   });
   useEntityTransform(id, ref);
-  useFrame(() => {
+  useFrame(({ clock }) => {
     const e = frame.current?.entities.get(id);
     if (!e) return;
-    const t = performance.now() * 0.02;
+    const t = clock.elapsedTime * 20;
     band.emissiveIntensity = e.energized > 0 ? 2.4 + 0.9 * Math.sin(t) : e.charge > 0 ? 1.2 : 0;
   });
   return (
@@ -239,7 +239,7 @@ const RISE_DONE_S = Math.max(...GUARD_COLUMNS.map((c) => c.delay)) + COLUMN_RISE
 
 function Guard({ id, owner }: { id: number; owner: PlayerSlot | -1 }) {
   const ref = useRef<THREE.Group>(null);
-  const born = useRef(0);
+  const born = useRef(-1);
   const frame = useRenderFrame();
   const def = DEFAULT_ABILITIES.guard;
   const color = owner === -1 ? PALETTE.coldSilver : TEAM_COLORS[owner];
@@ -289,15 +289,15 @@ function Guard({ id, owner }: { id: number; owner: PlayerSlot | -1 }) {
     [],
   );
   useEntityTransform(id, ref);
-  useFrame(() => {
+  useFrame(({ clock }) => {
     const g = ref.current;
     const e = frame.current?.entities.get(id);
     if (!g || !e) return;
     // The collider exists from the accepted tick; the columns only show it going up, the middle
     // first, each within a fifth of a second (visual only).
-    const now = performance.now();
-    if (born.current === 0) born.current = now;
-    const age = (now - born.current) / 1000;
+    const now = clock.elapsedTime;
+    if (born.current < 0) born.current = now;
+    const age = now - born.current;
     const base = -def.halfHeight;
     // Up and still: after one last pass at the final pose, the columns' matrices need no more
     // uploads (the seams' glow still changes).
@@ -322,7 +322,7 @@ function Guard({ id, owner }: { id: number; owner: PlayerSlot | -1 }) {
     }
     const fade = e.ttl > 0 ? Math.min(1, e.ttl / 20) : 1;
     // A soaked or charged guard telegraphs that a discharge could overload it.
-    const crackle = e.charge > 0 ? 1.5 * Math.abs(Math.sin(now * 0.05)) : 0;
+    const crackle = e.charge > 0 ? 1.5 * Math.abs(Math.sin(now * 50)) : 0;
     seam.emissiveIntensity = 0.6 + 1.8 * fade + crackle;
     stone.color.copy(GUARD_DRY).lerp(GUARD_WET, e.wet);
   });

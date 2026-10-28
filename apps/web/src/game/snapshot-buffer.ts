@@ -78,6 +78,11 @@ export class SnapshotBuffer {
   /** Bodies snapped instead of interpolated (teleports such as kickoff resets). */
   teleports = 0;
   adaptive: AdaptiveDelay | null = null;
+  /**
+   * How far past the newest snapshot a frame may run ahead (ticks): about 100 ms by default, 0 for
+   * the Physics Lab, which shows each published tick exactly as simulated, however long it waits.
+   */
+  maxExtrapolationTicks = 3;
 
   constructor(
     private readonly tickMs: number,
@@ -149,7 +154,7 @@ export class SnapshotBuffer {
     this.sampledFrames++;
 
     if (target >= latest.tick) {
-      const ahead = Math.min(target - latest.tick, 3); // cap extrapolation to ~100 ms
+      const ahead = Math.min(target - latest.tick, this.maxExtrapolationTicks);
       f.extrapolating = ahead > 0;
       if (f.extrapolating) this.extrapolatedFrames++;
       this.write(latest, latest, 0, (ahead * this.tickMs) / 1000);

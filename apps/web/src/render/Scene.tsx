@@ -64,6 +64,12 @@ export interface SceneProps {
   readonly onAdapt?: (tier: TierName) => void;
   /** The menu's slow cinematic camera instead of the fitted gameplay framing. */
   readonly cinematic?: boolean;
+  /**
+   * 'never': nothing renders on its own; each R3F advance(t) draws one frame at render time t (s).
+   * Physics Lab evidence captures step effects frame by frame this way, independent of how slowly
+   * a software renderer draws.
+   */
+  readonly frameloop?: 'always' | 'never';
   readonly children?: ReactNode;
 }
 
@@ -87,6 +93,7 @@ export function GameScene({
   textureTier,
   onAdapt,
   cinematic = false,
+  frameloop = 'always',
   children,
 }: SceneProps) {
   const tier = QUALITY[quality];
@@ -94,6 +101,7 @@ export function GameScene({
   const variant: LightingVariant = LIGHT_VARIANTS[light];
   return (
     <Canvas
+      frameloop={frameloop}
       shadows={tier.shadows ? { type: THREE.PCFSoftShadowMap } : false}
       dpr={[1, tier.dpr]}
       gl={{

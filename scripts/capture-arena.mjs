@@ -22,10 +22,17 @@ const browser = await chromium.launch({
 });
 const errors = [];
 
+/** Each page's recent console lines, printed when its frame will not render. */
+const consoles = new WeakMap();
+
 function watch(page) {
+  const lines = [];
+  consoles.set(page, lines);
   page.on('pageerror', (e) => errors.push(e.message));
-  // A shader that fails to compile only logs: treat it as an error too.
   page.on('console', (m) => {
+    lines.push(`${m.type()}: ${m.text()}`);
+    if (lines.length > 20) lines.shift();
+    // A shader that fails to compile only logs: treat it as an error too.
     if (m.type() === 'error' && /shader|webgl|THREE/i.test(m.text())) errors.push(m.text());
   });
 }
@@ -55,9 +62,41 @@ async function startMatch(page, tap = false) {
 // generation cost on this machine's CPU: the load/perf report. SwiftShader frame times are not
 // recorded — they say nothing about a real GPU.
 const stats = {};
+// A frame of one flat colour (the canvas never drew) compresses to a few KB; a rendered arena is
+// hundreds.
+const BLANK_BYTES = 40_000;
+/** Resolves once the page has rendered one whole frame after the call. */
+const rendered = (page) =>
+  page.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+  );
 const shot = async (page, name) => {
   const path = `${outDir}/arena-${name}-${tag}.jpg`;
-  await page.screenshot({ path, type: 'jpeg', quality: 86 });
+  for (let attempt = 1; ; attempt++) {
+    // Software GL under load can hold a frame back past any fixed wait (a shader compile blocks
+    // the main thread), and the shot comes out blank: then let a whole frame render first.
+    if (attempt > 1) await rendered(page);
+    let image = null;
+    try {
+      image = await page.screenshot({ type: 'jpeg', quality: 86, timeout: 60_000 });
+    } catch (e) {
+      // The compositor can miss a capture under load: try again.
+      if (!/Unable to capture screenshot/.test(String(e))) throw e;
+    }
+    if (image && image.length > BLANK_BYTES) {
+      writeFileSync(path, image);
+      break;
+    }
+    if (attempt >= 3) {
+      if (image) writeFileSync(path, image);
+      errors.push(`${name}: ${image ? 'blank frame' : 'no screenshot'} after ${attempt} tries`);
+      console.error(
+        `${name}: no rendered frame; recent console:\n  ${consoles.get(page)?.join('\n  ')}`,
+      );
+      return;
+    }
+    await page.waitForTimeout(3000);
+  }
   const s = await page.evaluate(() => window.__ffDebug?.renderStats?.() ?? null);
   if (s) {
     stats[name] = {
@@ -205,21 +244,25 @@ if (want('phones')) {
 // distinguishable. Defaults: R6 heat beside ice, R1 the ice ramp, R3 steam, R5 charge on the wet
 // chain. Set ELEMENT_TICKS="R6:30,R1:120" to choose other moments.
 // D09 (7C): an event's effect lasts a fraction of a second and a seek is silent, so "R5:10+1"
-// seeks to tick 10, lets the page settle, then steps one tick (its events play) and shoots
-// ELEMENT_STEP_MS later (default 150). ELEMENT_QUALITY picks the tier (default high) and
-// ELEMENT_CAM the camera (close, the default, or broadcast: the whole field, e.g. for a goal).
+// seeks to tick 10, then steps one tick (its events play) and shoots ELEMENT_STEP_MS of render
+// time later (default 150; the page draws frame by frame, so this is exact). ELEMENT_QUALITY picks the tier (default high) and
+// ELEMENT_CAM the camera (close, the default, or broadcast: the whole field, e.g. for a goal);
+// ELEMENT_VIEW="px,py,pz,tx,ty,tz" places the close camera by hand (a guard, a goal mouth).
 // "R9:20~12" sets the core spinning at 12 rad/s at that tick first (Physics Lab debug setter);
-// "R1:150*700" plays on for 700 ms before the shot (the trail, a goal's collapse).
+// "R1:150*700" plays on for 700 ms before the shot (the trail, a goal's collapse); "R3/control:71"
+// replays the fixture's control variant (no reaction: e.g. the shot that hits the guard).
 if (want('elements')) {
   const elementTicks = (process.env.ELEMENT_TICKS ?? 'R6:30,R1:120,R3:90,R5:20')
     .split(',')
     .map((s) => {
-      const [fx, rest] = s.split(':');
+      const [fxSpec, rest] = s.split(':');
+      const [fx, variant = 'reaction'] = fxSpec.split('/');
       const [timed, playMs] = rest.split('*');
       const [tick, spin] = timed.split('~');
       const [t, steps] = tick.split('+');
       return [
         fx,
+        variant,
         t,
         Number(steps ?? 0),
         spin === undefined ? null : Number(spin),
@@ -229,30 +272,53 @@ if (want('elements')) {
   const quality = process.env.ELEMENT_QUALITY ?? 'high';
   const cam = process.env.ELEMENT_CAM ?? 'close';
   const stepMs = Number(process.env.ELEMENT_STEP_MS ?? 150);
-  for (const [fx, t, steps, spin, playMs] of elementTicks) {
+  const view = process.env.ELEMENT_VIEW ? `&view=${process.env.ELEMENT_VIEW}` : '';
+  const TICK_MS = 1000 / 30;
+  const FRAME_MS = 1000 / 60;
+  for (const [fx, variant, t, steps, spin, playMs] of elementTicks) {
     const ctx = await browser.newContext(desktop);
     const page = await ctx.newPage();
     watch(page);
     await page.goto(
-      `${base}/lab?fx=${fx}&t=${t}&cam=${cam}&vectors=0&regions=0&impacts=0&quality=${quality}&test=1`,
+      `${base}/lab?fx=${fx}&v=${variant}&t=${t}&cam=${cam}&vectors=0&regions=0&impacts=0&quality=${quality}&test=1&frames=manual${view}`,
     );
-    for (let i = 0; i < 240; i++) {
-      const at = await page.evaluate(() => window.__ffLab?.state().t ?? -1);
-      if (at === Number(t)) break;
-      await page.waitForTimeout(250);
+    // At the tick asked for, with the fixture loaded (t is 0 before it is, too).
+    let at = -1;
+    for (let i = 0; i < 240 && at !== Number(t); i++) {
+      at = await page.evaluate(() => {
+        const s = window.__ffLab?.state();
+        return s && !s.loading ? s.t : -1;
+      });
+      if (at !== Number(t)) await page.waitForTimeout(250);
     }
+    if (at !== Number(t)) console.error(`${fx} ${variant}: the lab is at tick ${at}, not ${t}`);
     await page.addStyleTag({ content: '.lab-panel,.lab-tick{display:none!important}' });
+    // The page draws only when asked (frames=manual), each frame at an exact render time: an
+    // effect is caught at the age asked for, however slowly software GL draws. The first frames
+    // compile the shaders and generate the surfaces.
+    const frame = (ms) => page.evaluate((v) => window.__ffLab.frame(v), ms);
+    const step = () => page.evaluate(() => window.__ffLab.step());
+    for (let i = 0; i < 6; i++) await frame(FRAME_MS);
     // "~12": the core spinning at 12 rad/s at that tick (a debug-only setter, as a twist would).
-    if (spin !== null) await page.evaluate((v) => window.__ffLab.spin(v), spin);
-    await page.waitForTimeout(2500);
-    for (let i = 0; i < steps; i++) await page.keyboard.press('ArrowRight');
-    if (steps > 0) await page.waitForTimeout(stepMs);
-    // "*700": play on for 700 ms first (motion: the trail, a goal's collapse).
-    if (playMs > 0) {
-      await page.keyboard.press('Space');
-      await page.waitForTimeout(playMs);
+    if (spin !== null) {
+      await page.evaluate((v) => window.__ffLab.spin(v), spin);
+      await frame(FRAME_MS);
     }
-    const name = `element-${fx}-t${t}${steps ? `+${steps}` : ''}${spin === null ? '' : `-spin${spin}`}${playMs ? `-play${playMs}` : ''}${quality === 'high' ? '' : `-${quality}`}${cam === 'close' ? '' : `-${cam}`}`;
+    // "+3": three ticks, each drawn as live play at 30 fps would draw it, and the shot
+    // ELEMENT_STEP_MS of render time after the last (its events play on that step).
+    for (let i = 0; i < steps; i++) {
+      await step();
+      if (i < steps - 1) await frame(TICK_MS);
+    }
+    for (let ms = 0; steps > 0 && ms < stepMs; ms += FRAME_MS) await frame(FRAME_MS);
+    // "*700": 700 ms of play first, a tick and a frame at a time (the trail, a goal's collapse).
+    for (let i = 0; i < Math.round(playMs / TICK_MS); i++) {
+      await step();
+      await frame(TICK_MS);
+    }
+    const shown = await page.evaluate(() => window.__ffLab.state().t);
+    console.log(`${fx} ${variant}: the frame shows tick ${shown}`);
+    const name = `element-${fx}${variant === 'reaction' ? '' : `-${variant}`}-t${t}${steps ? `+${steps}` : ''}${spin === null ? '' : `-spin${spin}`}${playMs ? `-play${playMs}` : ''}${quality === 'high' ? '' : `-${quality}`}${cam === 'close' ? '' : `-${cam}`}${view ? '-view' : ''}`;
     await shot(page, name);
     await ctx.close();
   }
