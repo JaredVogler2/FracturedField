@@ -16,6 +16,14 @@ import { cameraActive, drive, handFor, learnAim, type AimMap, type HandPose } fr
 import { debug, openRoom, projectAll, readyUp, snapshot, type Snap } from './helpers';
 
 const coreOf = (s: Snap) => s.entities.find((e) => e.kind === 'core')!;
+/** How closed a seat's spectral hand is drawn (7D): 0 open, 1 a fist round what it grips. */
+const spectralCurl = (page: Page, slot: 0 | 1) =>
+  page.evaluate(
+    (slot) =>
+      (window as unknown as { __ffWielders?: () => { curl: number }[] }).__ffWielders?.()[slot]
+        ?.curl ?? 0,
+    slot,
+  );
 
 test('camera, hands-on by default: grip the core, swing, let go — and score against the bot', async ({
   page,
@@ -76,6 +84,9 @@ test('camera, hands-on by default: grip the core, swing, let go — and score ag
       await hand(c.p[0], c.p[2], { shape: 'open' });
       continue;
     }
+    // The seat's spectral hand closes round the core with the grip (7D: drawn from the snapshot).
+    if (throws === 0)
+      await expect.poll(() => spectralCurl(page, 0), { timeout: 5_000 }).toBeGreaterThan(0.8);
     // Bring it to a good spot first, as a person would — back near our own goal, on the
     // middle line, out of the rival's reach — then swing down the middle toward the rival gate
     // in a few frames and let go mid-swing (timed by watching the core, as by eye).

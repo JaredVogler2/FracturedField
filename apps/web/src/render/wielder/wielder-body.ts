@@ -36,6 +36,8 @@ export const BONES = [
   'thigh.R',
   'shin.R',
   'foot.R',
+  'coat.L',
+  'coat.R',
 ] as const;
 export type BoneName = (typeof BONES)[number];
 const B = Object.fromEntries(BONES.map((n, i) => [n, i])) as Record<BoneName, number>;
@@ -63,6 +65,9 @@ const PARENT: Record<BoneName, BoneName | null> = {
   'thigh.R': 'hips',
   'shin.R': 'thigh.R',
   'foot.R': 'shin.R',
+  // The coat's tails hang from the hips at the small of the back (secondary motion).
+  'coat.L': 'hips',
+  'coat.R': 'hips',
 };
 
 /** The arms hang this far out from the body in the rest pose (radians). */
@@ -95,6 +100,7 @@ export function restJoints(): Record<BoneName, THREE.Vector3> {
     j[`thigh.${side}`] = hip;
     j[`shin.${side}`] = v(s * RIG.hipHalf, RIG.hipJointY - RIG.leg.upper, 0);
     j[`foot.${side}`] = v(s * RIG.hipHalf, RIG.ankleY, 0);
+    j[`coat.${side}`] = v(s * 0.07, 1.04, -0.1);
   }
   return j;
 }
@@ -140,6 +146,8 @@ export interface WielderLook {
 
 /** Glow channels: which uniform scales a vertex's glow. */
 export const GLOW = { body: 0, left: 1, right: 2, visor: 3 } as const;
+/** Surface relief the material draws (`aDetail`): quilted coat, grained leather, hammered metal. */
+export const DETAIL = { none: 0, quilted: 1, leather: 2, metal: 3 } as const;
 
 type Weights = readonly (readonly [number, number])[];
 
@@ -152,19 +160,21 @@ interface Section {
   rz: number;
 }
 
-/** Per-vertex surface: colour, roughness, metalness, glow strength and channel. */
+/** Per-vertex surface: colour, roughness, metalness, glow strength and channel, relief. */
 interface Surface {
   color: THREE.Color;
   rough: number;
   metal: number;
   glow: number;
   channel: number;
+  detail: number;
 }
 
 interface Builder {
   pos: number[];
   col: number[];
   mat: number[];
+  det: number[];
   si: number[];
   sw: number[];
   idx: number[];
@@ -188,7 +198,14 @@ function loft(
   const closed = !opts.arc;
   const cols = closed ? segs : segs + 1;
   const p = new THREE.Vector3();
-  const s: Surface = { color: new THREE.Color(), rough: 0.7, metal: 0, glow: 0, channel: 0 };
+  const s: Surface = {
+    color: new THREE.Color(),
+    rough: 0.7,
+    metal: 0,
+    glow: 0,
+    channel: 0,
+    detail: 0,
+  };
   sections.forEach((sec, i) => {
     for (let j = 0; j < cols; j++) {
       const a = a0 + ((a1 - a0) * j) / segs;
@@ -199,9 +216,11 @@ function loft(
       b.pos.push(p.x, p.y, p.z);
       s.glow = 0;
       s.channel = 0;
+      s.detail = DETAIL.none;
       surface(i, a, s);
       b.col.push(s.color.r, s.color.g, s.color.b);
       b.mat.push(s.rough, s.metal, s.glow, s.channel);
+      b.det.push(s.detail);
       const w = skin(i, a);
       let sum = 0;
       for (let k = 0; k < 4; k++) sum += w[k]?.[1] ?? 0;
@@ -211,14 +230,34 @@ function loft(
       }
     }
   });
+  // Wind every part's faces outward (away from its sections' centres), whichever way its
+  // sections run and however its section axes turn: decided on the widest section by a vote of
+  // its quads, so a flattened face or a tapering tip cannot tip it.
+  let widest = 0;
+  sections.forEach((sec, i) => {
+    if (i < sections.length - 1 && sec.rx * sec.rz > sections[widest]!.rx * sections[widest]!.rz)
+      widest = i;
+  });
+  const at = (v: number) => new THREE.Vector3(b.pos[v * 3], b.pos[v * 3 + 1], b.pos[v * 3 + 2]);
+  let vote = 0;
+  for (let j = 0; j < segs; j++) {
+    const j1 = closed ? (j + 1) % segs : j + 1;
+    const r0 = base + widest * cols;
+    const r1 = base + (widest + 1) * cols;
+    const o = at(r0 + j);
+    const n = at(r1 + j)
+      .sub(o)
+      .cross(at(r0 + j1).sub(o));
+    vote += Math.sign(n.dot(o.sub(sections[widest]!.c)));
+  }
+  const flip = vote < 0;
   for (let i = 0; i < sections.length - 1; i++) {
-    for (let j = 0; j < (closed ? segs : segs); j++) {
+    for (let j = 0; j < segs; j++) {
       const j1 = closed ? (j + 1) % segs : j + 1;
       const r0 = base + i * cols;
       const r1 = base + (i + 1) * cols;
-      // Winding: outward faces for sections running along +axis with the angle turning from ax
-      // toward az; `orient` below fixes any part built the other way round.
-      b.idx.push(r0 + j, r1 + j, r0 + j1, r0 + j1, r1 + j, r1 + j1);
+      if (flip) b.idx.push(r0 + j, r0 + j1, r1 + j, r0 + j1, r1 + j1, r1 + j);
+      else b.idx.push(r0 + j, r1 + j, r0 + j1, r0 + j1, r1 + j, r1 + j1);
     }
   }
 }
@@ -261,7 +300,7 @@ function blend(a: number, b: number, t: number): Weights {
 /** The rest-pose body for one seat's look; `detail` 1 (high) to 0 (low) sets the ring counts. */
 export function buildBody(look: WielderLook, detail: number): THREE.BufferGeometry {
   const j = restJoints();
-  const b: Builder = { pos: [], col: [], mat: [], si: [], sw: [], idx: [] };
+  const b: Builder = { pos: [], col: [], mat: [], det: [], si: [], sw: [], idx: [] };
   const seg = detail >= 0.5 ? 16 : 10;
   const up = new THREE.Vector3(0, 1, 0);
   const fwd = new THREE.Vector3(0, 0, 1);
@@ -273,6 +312,8 @@ export function buildBody(look: WielderLook, detail: number): THREE.BufferGeomet
   const metal = new THREE.Color(look.metal);
   const mask = new THREE.Color(look.mask);
   const leather = new THREE.Color(look.leather);
+  // Trousers darker than the coat, so the coat's shape reads over the legs.
+  const trousers = coat.clone().lerp(leather, 0.55);
   const ring = (y: number, rx: number, rz: number, z = 0): Section => ({
     c: new THREE.Vector3(0, y, z),
     ax: X,
@@ -280,15 +321,18 @@ export function buildBody(look: WielderLook, detail: number): THREE.BufferGeomet
     rx,
     rz,
   });
+  // The coat's own cloth is quilted and the leather grained; trim, sash and trousers plain.
   const fabric = (s: Surface, c: THREE.Color, rough = 0.82) => {
     s.color.copy(c);
     s.rough = rough;
     s.metal = 0;
+    s.detail = c === coat ? DETAIL.quilted : c === leather ? DETAIL.leather : DETAIL.none;
   };
   const metallic = (s: Surface, c: THREE.Color, rough = 0.32) => {
     s.color.copy(c);
     s.rough = rough;
     s.metal = 1;
+    s.detail = DETAIL.metal;
   };
 
   // Torso: pelvis to the neck's base, broad in the chest; the coat's body, trimmed at the waist.
@@ -420,35 +464,43 @@ export function buildBody(look: WielderLook, detail: number): THREE.BufferGeomet
       },
       (_i, _a, su) => fabric(su, coat),
     );
-    // Pauldron: a metal shell over the shoulder.
+    // Pauldrons: two overlapping metal shells over the shoulder, the upper one broad.
     const pdir = new THREE.Vector3(s, 0.35, 0).normalize();
-    const pc = sh.clone().addScaledVector(up, 0.02);
-    loft(
-      b,
-      [0, 0.25, 0.5, 0.75, 1].map((t) => {
-        const r = 0.095 * Math.sin(Math.PI * (0.5 + 0.5 * t)) + 0.004;
-        const c = pc.clone().addScaledVector(pdir, 0.015 + 0.06 * (1 - t));
-        return {
-          c,
-          ax: Z,
-          az: new THREE.Vector3().crossVectors(pdir, Z).normalize(),
-          rx: r * 1.05,
-          rz: r,
-        };
-      }),
-      seg,
-      () => [
-        [B[`upperArm.${side}`], 0.6],
-        [B[`clavicle.${side}`], 0.4],
-      ],
-      (i, _a, su) => {
-        metallic(su, metal, 0.34);
-        if (i === 1) {
-          su.glow = 0.6;
-          su.channel = channel;
-        }
-      },
-    );
+    for (const [lift, size] of [
+      [0.03, 0.13],
+      [-0.05, 0.1],
+    ] as const) {
+      const pc = sh
+        .clone()
+        .addScaledVector(up, lift)
+        .addScaledVector(pdir, lift < 0 ? 0.02 : 0);
+      loft(
+        b,
+        [0, 0.25, 0.5, 0.75, 1].map((t) => {
+          const r = size * Math.sin(Math.PI * (0.5 + 0.5 * t)) + 0.004;
+          const c = pc.clone().addScaledVector(pdir, 0.015 + size * 0.65 * (1 - t));
+          return {
+            c,
+            ax: Z,
+            az: new THREE.Vector3().crossVectors(pdir, Z).normalize(),
+            rx: r * 1.08,
+            rz: r,
+          };
+        }),
+        seg,
+        () => [
+          [B[`upperArm.${side}`], 0.6],
+          [B[`clavicle.${side}`], 0.4],
+        ],
+        (i, _a, su) => {
+          metallic(su, metal, 0.34);
+          if (i === 1) {
+            su.glow = 0.6;
+            su.channel = channel;
+          }
+        },
+      );
+    }
     // Gauntlet: a flared metal cuff over the forearm, conductor lines that glow with the cast.
     const gPts = along(el.clone().lerp(wr, 0.35), wr.clone().addScaledVector(dirArm, 0.012), 5);
     const gR: [number, number][] = [
@@ -479,9 +531,9 @@ export function buildBody(look: WielderLook, detail: number): THREE.BufferGeomet
       limb(
         palmPts,
         [
-          [0.038, 0.018],
-          [0.046, 0.02],
-          [0.045, 0.018],
+          [0.047, 0.022],
+          [0.056, 0.024],
+          [0.055, 0.022],
         ],
         palmFwd,
       ),
@@ -489,15 +541,15 @@ export function buildBody(look: WielderLook, detail: number): THREE.BufferGeomet
       () => [[B[`hand.${side}`], 1]],
       (_i, _a, su) => fabric(su, leather, 0.6),
     );
-    const tip = kn.clone().addScaledVector(dirArm, 0.075);
+    const tip = kn.clone().addScaledVector(dirArm, 0.09);
     loft(
       b,
       limb(
         along(kn, tip, 3),
         [
-          [0.044, 0.017],
-          [0.04, 0.016],
-          [0.02, 0.012],
+          [0.054, 0.021],
+          [0.05, 0.02],
+          [0.026, 0.015],
         ],
         palmFwd,
       ),
@@ -513,8 +565,8 @@ export function buildBody(look: WielderLook, detail: number): THREE.BufferGeomet
       limb(
         [tBase, tEnd],
         [
-          [0.016, 0.016],
-          [0.011, 0.011],
+          [0.02, 0.02],
+          [0.014, 0.014],
         ],
         palmFwd,
       ),
@@ -532,13 +584,13 @@ export function buildBody(look: WielderLook, detail: number): THREE.BufferGeomet
       ...along(knee, ankle, 4).slice(1),
     ];
     const legR: [number, number][] = [
-      [0.085, 0.085],
-      [0.075, 0.078],
-      [0.066, 0.068],
-      [0.056, 0.06],
-      [0.058, 0.062],
-      [0.05, 0.054],
-      [0.044, 0.046],
+      [0.1, 0.1],
+      [0.09, 0.092],
+      [0.08, 0.083],
+      [0.07, 0.073],
+      [0.07, 0.073],
+      [0.064, 0.067],
+      [0.056, 0.058],
     ];
     loft(
       b,
@@ -549,57 +601,63 @@ export function buildBody(look: WielderLook, detail: number): THREE.BufferGeomet
         if (y > knee.y + 0.04) return blend(B.hips, B[`thigh.${side}`], (hip.y + 0.03 - y) / 0.05);
         return blend(B[`thigh.${side}`], B[`shin.${side}`], (knee.y + 0.04 - y) / 0.08);
       },
-      (_i, _a, su) => fabric(su, coat, 0.85),
+      (_i, _a, su) => fabric(su, trousers, 0.85),
     );
     const bootPts = along(
-      knee.clone().lerp(ankle, 0.35),
+      knee.clone().lerp(ankle, 0.1),
       ankle.clone().addScaledVector(up, -0.02),
-      4,
+      5,
     );
     loft(
       b,
       limb(
         bootPts,
         [
-          [0.056, 0.06],
-          [0.054, 0.058],
-          [0.05, 0.055],
-          [0.052, 0.058],
+          [0.08, 0.084],
+          [0.076, 0.08],
+          [0.07, 0.074],
+          [0.066, 0.071],
+          [0.066, 0.073],
         ],
         fwd,
       ),
       seg,
       (i) => blend(B[`shin.${side}`], B[`foot.${side}`], (i - 2) / 1.2),
       (i, _a, su) => {
-        fabric(su, leather, 0.5);
+        fabric(su, leather, 0.74);
         if (i === 0) metallic(su, metal, 0.35); // the boot's metal rim
       },
     );
-    // The foot: heel to toe along +Z, flat on the sole.
-    const footSecs: Section[] = [-0.06, -0.02, 0.04, 0.1, 0.15].map((z, i) => ({
-      c: new THREE.Vector3(hip.x, 0.045 - (i === 4 ? 0.01 : 0), z),
+    // The foot: heel to toe along +Z, flat on the sole, closed at both ends (rounded to a point
+    // at the heel and the toe: an open end shows its inside).
+    const footZ = [-0.075, -0.068, -0.06, -0.02, 0.04, 0.1, 0.15, 0.168, 0.175];
+    const footRx = [0.006, 0.038, 0.052, 0.058, 0.06, 0.054, 0.034, 0.022, 0.004];
+    const footRz = [0.006, 0.036, 0.05, 0.052, 0.046, 0.036, 0.022, 0.014, 0.003];
+    const footY = [0.045, 0.045, 0.045, 0.045, 0.045, 0.045, 0.035, 0.032, 0.03];
+    const footSecs: Section[] = footZ.map((z, i) => ({
+      c: new THREE.Vector3(hip.x, footY[i], z),
       ax: X,
       az: up,
-      rx: [0.045, 0.05, 0.052, 0.046, 0.03][i]!,
-      rz: [0.045, 0.046, 0.04, 0.032, 0.02][i]!,
+      rx: footRx[i]!,
+      rz: footRz[i]!,
     }));
     loft(
       b,
       footSecs,
       seg,
       () => [[B[`foot.${side}`], 1]],
-      (_i, _a, su) => fabric(su, leather, 0.5),
+      (_i, _a, su) => fabric(su, leather, 0.78),
       { shape: (p) => void (p.y = Math.max(0.002, p.y)) },
     );
   }
 
-  // The coat's skirt: from the waist to just below the knees, open at the front, its sides
-  // following the thighs and its back the hips.
-  const skirtY = [1.12, 1.0, 0.86, 0.72, 0.6, 0.5];
+  // The coat's skirt: from the waist to mid-calf, open at the front, its sides following the
+  // thighs, the back falling lower in two tails that swing on their own bones.
+  const skirtY = [1.12, 1.0, 0.86, 0.72, 0.58, 0.46, 0.36];
   const open = 0.42;
   loft(
     b,
-    skirtY.map((y, i) => ring(y, 0.135 + i * 0.03, 0.098 + i * 0.026, -0.005 * i)),
+    skirtY.map((y, i) => ring(y, 0.135 + i * 0.028, 0.098 + i * 0.024, -0.006 * i)),
     seg + 4,
     (i, a) => {
       const down = i / (skirtY.length - 1);
@@ -610,21 +668,73 @@ export function buildBody(look: WielderLook, detail: number): THREE.BufferGeomet
         ];
       const lateral = Math.cos(a);
       const thigh = lateral > 0 ? B['thigh.L'] : B['thigh.R'];
-      const k = Math.min(1, Math.abs(lateral) * 1.3) * Math.min(1, down * 1.2) * 0.7;
+      // The back and the sides' rear, lower down, hang on the tails; the left one on the left.
+      const back = Math.min(1, (Math.max(0, 0.3 - Math.sin(a)) / 1.3) * 1.2);
+      const tail = back * down * down * 0.9;
+      const toLeft = 0.5 + 0.5 * Math.max(-1, Math.min(1, lateral * 2.5));
+      const k = Math.min(1, Math.abs(lateral) * 1.3) * Math.min(1, down * 1.2) * 0.7 * (1 - tail);
       return [
-        [B.hips, 1 - k],
+        [B.hips, 1 - k - tail],
         [thigh, k],
+        [B['coat.L'], tail * toLeft],
+        [B['coat.R'], tail * (1 - toLeft)],
       ];
     },
-    (i, a, s) => {
+    (i, _a, s) => {
+      // Coat cloth with a trimmed hem. Not the front edges: a trim colour on the edge vertices
+      // spreads across a whole segment of the skirt and reads as a pale panel.
       fabric(s, coat);
-      const edge =
-        Math.abs(a - Math.PI / 2 - open) < 0.08 ||
-        Math.abs(a - (Math.PI / 2 + Math.PI * 2 - open)) < 0.08;
-      if (i === skirtY.length - 1 || edge) fabric(s, trim, 0.6);
+      if (i === skirtY.length - 1) fabric(s, trim, 0.6);
     },
-    { arc: [Math.PI / 2 + open, Math.PI / 2 + Math.PI * 2 - open] },
+    {
+      arc: [Math.PI / 2 + open, Math.PI / 2 + Math.PI * 2 - open],
+      shape: (p, i, a) => {
+        const back = Math.max(0, -Math.sin(a));
+        p.y -= back * back * 0.09 * (i / (skirtY.length - 1));
+      },
+    },
   );
+
+  // The conductor ring: a glowing ring the wielder carries behind the shoulders, on two struts.
+  const ringC = new THREE.Vector3(0, 1.42, -0.2);
+  const ringPts = Array.from({ length: (seg >= 16 ? 28 : 16) + 1 }, (_, k) => {
+    const a = (k / (seg >= 16 ? 28 : 16)) * Math.PI * 2;
+    return ringC.clone().add(new THREE.Vector3(Math.cos(a) * 0.3, Math.sin(a) * 0.3, 0));
+  });
+  loft(
+    b,
+    limb(
+      ringPts,
+      ringPts.map(() => [0.018, 0.018] as const),
+      Z,
+    ),
+    Math.max(6, seg / 2),
+    () => [[B.chest, 1]],
+    (i, _a, s) => {
+      metallic(s, metal, 0.3);
+      // Its coils glow at half the visor's: an attachment, not a halo that outshines the cast.
+      if (i % 2 === 0) {
+        s.glow = 0.5;
+        s.channel = GLOW.visor;
+      }
+    },
+  );
+  for (const sx of [1, -1]) {
+    loft(
+      b,
+      limb(
+        [new THREE.Vector3(sx * 0.08, 1.38, -0.08), new THREE.Vector3(sx * 0.2, 1.3, -0.2)],
+        [
+          [0.012, 0.012],
+          [0.01, 0.01],
+        ],
+        Z,
+      ),
+      6,
+      () => [[B.chest, 1]],
+      (_i, _a, s) => metallic(s, metal, 0.35),
+    );
+  }
 
   // A brass belt with a glowing buckle.
   loft(
@@ -674,6 +784,7 @@ export function buildBody(look: WielderLook, detail: number): THREE.BufferGeomet
   g.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(b.col, 3));
   g.setAttribute('aMat', new THREE.Float32BufferAttribute(b.mat, 4));
+  g.setAttribute('aDetail', new THREE.Float32BufferAttribute(b.det, 1));
   g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(b.si, 4));
   g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(b.sw, 4));
   g.setIndex(b.idx);
@@ -685,21 +796,21 @@ export function buildBody(look: WielderLook, detail: number): THREE.BufferGeomet
 /** A seat's look: amber and copper for EMBER (slot 0), cyan and silver for TIDE (slot 1). */
 export const WIELDER_LOOKS: readonly [WielderLook, WielderLook] = [
   {
-    coat: '#2b1a15',
-    trim: '#7a4a2a',
-    sash: '#8c3a14',
-    metal: '#b8733f',
+    coat: '#5a2418',
+    trim: '#c28a4c',
+    sash: '#d0622a',
+    metal: '#c47a42',
     glow: '#ff8a3a',
-    mask: '#15110f',
-    leather: '#1d1512',
+    mask: '#1a1412',
+    leather: '#2e211b',
   },
   {
-    coat: '#141c26',
-    trim: '#4f6274',
-    sash: '#145a78',
-    metal: '#c3cad2',
+    coat: '#173a52',
+    trim: '#a9bccb',
+    sash: '#2a90ba',
+    metal: '#c8d0d8',
     glow: '#5fd4ff',
-    mask: '#0f1216',
-    leather: '#14171c',
+    mask: '#121619',
+    leather: '#1f262d',
   },
 ];

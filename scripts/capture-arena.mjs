@@ -266,6 +266,8 @@ if (want('phones')) {
 // "R9:20~12" sets the core spinning at 12 rad/s at that tick first (Physics Lab debug setter);
 // "R1:150*700" plays on for 700 ms before the shot (the trail, a goal's collapse); "R3/control:71"
 // replays the fixture's control variant (no reaction: e.g. the shot that hits the guard).
+// ELEMENT_STRIP_MS="0,50,100,200" shoots a moment at each of those render times after its event
+// instead of once (one page: a motion strip, e.g. a wielder's throw easing in and out).
 if (want('elements')) {
   const elementTicks = (process.env.ELEMENT_TICKS ?? 'R6:30,R1:120,R3:90,R5:20')
     .split(',')
@@ -287,6 +289,9 @@ if (want('elements')) {
   const quality = process.env.ELEMENT_QUALITY ?? 'high';
   const cam = process.env.ELEMENT_CAM ?? 'close';
   const stepMs = Number(process.env.ELEMENT_STEP_MS ?? 150);
+  const strip = process.env.ELEMENT_STRIP_MS
+    ? process.env.ELEMENT_STRIP_MS.split(',').map(Number)
+    : null;
   const view = process.env.ELEMENT_VIEW ? `&view=${process.env.ELEMENT_VIEW}` : '';
   const deviceName = process.env.ELEMENT_DEVICE ?? 'desktop';
   const device = { desktop, landscape, portrait }[deviceName];
@@ -316,7 +321,10 @@ if (want('elements')) {
     // compile the shaders and generate the surfaces.
     const frame = (ms) => page.evaluate((v) => window.__ffLab.frame(v), ms);
     const step = () => page.evaluate(() => window.__ffLab.step());
-    for (let i = 0; i < 6; i++) await frame(FRAME_MS);
+    // ELEMENT_WARM_FRAMES (default 6) more frames at the paused tick first: anything that eases
+    // in over render time (the wielders' poses) settles before the moment.
+    const warm = Number(process.env.ELEMENT_WARM_FRAMES ?? 6);
+    for (let i = 0; i < warm; i++) await frame(FRAME_MS);
     // "~12": the core spinning at 12 rad/s at that tick (a debug-only setter, as a twist would).
     if (spin !== null) {
       await page.evaluate((v) => window.__ffLab.spin(v), spin);
@@ -328,6 +336,18 @@ if (want('elements')) {
       await step();
       if (i < steps - 1) await frame(TICK_MS);
     }
+    const name = `element-${fx}${variant === 'reaction' ? '' : `-${variant}`}-t${t}${steps ? `+${steps}` : ''}${spin === null ? '' : `-spin${spin}`}${playMs ? `-play${playMs}` : ''}${quality === 'high' ? '' : `-${quality}`}${cam === 'close' ? '' : `-${cam}`}${view ? '-view' : ''}${deviceName === 'desktop' ? '' : `-${deviceName}`}`;
+    if (strip && steps > 0) {
+      // A motion strip: the same moment at each render time after its event.
+      let elapsed = 0;
+      for (const at of strip) {
+        for (; elapsed < at - 1e-6; elapsed += FRAME_MS) await frame(FRAME_MS);
+        await shot(page, `${name}-at${at}`);
+      }
+      console.log(`${fx} ${variant}: a strip of ${strip.length} frames to ${strip.at(-1)} ms`);
+      await ctx.close();
+      continue;
+    }
     for (let ms = 0; steps > 0 && ms < stepMs; ms += FRAME_MS) await frame(FRAME_MS);
     // "*700": 700 ms of play first, a tick and a frame at a time (the trail, a goal's collapse).
     for (let i = 0; i < Math.round(playMs / TICK_MS); i++) {
@@ -336,7 +356,6 @@ if (want('elements')) {
     }
     const shown = await page.evaluate(() => window.__ffLab.state().t);
     console.log(`${fx} ${variant}: the frame shows tick ${shown}`);
-    const name = `element-${fx}${variant === 'reaction' ? '' : `-${variant}`}-t${t}${steps ? `+${steps}` : ''}${spin === null ? '' : `-spin${spin}`}${playMs ? `-play${playMs}` : ''}${quality === 'high' ? '' : `-${quality}`}${cam === 'close' ? '' : `-${cam}`}${view ? '-view' : ''}${deviceName === 'desktop' ? '' : `-${deviceName}`}`;
     await shot(page, name);
     await ctx.close();
   }
