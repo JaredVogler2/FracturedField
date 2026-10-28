@@ -15,18 +15,27 @@ describe('a pool visual narrates the authoritative ICE flag (7C, D09)', () => {
     const s = newIceState(false);
     expect(run(s, 0.5, true, false)).toMatchObject({ water: true, ice: false, waterFade: 1 });
     const first = stepIce(s, true, true, DT);
-    // The collider exists at once, so the plate is there at once; the front shows it forming.
+    // The collider exists at once, so the plate is there at once; the front shows it forming over
+    // the water, which stays until the front closes, then fades out.
     expect(first.ice).toBe(true);
-    expect(first.water).toBe(false);
+    expect(first.water).toBe(true);
+    expect(first.waterFade).toBe(1);
     expect(first.freeze).toBeGreaterThan(0);
     expect(first.freeze).toBeLessThan(0.2);
     let prev = first.freeze;
+    let fade = first.waterFade;
     for (let t = DT; t < FREEZE_S + 0.05; t += DT) {
       const v = stepIce(s, true, true, DT);
       expect(v.freeze).toBeGreaterThanOrEqual(prev);
+      if (v.water) {
+        expect(v.waterFade).toBeLessThanOrEqual(fade);
+        if (v.freeze < 0.85) expect(v.waterFade).toBe(1);
+        fade = v.waterFade;
+      }
       prev = v.freeze;
     }
     expect(prev).toBe(1);
+    expect(stepIce(s, true, true, DT).water).toBe(false);
   });
 
   it('a pool first seen frozen (a late join) shows its plate whole, without a front', () => {

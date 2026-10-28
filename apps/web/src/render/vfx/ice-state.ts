@@ -7,6 +7,8 @@
 /** Seconds for the freeze front to cross a plate, and for a thaw to finish. */
 export const FREEZE_S = 0.35;
 export const MELT_S = 0.5;
+/** The last part of the front's crossing, over which the water under it fades out. */
+const CLOSING = 0.15;
 
 export interface IceState {
   /** The ICE flag as last seen. */
@@ -20,7 +22,7 @@ export interface IceState {
 
 export interface IceView {
   water: boolean;
-  /** Water opacity 0..1 (it comes back during a thaw). */
+  /** Water opacity 0..1 (it fades under a freeze front and comes back during a thaw). */
   waterFade: number;
   ice: boolean;
   /** 0..1: how far the freeze front has crossed the plate (eased). */
@@ -56,12 +58,17 @@ export function stepIce(s: IceState, present: boolean, frozenNow: boolean, rawDt
   if (s.meltT >= 0) s.meltT += dt;
   const melt = s.meltT >= 0 ? Math.min(1, s.meltT / MELT_S) : 0;
   const k = Math.min(1, s.freezeT / FREEZE_S);
+  const freeze = 1 - (1 - k) * (1 - k);
   const ice = !s.broken && (frozen || (s.meltT >= 0 && s.meltT < MELT_S));
+  // While the front crosses, the water still shows where it has not frozen (under the plate it is
+  // water beneath ice), fading out only as the front closes.
+  const freezing = frozen && k < 1;
   return {
-    water: present && (!frozen || s.meltT >= 0 || s.broken),
-    waterFade: s.meltT >= 0 && !s.broken ? melt : 1,
+    water: present && (!frozen || freezing || s.meltT >= 0 || s.broken),
+    waterFade:
+      s.meltT >= 0 && !s.broken ? melt : freezing ? Math.min(1, (1 - freeze) / CLOSING) : 1,
     ice,
-    freeze: 1 - (1 - k) * (1 - k),
+    freeze,
     melt,
     done: !present && !ice,
   };

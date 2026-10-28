@@ -87,13 +87,14 @@ export function CoreTrail({ tier }: { tier: 'low' | 'medium' | 'high' }) {
             // 0 at the core .. 1 at the oldest sample laid so far.
             float t = min(1.0, vAlong.y * uSpan);
             // Soft cross-section, fading along the length.
-            float a = (1.0 - across * across) * pow(1.0 - t, 1.6) * uStrength;
+            float a = (1.0 - across * across) * pow(1.0 - t, 1.3) * uStrength;
             // A hot line down the middle near the core.
             float hot = pow(1.0 - across, 4.0) * (1.0 - t);
             vec3 col = mix(uColor, vec3(1.0), hot * 0.7);
             // High tier: red leads on one edge, blue on the other (a slight chromatic fringe).
             col *= vec3(1.0 + uFringe * vAlong.x, 1.0, 1.0 - uFringe * vAlong.x);
-            gl_FragColor = vec4(col * a, a);
+            // Bright enough to read against the floor (D09), and to bloom on the tiers that have it.
+            gl_FragColor = vec4(col * a * 1.8, a);
           }`,
       }),
     [tier],
