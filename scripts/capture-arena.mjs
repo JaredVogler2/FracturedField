@@ -74,8 +74,13 @@ const shot = async (page, name) => {
   const path = `${outDir}/arena-${name}-${tag}.jpg`;
   for (let attempt = 1; ; attempt++) {
     // Software GL under load can hold a frame back past any fixed wait (a shader compile blocks
-    // the main thread), and the shot comes out blank: then let a whole frame render first.
-    if (attempt > 1) await rendered(page);
+    // the main thread), and the shot comes out blank: then let a whole frame render first. The
+    // Physics Lab's manual frames draw only when asked: draw the same moment again (no time
+    // passes), or every retake shoots the same blank canvas.
+    if (attempt > 1) {
+      await page.evaluate(() => window.__ffLab?.frame?.(0));
+      await rendered(page);
+    }
     let image = null;
     try {
       image = await page.screenshot({ type: 'jpeg', quality: 86, timeout: 60_000 });
@@ -97,15 +102,24 @@ const shot = async (page, name) => {
     }
     await page.waitForTimeout(3000);
   }
-  const s = await page.evaluate(() => window.__ffDebug?.renderStats?.() ?? null);
+  // The Physics Lab draws frame by frame: draw the same moment once more (no time passes), so the
+  // counters hold the shot frame's own totals.
+  const s = await page.evaluate(() => {
+    if (window.__ffLab?.stats) {
+      window.__ffLab.frame(0);
+      return window.__ffLab.stats();
+    }
+    return window.__ffDebug?.renderStats?.() ?? null;
+  });
   if (s) {
     stats[name] = {
       drawCalls: s.drawCalls,
       triangles: s.triangles,
       geometries: s.geometries,
       textures: s.textures,
-      surfaceTextures: s.surfaces.generated,
-      surfaceGenMs: Math.round(s.surfaces.ms),
+      ...(s.surfaces
+        ? { surfaceTextures: s.surfaces.generated, surfaceGenMs: Math.round(s.surfaces.ms) }
+        : { programs: s.programs }),
     };
   }
   console.log(`saved ${path}`, s ? `(${s.drawCalls} draws, ${s.triangles} tris)` : '');

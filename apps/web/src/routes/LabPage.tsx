@@ -7,6 +7,7 @@ import { GameClientProvider } from '../render/frame-context';
 import { GameScene, type CameraOverride } from '../render/Scene';
 import { LabController, LAB_FIXTURES, type LabState } from '../lab/lab-controller';
 import { LabOverlays } from '../lab/LabOverlays';
+import { renderStats } from '../render/render-stats';
 
 const SPEEDS = [0.1, 0.25, 0.5, 1] as const;
 const MATERIAL_KINDS = new Set(['core', 'boulder', 'lodestone', 'shard', 'guard']);
@@ -88,6 +89,15 @@ export function LabPage() {
           renderAt += ms / 1000;
           advance(renderAt);
         },
+        // Totals of the frame before the last one drawn (all passes): draw frame(0) first to
+        // read the last frame's own.
+        stats: () => ({
+          drawCalls: renderStats.drawCalls,
+          triangles: renderStats.triangles,
+          geometries: renderStats.geometries,
+          textures: renderStats.textures,
+          programs: renderStats.programs,
+        }),
       };
     return () => {
       delete w.__ffLab;
