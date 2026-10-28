@@ -1182,7 +1182,10 @@ software GL; not Safari on Apple hardware), with no console or page error. A mat
 programs on low and 56 on medium and high (the 7C gate: 45 and 52): the wielders' body (with the
 relief on medium and high, plain on low), the arms and motes and the hands; the lab views link
 52 to 58. In Chromium five lab views gave back no data on a first visit (the probe's known quirk)
-and passed on the next.
+and passed on the next. Re-checked on the w10 build (`fb844bd`'s code, whose motes' shader draws
+the motif's shapes): every shader compiled and every program linked in all twelve views in both
+engines, with the same program counts; `scripts/probe-programs.mjs` in a bot match: 47 programs
+on low and 56 on high, as before w10.
 
 ### Tests
 
@@ -1258,8 +1261,8 @@ and passed on the next.
   JaredVogler2/FracturedField#3).
 - `bda012c` "7D: the wielders in the game, with spectral arms and hands" (rounds w0–w6).
 - `de902e1` "7D: the wielders read on phones; the spectral hands mirror the hand channel" (w7–w9).
-- "7D: the loadout's motif, a flinch at hard hits, a flash at the cast; the 7D gate review" (w10
-  and this review).
+- `fb844bd` "7D: the loadout's motif, a flinch at hard hits, a flash at the cast; the 7D gate
+  review" (w10 and this review).
 
 ### 7D gate review (D10)
 
