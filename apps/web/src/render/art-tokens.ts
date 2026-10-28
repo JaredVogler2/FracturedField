@@ -499,6 +499,8 @@ export interface QualityTier {
    * the low tier ~8 % on the software-rendered phone view (≈125 vs ≈115 ms a frame).
    */
   readonly cloudShadows: boolean;
+  /** Heat refraction above flames (a screen-space shimmer in the post pass); high only. */
+  readonly heatHaze: boolean;
 }
 
 export const QUALITY: Record<QualityTier['name'], QualityTier> = {
@@ -516,6 +518,7 @@ export const QUALITY: Record<QualityTier['name'], QualityTier> = {
     particles: 0.5,
     pointLights: 1,
     cloudShadows: false,
+    heatHaze: false,
   },
   medium: {
     name: 'medium',
@@ -531,6 +534,7 @@ export const QUALITY: Record<QualityTier['name'], QualityTier> = {
     particles: 0.75,
     pointLights: 3,
     cloudShadows: true,
+    heatHaze: false,
   },
   high: {
     name: 'high',
@@ -546,5 +550,6 @@ export const QUALITY: Record<QualityTier['name'], QualityTier> = {
     particles: 1,
     pointLights: 3,
     cloudShadows: true,
+    heatHaze: true,
   },
 };

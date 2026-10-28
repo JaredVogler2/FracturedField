@@ -15,6 +15,7 @@ import { CoreTrail } from './core/CoreTrail';
 import { MagnetFields } from './vfx/magnet';
 import { GravityWells } from './vfx/gravity';
 import { ChargeArcs } from './vfx/electric';
+import { HeatHaze } from './vfx/HeatHaze';
 import { Fire } from './vfx/fire';
 import { Plumes } from './vfx/plumes';
 import { WaterAndIce } from './vfx/water-ice';
@@ -165,6 +166,7 @@ export function GameScene({
       {onAdapt && <AdaptiveProbe start={textureTier ?? quality} onAdapt={onAdapt} />}
       {!renders('post') ? null : tier.bloom ? (
         <EffectComposer multisampling={0}>
+          {tier.heatHaze ? <HeatHaze /> : <></>}
           <Bloom
             luminanceThreshold={POST.bloomThreshold}
             intensity={POST.bloomIntensity}

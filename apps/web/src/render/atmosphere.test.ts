@@ -71,15 +71,16 @@ describe('quality tiers', () => {
       expect(Number(b.shadows)).toBeGreaterThanOrEqual(Number(a.shadows));
       expect(Number(b.bloom)).toBeGreaterThanOrEqual(Number(a.bloom));
       expect(Number(b.shafts)).toBeGreaterThanOrEqual(Number(a.shafts));
+      expect(Number(b.heatHaze)).toBeGreaterThanOrEqual(Number(a.heatHaze));
     }
     const skyCost = { baked: 0, low: 1, high: 2 } as const;
     expect(skyCost[low.sky]).toBeLessThanOrEqual(skyCost[medium.sky]);
     expect(skyCost[medium.sky]).toBeLessThanOrEqual(skyCost[high.sky]);
     // Low: no shadow maps, bloom, shafts, dust or cloud sheets; a baked sky; one point light
     // (the core's). Weak GPUs and software rasterisers pay for every full-screen layer.
-    expect(low.shadows || low.bloom || low.shafts || low.dust > 0 || low.cloudLayers > 0).toBe(
-      false,
-    );
+    expect(
+      low.shadows || low.bloom || low.shafts || low.dust > 0 || low.cloudLayers > 0 || low.heatHaze,
+    ).toBe(false);
     expect(low.sky).toBe('baked');
     expect(low.pointLights).toBe(1);
   });
