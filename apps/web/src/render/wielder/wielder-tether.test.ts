@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { layTether, TETHER_SEGMENTS, tetherPoint } from './wielder-tether';
+import { layTether, TETHER_MIN_PX, TETHER_SEGMENTS, tetherPoint } from './wielder-tether';
 
 const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 const N = (TETHER_SEGMENTS + 1) * 2;
@@ -45,6 +45,31 @@ describe('the spectral arm (7D, D10): hand to force point', () => {
     );
     const sight = eye.clone().sub(mid(pos, i));
     expect(Math.abs(across.normalize().dot(sight.normalize()))).toBeLessThan(1e-4);
+  });
+
+  it('keeps a least width on screen from far away, and says how wide it really is', () => {
+    // One render pixel per metre of distance: 1/400 m (a phone sees the plinths from ~55 m).
+    const pixel = 1 / 400;
+    const far = v(0, 30, 60);
+    const pos = new Float32Array(N * 3);
+    const px = new Float32Array(N).fill(-1);
+    layTether(hand, field, far, pos, 0, pixel, px);
+    for (let i = 0; i <= TETHER_SEGMENTS; i++) {
+      const onePx = far.distanceTo(mid(pos, i)) * pixel;
+      expect(width(pos, i) / onePx).toBeGreaterThanOrEqual(TETHER_MIN_PX - 1e-3);
+      // Both vertices of a sample carry its true width in pixels, under the least width here.
+      const truth = (0.14 + (0.09 - 0.14) * (i / TETHER_SEGMENTS)) / onePx;
+      expect(px[i * 2]).toBeCloseTo(truth, 2);
+      expect(px[i * 2 + 1]).toBe(px[i * 2]);
+      expect(px[i * 2]).toBeLessThan(TETHER_MIN_PX);
+    }
+    // Close up the arm is already wider than that: it is laid as without a least width.
+    const near = new Float32Array(N * 3);
+    const plain = new Float32Array(N * 3);
+    layTether(hand, field, eye, near, 0, 1 / 4000, px);
+    layTether(hand, field, eye, plain, 0);
+    expect([...near]).toEqual([...plain]);
+    expect(Math.min(...px)).toBeGreaterThan(TETHER_MIN_PX);
   });
 
   it('writes where it is told, and stays finite with the eye on the arc', () => {

@@ -10,6 +10,7 @@
 import type { AbilityId, ArenaLayout } from '@ff/game-data';
 import type {
   ActionIntent,
+  HandState,
   IntentAction,
   IntentPhase,
   PlayerSlot,
@@ -171,6 +172,8 @@ export class ScenarioRun {
   outcome: ScenarioOutcome = emptyOutcome();
   private readonly steps: readonly ScenarioStep[];
   private seq: [number, number] = [0, 0];
+  /** A hand each seat holds on every tick from now (Physics Lab captures), or none. */
+  private hands: [HandState | null, HandState | null] = [null, null];
 
   private constructor(
     readonly fixture: ScenarioFixture,
@@ -223,11 +226,37 @@ export class ScenarioRun {
     return id;
   }
 
+  /**
+   * Physics Lab: from the next tick on, seat `slot` describes `hand` (as a camera would, with its
+   * current aim), or nothing again. Outside the fixture's script: a what-if, like a material
+   * change.
+   */
+  setHand(slot: PlayerSlot, hand: HandState | null): void {
+    this.hands[slot] = hand;
+  }
+
   /** Applies this tick's script, advances the world one fixed step and records the outcome. */
   step(): ScenarioTick {
     const w = this.current;
     // Sequence numbers continue from what the world has accepted (stays valid across rewinds).
     this.seq = [w.lastSeq(0) + 1, w.lastSeq(1) + 1];
+    // A held hand first, toward the seat's own aim, so this tick's script still moves its aim.
+    for (const slot of [0, 1] as const) {
+      const hand = this.hands[slot];
+      if (!hand) continue;
+      const [x, z] = w.debugAimTarget(slot);
+      const seq = this.seq[slot]++;
+      w.applyCommand(slot, {
+        seq,
+        clientTime: seq * 33,
+        action: 'aim',
+        phase: 'hold',
+        aim: toAim(w.arena, x, z),
+        intensity: 1,
+        hand,
+        source: 'camera',
+      });
+    }
     for (const st of this.stepsAt(this.t)) {
       if ('place' in st) {
         const v = st.v ?? [0, 0, 0];

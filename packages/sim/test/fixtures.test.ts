@@ -122,6 +122,27 @@ describe('D04 reaction fixtures: each reaction changes a scoring trajectory', ()
     }
   });
 
+  it('the Lab can hold a seat’s hand: it reaches the snapshot each tick and the script still runs', async () => {
+    const fx = fixtures.find((f) => f.id === 'R4')!;
+    const run = await ScenarioRun.create(fx, 'reaction');
+    try {
+      while (run.t < 12) run.step();
+      run.setHand(0, { grip: 0, push: 0.6, twist: 0 });
+      const { result, snapshot } = run.step(); // t12: the script's pulse from seat 0
+      expect(snapshot.players[0].hand).toEqual({ grip: 0, push: 0.6, twist: 0 });
+      expect(snapshot.players[1].hand).toBeUndefined();
+      expect(result.events.some((e) => e.type === 'cast' && e.slot === 0)).toBe(true);
+      // Its aim is left where the script put it.
+      expect(snapshot.players[0].m[0]).toBeCloseTo(1.4, 1);
+      run.setHand(0, null);
+      const stale = Math.ceil(DEFAULT_RULES.hand.staleSeconds * DEFAULT_RULES.match.tickRate);
+      for (let i = 0; i <= stale + 1; i++) run.step();
+      expect(run.world.snapshot().players[0].hand).toBeUndefined();
+    } finally {
+      run.dispose();
+    }
+  });
+
   for (const fx of fixtures) {
     it(`${fx.id}: ${fx.title}`, async () => {
       const control = await runVariant(fx, 'control');

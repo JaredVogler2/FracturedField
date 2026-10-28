@@ -1,4 +1,4 @@
-import type { EntityId, GameEvent, WorldSnapshot } from '@ff/protocol';
+import type { EntityId, GameEvent, HandState, PlayerSlot, WorldSnapshot } from '@ff/protocol';
 import {
   REACTION_FIXTURES,
   ScenarioRun,
@@ -326,6 +326,18 @@ export class LabController {
     this.marks = this.marks.filter((m) => m.t < run.t);
     this.marks.push(run.mark());
     this.publish(run.world.snapshot(), [], true);
+    this.set({ modifiedAt: this.state.modifiedAt ?? run.t });
+  }
+
+  /**
+   * A hand seat `slot` describes from the next tick on, as a camera would, or none (Lab captures
+   * of the spectral hands; invalidates later marks).
+   */
+  setHand(slot: PlayerSlot, hand: HandState | null): void {
+    const run = this.run;
+    if (!run || this.busy) return;
+    run.setHand(slot, hand);
+    this.marks = this.marks.filter((m) => m.t <= run.t);
     this.set({ modifiedAt: this.state.modifiedAt ?? run.t });
   }
 

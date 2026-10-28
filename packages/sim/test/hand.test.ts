@@ -174,6 +174,24 @@ describe('grip and throw', () => {
     b.w.dispose();
     c.w.dispose();
   });
+
+  it('the snapshot shows each live hand, rounded, for drawing; none without one or once stale', async () => {
+    const b = await bench();
+    // No hand described yet (and the other seat never describes one): no hand in the snapshot.
+    expect(b.w.snapshot().players[0].hand).toBeUndefined();
+    b.tick([-6, 0], { grip: 0.333, push: -0.5049, twist: 0.25 });
+    expect(b.w.snapshot().players[0].hand).toEqual({ grip: 0.33, push: -0.5, twist: 0.25 });
+    expect(b.w.snapshot().players[1].hand).toBeUndefined();
+    // Keys or touch for the rest of the match: the last hand shows until it goes stale.
+    b.aimOnly([-6, 0]);
+    expect(b.w.snapshot().players[0].hand).toEqual({ grip: 0.33, push: -0.5, twist: 0.25 });
+    stepN(b.w, Math.ceil(H.staleSeconds * DEFAULT_RULES.match.tickRate) + 2);
+    expect(b.w.snapshot().players[0].hand).toBeUndefined();
+    b.tick([-6, 0], FIST);
+    b.w.setConnected(0, false);
+    expect(b.w.snapshot().players[0].hand).toBeUndefined();
+    b.w.dispose();
+  });
 });
 
 describe('twist and curve', () => {

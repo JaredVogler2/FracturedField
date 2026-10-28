@@ -84,6 +84,9 @@ export function LabPage() {
         state: () => lab.getState(),
         seek: (n: number) => lab.seek(n),
         spin: (v: number) => lab.setCoreSpin(v),
+        // A seat's hand from the next tick on (grip, push, twist), or none with a null grip.
+        hand: (slot: 0 | 1, grip: number | null, push = 0, twist = 0) =>
+          lab.setHand(slot, grip === null ? null : { grip, push, twist }),
         step: () => lab.stepOnce(),
         frame: (ms: number) => {
           renderAt += ms / 1000;

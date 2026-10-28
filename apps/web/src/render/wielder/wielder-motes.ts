@@ -53,6 +53,32 @@ export function layMotes(
   }
 }
 
+/**
+ * The flare at a wielder's acting gauntlet: one camera-facing quad, `radius` (m) to its edge,
+ * written as a mote (4 vertices from `first`) so the motes' shader draws it as a soft glow.
+ * It marks which wielder acts where its figure is only a few pixels tall (a phone).
+ */
+export function layFlare(
+  centre: THREE.Vector3,
+  radius: number,
+  bright: number,
+  right: THREE.Vector3,
+  up: THREE.Vector3,
+  pos: Float32Array,
+  glow: Float32Array,
+  first: number,
+): void {
+  for (let c = 0; c < 4; c++) {
+    const sx = c & 1 ? 1 : -1;
+    const sy = c & 2 ? 1 : -1;
+    const v = first + c;
+    pos[v * 3] = centre.x + (right.x * sx + up.x * sy) * radius;
+    pos[v * 3 + 1] = centre.y + (right.y * sx + up.y * sy) * radius;
+    pos[v * 3 + 2] = centre.z + (right.z * sx + up.z * sy) * radius;
+    glow[v] = bright;
+  }
+}
+
 /** Each mote corner's quad coordinates (−1..1 across and up), in layMotes' vertex order. */
 export function moteCorner(c: number): [number, number] {
   return [c & 1 ? 1 : -1, c & 2 ? 1 : -1];

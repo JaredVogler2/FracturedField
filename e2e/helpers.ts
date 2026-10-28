@@ -19,6 +19,8 @@ export interface Snap {
     hold: string | null;
     /** The body this seat's hand holds (-1: none). */
     grasp: number;
+    /** The hand the seat describes, as the authority reads it, while it is live (7D). */
+    hand?: { grip: number; push: number; twist: number };
   }[];
   match: {
     phase: string;
@@ -244,17 +246,26 @@ export async function openRoom(
   expect(code).toMatch(/^[23456789BCDFGHJKMNPQRSTVWXYZ]{6}$/);
   await expect(a).toHaveURL(new RegExp(`room=${code}`));
 
-  // Guest opens the invite link on another "device" and joins with one click.
+  // Guest opens the invite link on another "device" and joins with one click. Its page compiles
+  // the arena's shaders twice before its seat shows: for the menu it opens on, then for the match
+  // view it joins into (each view has its own WebGL context). On software WebGL each takes long:
+  // pinned to two cores, the guest froze for 32–39 s right after joining, on main as with the
+  // wielders (PR #4), past an assertion's default 30 s. The guest's join steps get JOIN_MS.
   await b.goto(`/?room=${code}&test=1&quality=low${q}`);
-  await expect(b.getByTestId('room-code-input')).toHaveValue(code);
+  await expect(b.getByTestId('room-code-input')).toHaveValue(code, { timeout: JOIN_MS });
   await b.getByTestId('join-room').click();
-  await expect(b.getByTestId('online-lobby')).toBeVisible();
+  await expect(b.getByTestId('online-lobby')).toBeVisible({ timeout: JOIN_MS });
   await expect.poll(() => debug(a, 'slot')).toBe(0);
-  await expect.poll(() => debug(b, 'slot')).toBe(1);
+  await expect.poll(() => debug(b, 'slot'), { timeout: JOIN_MS }).toBe(1);
   await expect(a.getByTestId('lobby-seat-1').locator('.seat-status')).toHaveText('not ready');
-  await expect(b.getByTestId('lobby-seat-0').locator('.seat-status')).toHaveText('not ready');
+  await expect(b.getByTestId('lobby-seat-0').locator('.seat-status')).toHaveText('not ready', {
+    timeout: JOIN_MS,
+  });
   return { ctxA, ctxB, a, b, code, errors };
 }
+
+/** Time for a guest's join step: its page may be compiling the match view's shaders (above). */
+const JOIN_MS = 90_000;
 
 /** Both seats press READY and wait until the authoritative match is playing. */
 export async function readyUp(

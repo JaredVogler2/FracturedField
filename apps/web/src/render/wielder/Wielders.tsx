@@ -8,9 +8,10 @@ import { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { MERIDIAN_ARENA } from '@ff/game-data';
-import type { PlayerSlot } from '@ff/protocol';
+import type { HandState, PlayerSlot } from '@ff/protocol';
 import { useGameClient, useRenderFrame } from '../frame-context';
 import { TEAM_COLORS } from '../art-tokens';
+import { localHand } from '../vfx/local-aim';
 import {
   BONES,
   buildBody,
@@ -27,8 +28,8 @@ import {
 } from './wielder-anim';
 import { aimBone, newSolution, solveTwoBone } from './wielder-ik';
 import { RIG } from './wielder-rig';
-import { layTether, TETHER_SEGMENTS } from './wielder-tether';
-import { layMotes, moteCorner, MOTES } from './wielder-motes';
+import { layTether, TETHER_MIN_PX, TETHER_SEGMENTS } from './wielder-tether';
+import { layFlare, layMotes, moteCorner, MOTES } from './wielder-motes';
 import { buildSpectralHand, placeSpectralHand } from './spectral-hand';
 import { wielderMaterial } from './wielder-material';
 
@@ -52,17 +53,20 @@ const energyVertex = /* glsl */ `
   attribute float aWho;
   attribute float aKind;
   attribute float aGlow;
+  attribute float aPx;
   varying float vAlong;
   varying float vSide;
   varying float vWho;
   varying float vKind;
   varying float vGlow;
+  varying float vPx;
   void main() {
     vAlong = aAlong;
     vSide = aSide;
     vWho = aWho;
     vKind = aKind;
     vGlow = aGlow;
+    vPx = aPx;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
@@ -76,6 +80,7 @@ const energyFragment = /* glsl */ `
   varying float vWho;
   varying float vKind;
   varying float vGlow;
+  varying float vPx;
   void main() {
     vec3 col = vWho < 0.5 ? uColor0 : uColor1;
     if (vKind > 0.5) {
@@ -87,11 +92,18 @@ const energyFragment = /* glsl */ `
       return;
     }
     float s = vWho < 0.5 ? uStrength.x : uStrength.y;
-    float core = pow(1.0 - abs(vSide), 1.6);
+    // Laid wider than it is (a few pixels across, on a phone), the arm is flatter across and its
+    // light spread over the extra width, though never below 0.6 of it: it reads as a thin line.
+    float drawn = max(vPx, ${TETHER_MIN_PX.toFixed(1)});
+    float sharp = smoothstep(2.0, 6.0, drawn);
+    float core = mix(0.85, pow(1.0 - abs(vSide), 1.6), sharp);
+    float cover = max(0.6, vPx / drawn);
     float ends = smoothstep(0.0, 0.08, vAlong) * (1.0 - smoothstep(0.88, 1.0, vAlong));
-    // Pulses flowing from the hand out to the field.
-    float flow = 0.55 + 0.45 * sin(vAlong * 34.0 - uTime * 9.0);
-    float a = s * core * ends * flow;
+    // Pulses flowing from the hand out to the field; shallow on a thin arm, which they would
+    // otherwise break into dashes.
+    float depth = mix(0.12, 0.45, sharp);
+    float flow = 1.0 - depth + depth * sin(vAlong * 34.0 - uTime * 9.0);
+    float a = s * core * cover * ends * flow;
     gl_FragColor = vec4(col * a, a);
   }
 `;
@@ -99,27 +111,33 @@ const TETHER_VERTS = (TETHER_SEGMENTS + 1) * 2;
 /** Where the motes start in the energy mesh, and how many vertices each wielder's take. */
 const MOTE_BASE = TETHER_VERTS * 2;
 const MOTE_VERTS = MOTES * 4;
+/** Then each wielder's flare at its acting gauntlet: one quad. */
+const FLARE_BASE = MOTE_BASE + MOTE_VERTS * 2;
 
 /**
- * Both wielders' spectral arms and energy motes in one mesh: one draw call. The arms are ribbons
- * (`aKind` 0), the motes camera-facing quads (`aKind` 1) whose brightness is per vertex.
+ * Both wielders' spectral arms, energy motes and gauntlet flares in one mesh: one draw call. The
+ * arms are ribbons (`aKind` 0); the motes and flares camera-facing quads (`aKind` 1) whose
+ * brightness is per vertex.
  */
 function makeEnergy(): {
   mesh: THREE.Mesh;
   pos: Float32Array;
   glow: Float32Array;
+  px: Float32Array;
   strength: THREE.Vector2;
   time: { value: number };
   dispose: () => void;
 } {
   const geometry = new THREE.BufferGeometry();
-  const count = MOTE_BASE + MOTE_VERTS * 2;
+  const count = FLARE_BASE + 4 * 2;
   const pos = new Float32Array(count * 3);
   const along = new Float32Array(count);
   const side = new Float32Array(count);
   const who = new Float32Array(count);
   const kind = new Float32Array(count);
   const glow = new Float32Array(count);
+  // Each arm vertex's true width on screen (render pixels); wide until the first frame lays it.
+  const px = new Float32Array(count).fill(64);
   const index: number[] = [];
   for (let w = 0; w < 2; w++) {
     for (let i = 0; i <= TETHER_SEGMENTS; i++) {
@@ -134,8 +152,9 @@ function makeEnergy(): {
         index.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
       }
     }
-    for (let m = 0; m < MOTES; m++) {
-      const a = MOTE_BASE + w * MOTE_VERTS + m * 4;
+    for (let m = 0; m <= MOTES; m++) {
+      // The last quad is the wielder's flare.
+      const a = m < MOTES ? MOTE_BASE + w * MOTE_VERTS + m * 4 : FLARE_BASE + w * 4;
       for (let c = 0; c < 4; c++) {
         [along[a + c], side[a + c]] = moteCorner(c);
         who[a + c] = w;
@@ -156,6 +175,7 @@ function makeEnergy(): {
     'aGlow',
     new THREE.BufferAttribute(glow, 1).setUsage(THREE.DynamicDrawUsage),
   );
+  geometry.setAttribute('aPx', new THREE.BufferAttribute(px, 1).setUsage(THREE.DynamicDrawUsage));
   geometry.setIndex(index);
   const strength = new THREE.Vector2();
   const time = { value: 0 };
@@ -181,6 +201,7 @@ function makeEnergy(): {
     mesh,
     pos,
     glow,
+    px,
     strength,
     time,
     dispose: () => {
@@ -216,16 +237,24 @@ const handFragment = /* glsl */ `
   uniform vec3 uColor0;
   uniform vec3 uColor1;
   uniform vec2 uStrength;
+  uniform vec2 uSmall;
   varying vec3 vNormalV;
   varying vec3 vViewV;
   varying float vWho;
   void main() {
     float s = vWho < 0.5 ? uStrength.x : uStrength.y;
     vec3 col = vWho < 0.5 ? uColor0 : uColor1;
-    // Spectral: a faint body with a bright outline where the surface turns away.
+    // Spectral: a faint body with a bright outline where the surface turns away. Small on screen
+    // (a phone), the body fills in: an outline a pixel wide breaks up and the hand's shape is lost.
+    float small = vWho < 0.5 ? uSmall.x : uSmall.y;
+    float fill = mix(0.22, 0.62, small);
     float edge = 1.0 - abs(dot(normalize(vNormalV), normalize(vViewV)));
-    float a = s * (0.22 + 0.78 * pow(edge, 1.8));
-    gl_FragColor = vec4(col * a * 2.4 + vec3(a * a * 0.25), a);
+    float a = s * (fill + (1.0 - fill) * pow(edge, 1.8));
+    // Filled in, less gain: added over the stone at full gain, amber washes out to cream.
+    vec3 light = col * a * mix(2.4, 1.3, small) + vec3(a * a * mix(0.25, 0.08, small));
+    // Premultiplied: the light is added as before (scaled by a, as additive blending did), and a
+    // small hand also dims what lies behind it, so its colour holds its hue over the stone.
+    gl_FragColor = vec4(light * a, a * 0.6 * small);
   }
 `;
 
@@ -238,6 +267,7 @@ function makeHands(segs: number): {
   matrices: [THREE.Matrix4, THREE.Matrix4];
   curl: THREE.Vector2;
   strength: THREE.Vector2;
+  small: THREE.Vector2;
   dispose: () => void;
 } {
   const h = buildSpectralHand(segs);
@@ -260,11 +290,13 @@ function makeHands(segs: number): {
   const matrices: [THREE.Matrix4, THREE.Matrix4] = [new THREE.Matrix4(), new THREE.Matrix4()];
   const curl = new THREE.Vector2();
   const strength = new THREE.Vector2();
+  const small = new THREE.Vector2();
   const material = new THREE.ShaderMaterial({
     uniforms: {
       uHand: { value: matrices },
       uCurl: { value: curl },
       uStrength: { value: strength },
+      uSmall: { value: small },
       uColor0: { value: new THREE.Color(TEAM_COLORS[0]) },
       uColor1: { value: new THREE.Color(TEAM_COLORS[1]) },
     },
@@ -272,7 +304,10 @@ function makeHands(segs: number): {
     fragmentShader: handFragment,
     transparent: true,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
+    // Light added, the background kept but for the share the shader's alpha takes away.
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.OneFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,
     side: THREE.DoubleSide,
   });
   const mesh = new THREE.Mesh(geometry, material);
@@ -284,6 +319,7 @@ function makeHands(segs: number): {
     matrices,
     curl,
     strength,
+    small,
     dispose: () => {
       geometry.dispose();
       material.dispose();
@@ -369,7 +405,28 @@ const MOTE_SIZE = 0.055;
 const HAND_SIZE = 1.6;
 const HAND_HEIGHT = 2.1;
 const HAND_PITCH = 0.35;
+/**
+ * Small on screen (a phone), a spectral hand grows to keep at least HAND_MIN_PX render pixels of
+ * length, up to HAND_MAX_GROW times its size, and its body fills in below HAND_FULL_PX.
+ */
+const HAND_MIN_PX = 24;
+const HAND_MAX_GROW = 1.75;
+const HAND_FULL_PX = 64;
+/** The flare at the acting gauntlet: its radius at scale 1 (m), and at least (render pixels). */
+const FLARE_RADIUS = 0.2;
+const FLARE_MIN_PX = 5;
+/**
+ * The hand channel on the spectral hand (ADR-0009): a full push presses it this far down toward
+ * the field and flatter, a full pull lifts it and curls it into a claw, and a full twist turns it
+ * this far (seen from above, the way the twist spins a held core). Metres and radians.
+ */
+const PUSH_DROP = 0.5;
+const PULL_LIFT = 0.4;
+const PULL_CURL = 0.45;
+const TWIST_TURN = 0.7;
+const NO_HAND: HandState = { grip: 0, push: 0, twist: 0 };
 const handCentre = new THREE.Vector3();
+const buffer = new THREE.Vector2();
 
 /** Bone orientations and positions in the wielder's frame, parents first. */
 function forward(bones: readonly THREE.Bone[]): void {
@@ -491,7 +548,14 @@ export function Wielders({ tier, shadows }: { tier: 'low' | 'medium' | 'high'; s
         at: new THREE.Vector3(),
         curl: 0,
         strength: 0,
+        // The turn a spinning core gives a fist round it (rad, accumulated).
         twist: 0,
+        // The seat's hand as shown: grip, push and the wrist's twist, smoothed.
+        grip: 0,
+        push: 0,
+        wrist: 0,
+        // How much larger than HAND_SIZE it is drawn (small screens).
+        grow: 1,
         placed: false,
       })),
     [],
@@ -515,8 +579,12 @@ export function Wielders({ tier, shadows }: { tier: 'low' | 'medium' | 'high'; s
         reaching: r.animator.reaching,
         frameMs: cost.ms,
         frames: cost.frames,
-        // Its spectral hand: 0 open, 1 a fist round what the grip holds.
+        // Its spectral hand: 0 open, 1 a fist (closed round what the grip holds, or as closed as
+        // the seat's hand); drawn `grow` times its size (a small screen); the push it shows.
         curl: handState[r.slot]!.curl,
+        grow: handState[r.slot]!.grow,
+        push: handState[r.slot]!.push,
+        at: handState[r.slot]!.at.toArray(),
       }));
     return () => {
       delete w.__ffWielders;
@@ -530,7 +598,7 @@ export function Wielders({ tier, shadows }: { tier: 'low' | 'medium' | 'high'; s
     [client, rigs, get],
   );
 
-  useFrame(({ clock }, delta) => {
+  useFrame(({ clock, gl }, delta) => {
     const dt = Math.min(0.1, Math.max(0, delta));
     const f = frame.current;
     const snap = f?.latest;
@@ -539,6 +607,10 @@ export function Wielders({ tier, shadows }: { tier: 'low' | 'medium' | 'high'; s
     const coreEntity = snap.entities.find((e) => e.kind === 'core');
     camRight.setFromMatrixColumn(camera.matrixWorld, 0);
     camUp.setFromMatrixColumn(camera.matrixWorld, 1);
+    // The world size of one render pixel per metre from the camera: the arms, hands and flares
+    // keep a least size on screen from it (a phone sees the plinths from 50–60 m).
+    gl.getDrawingBufferSize(buffer);
+    const pixel = 2 / (Math.max(1e-6, camera.projectionMatrix.elements[5]) * Math.max(1, buffer.y));
     let motesLit = false;
     for (const r of rigs) {
       const p = snap.players.find((pl) => pl.slot === r.slot);
@@ -573,28 +645,76 @@ export function Wielders({ tier, shadows }: { tier: 'low' | 'medium' | 'high'; s
       // the grip holds, from the snapshot, so both players see each other's grips.
       const hs = handState[r.slot]!;
       const held = p && p.grasp >= 0 ? f.entities.get(p.grasp) : undefined;
-      if (held) handCentre.set(held.px, held.py + 0.8, held.pz);
-      else handCentre.set(fp.x, HAND_HEIGHT, fp.z);
+      // What the seat's hand is doing: this device's own seat at once (cosmetic, as its reticle),
+      // the rival's as the authority last read it; a seat without a hand shows an open, still one.
+      const shown = localHand.get(r.slot) ?? p?.hand ?? NO_HAND;
+      const k = hs.placed ? 1 - Math.exp(-dt / 0.06) : 1;
+      hs.grip += (shown.grip - hs.grip) * k;
+      hs.push += (shown.push - hs.push) * k;
+      hs.wrist += (shown.twist - hs.wrist) * k;
+      const press = Math.max(0, hs.push);
+      const pull = Math.max(0, -hs.push);
+      // A grown fist rises with its size, to close round the body as it does at full size.
+      if (held) handCentre.set(held.px, held.py + 0.8 * hs.grow, held.pz);
+      else
+        handCentre.set(fp.x, HAND_HEIGHT + (PULL_LIFT * pull - PUSH_DROP * press) * hs.grow, fp.z);
       hs.at.lerp(handCentre, hs.placed ? 1 - Math.exp(-dt / 0.07) : 1);
-      hs.curl += ((held ? 1 : 0) - hs.curl) * (hs.placed ? 1 - Math.exp(-dt / 0.09) : 1);
-      hs.strength = Math.min(1, reaching * (0.45 + 0.45 * flare + 0.3 * hs.curl));
+      // Closed round what the grip holds; otherwise as closed as the hand (a pull, a claw).
+      const close = held ? 1 : Math.max(hs.grip, PULL_CURL * pull);
+      hs.curl += (close - hs.curl) * (hs.placed ? 1 - Math.exp(-dt / 0.09) : 1);
+      hs.strength = Math.min(
+        1,
+        reaching * (0.45 + 0.45 * flare + 0.3 * hs.curl + 0.25 * Math.abs(hs.push)),
+      );
       // A fist on a spinning core turns with it: the player's twist, as the authority keeps it.
       if (held) hs.twist += held.spin * dt;
       else hs.twist *= Math.exp(-dt / 0.25);
       hs.placed = true;
-      // The spectral arm arrives at its wrist.
+      // Its length on screen: a phone draws it larger and fuller (render state only).
+      const handPx = HAND_SIZE / Math.max(1e-6, camera.position.distanceTo(hs.at) * pixel);
+      hs.grow = THREE.MathUtils.clamp(HAND_MIN_PX / handPx, 1, HAND_MAX_GROW);
+      hands.small.setComponent(
+        r.slot,
+        1 - THREE.MathUtils.smoothstep(handPx * hs.grow, HAND_MIN_PX, HAND_FULL_PX),
+      );
+      // The spectral arm arrives at its wrist. A push flattens the hand onto the field, a pull
+      // tips its fingers down to draw in; a twist turns it as it would spin a held core.
       placeSpectralHand(
         hs.at,
         r.group.position,
         h === 1,
-        HAND_SIZE,
-        HAND_PITCH,
+        HAND_SIZE * hs.grow,
+        HAND_PITCH - 0.25 * press + 0.35 * pull,
         hands.matrices[r.slot],
         tetherEnd,
-        hs.twist,
+        hs.twist - TWIST_TURN * hs.wrist,
       );
-      layTether(tetherStart, tetherEnd, camera.position, energy.pos, r.slot * TETHER_VERTS);
+      layTether(
+        tetherStart,
+        tetherEnd,
+        camera.position,
+        energy.pos,
+        r.slot * TETHER_VERTS,
+        pixel,
+        energy.px,
+      );
       energy.strength.setComponent(r.slot, reaching * (0.28 + 0.5 * flare));
+      // The flare at the acting gauntlet: faint while reaching, bright with a cast, a few pixels
+      // across at least, so a phone sees which wielder acts.
+      const flareBright = pose.aura * (0.12 * reaching + 0.88 * flare);
+      layFlare(
+        tetherStart,
+        Math.max(
+          FLARE_RADIUS * r.group.scale.x,
+          FLARE_MIN_PX * camera.position.distanceTo(tetherStart) * pixel,
+        ),
+        flareBright,
+        camRight,
+        camUp,
+        energy.pos,
+        energy.glow,
+        FLARE_BASE + r.slot * 4,
+      );
       // The motes: between the hands at rest, gathering at the acting hand as it reaches, spread
       // wider by a cast; dim with the wielder's aura.
       moteCentre
@@ -617,11 +737,12 @@ export function Wielders({ tier, shadows }: { tier: 'low' | 'medium' | 'high'; s
         energy.glow,
         MOTE_BASE + r.slot * MOTE_VERTS,
       );
-      motesLit ||= bright > 0.01;
+      motesLit ||= bright > 0.01 || flareBright > 0.01;
     }
     const attrs = energy.mesh.geometry.attributes;
     attrs.position!.needsUpdate = true;
     attrs.aGlow!.needsUpdate = true;
+    attrs.aPx!.needsUpdate = true;
     energy.time.value = clock.elapsedTime;
     energy.mesh.visible = motesLit || energy.strength.x + energy.strength.y > 0.005;
     hands.curl.set(handState[0]!.curl, handState[1]!.curl);

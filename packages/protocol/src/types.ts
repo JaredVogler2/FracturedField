@@ -117,6 +117,12 @@ export interface PlayerSnapshot {
   readonly holdTarget: EntityId;
   /** Body the hand's grip is holding (ADR-0009), -1 if none. */
   readonly grasp: EntityId;
+  /**
+   * The hand the seat describes, as the authority reads it (rounded to 0.01), so both devices can
+   * draw it (7D's spectral hands). Only while the seat's hand is live: keys, touch without
+   * hands-on, the bot and a stale or disconnected hand send none.
+   */
+  readonly hand?: HandState;
   readonly connected: boolean;
 }
 

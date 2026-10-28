@@ -264,6 +264,8 @@ if (want('phones')) {
 // ELEMENT_VIEW="px,py,pz,tx,ty,tz" places the close camera by hand (a guard, a goal mouth), and
 // ELEMENT_DEVICE=landscape or portrait shoots on a phone (iPhone 13 at 2x) instead of 1920 x 1080.
 // "R9:20~12" sets the core spinning at 12 rad/s at that tick first (Physics Lab debug setter);
+// "R4:12+20^0=1_0_0.5" has seat 0 describe a hand (grip 1, push 0, twist 0.5) from that tick on,
+// as a camera would (the spectral hands: a fist on the core, a push, a pull, a twist);
 // "R1:150*700" plays on for 700 ms before the shot (the trail, a goal's collapse); "R3/control:71"
 // replays the fixture's control variant (no reaction: e.g. the shot that hits the guard).
 // ELEMENT_STRIP_MS="0,50,100,200" shoots a moment at each of those render times after its event
@@ -274,9 +276,16 @@ if (want('elements')) {
     .map((s) => {
       const [fxSpec, rest] = s.split(':');
       const [fx, variant = 'reaction'] = fxSpec.split('/');
-      const [timed, playMs] = rest.split('*');
+      const [handed, playMs] = rest.split('*');
+      const [timed, handSpec] = handed.split('^');
       const [tick, spin] = timed.split('~');
       const [t, steps] = tick.split('+');
+      let hand = null;
+      if (handSpec !== undefined) {
+        const [slot, values] = handSpec.split('=');
+        const [grip, push = 0, twist = 0] = values.split('_').map(Number);
+        hand = { slot: Number(slot), grip, push: Number(push), twist: Number(twist) };
+      }
       return [
         fx,
         variant,
@@ -284,6 +293,7 @@ if (want('elements')) {
         Number(steps ?? 0),
         spin === undefined ? null : Number(spin),
         playMs === undefined ? 0 : Number(playMs),
+        hand,
       ];
     });
   const quality = process.env.ELEMENT_QUALITY ?? 'high';
@@ -298,7 +308,7 @@ if (want('elements')) {
   if (!device) throw new Error(`ELEMENT_DEVICE: no device ${deviceName}`);
   const TICK_MS = 1000 / 30;
   const FRAME_MS = 1000 / 60;
-  for (const [fx, variant, t, steps, spin, playMs] of elementTicks) {
+  for (const [fx, variant, t, steps, spin, playMs, hand] of elementTicks) {
     const ctx = await browser.newContext(device);
     const page = await ctx.newPage();
     watch(page);
@@ -321,6 +331,21 @@ if (want('elements')) {
     // compile the shaders and generate the surfaces.
     const frame = (ms) => page.evaluate((v) => window.__ffLab.frame(v), ms);
     const step = () => page.evaluate(() => window.__ffLab.step());
+    // The scene mounts once what it builds in its own time is ready (surface textures, larger on
+    // high), and its bodies a frame after that: redraw the paused tick (no render time passes)
+    // every 200 ms until it draws, and the same count three times running. A second page in a
+    // batch, its code already compiled, reached its tick before its scene had mounted: its frames
+    // drew nothing, and its shot came out without bodies.
+    for (let i = 0, last = -1, same = 0; i < 300 && same < 3; i++) {
+      await page.waitForTimeout(200);
+      const draws = await page.evaluate(() => {
+        window.__ffLab.frame(0);
+        window.__ffLab.frame(0);
+        return window.__ffLab.stats().drawCalls;
+      });
+      same = draws > 0 && draws === last ? same + 1 : 0;
+      last = draws;
+    }
     // ELEMENT_WARM_FRAMES (default 6) more frames at the paused tick first: anything that eases
     // in over render time (the wielders' poses) settles before the moment.
     const warm = Number(process.env.ELEMENT_WARM_FRAMES ?? 6);
@@ -330,13 +355,17 @@ if (want('elements')) {
       await page.evaluate((v) => window.__ffLab.spin(v), spin);
       await frame(FRAME_MS);
     }
+    // "^0=1_0_0.5": seat 0's hand from here on (it reaches the snapshot on the next step).
+    if (hand) {
+      await page.evaluate((h) => window.__ffLab.hand(h.slot, h.grip, h.push, h.twist), hand);
+    }
     // "+3": three ticks, each drawn as live play at 30 fps would draw it, and the shot
     // ELEMENT_STEP_MS of render time after the last (its events play on that step).
     for (let i = 0; i < steps; i++) {
       await step();
       if (i < steps - 1) await frame(TICK_MS);
     }
-    const name = `element-${fx}${variant === 'reaction' ? '' : `-${variant}`}-t${t}${steps ? `+${steps}` : ''}${spin === null ? '' : `-spin${spin}`}${playMs ? `-play${playMs}` : ''}${quality === 'high' ? '' : `-${quality}`}${cam === 'close' ? '' : `-${cam}`}${view ? '-view' : ''}${deviceName === 'desktop' ? '' : `-${deviceName}`}`;
+    const name = `element-${fx}${variant === 'reaction' ? '' : `-${variant}`}-t${t}${steps ? `+${steps}` : ''}${spin === null ? '' : `-spin${spin}`}${hand ? `-hand${hand.slot}g${hand.grip}p${hand.push}t${hand.twist}` : ''}${playMs ? `-play${playMs}` : ''}${quality === 'high' ? '' : `-${quality}`}${cam === 'close' ? '' : `-${cam}`}${view ? '-view' : ''}${deviceName === 'desktop' ? '' : `-${deviceName}`}`;
     if (strip && steps > 0) {
       // A motion strip: the same moment at each render time after its event.
       let elapsed = 0;
@@ -354,7 +383,10 @@ if (want('elements')) {
       await step();
       await frame(TICK_MS);
     }
-    const shown = await page.evaluate(() => window.__ffLab.state().t);
+    const shown = await page.evaluate(() => {
+      const s = window.__ffLab.state();
+      return `${s.t} (${s.snapshot?.match.phase}, ${s.snapshot?.entities.length} bodies)`;
+    });
     console.log(`${fx} ${variant}: the frame shows tick ${shown}`);
     await shot(page, name);
     await ctx.close();

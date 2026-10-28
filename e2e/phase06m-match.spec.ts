@@ -312,6 +312,12 @@ test('online: both seats hands-on — each grips the core in turn, and both devi
     await expect
       .poll(async () => coreOf((await snapshot(b))!).p[0], { timeout: 15_000 })
       .toBeGreaterThan(-1);
+    // The rival's device has seat 0's hand from the room's snapshots and draws its spectral hand
+    // as a fist round the core.
+    await expect
+      .poll(async () => (await snapshot(b))!.players[0]!.hand?.grip ?? 0, { timeout: 10_000 })
+      .toBeGreaterThan(0.6);
+    await expect.poll(() => spectralCurl(b, 0), { timeout: 10_000 }).toBeGreaterThan(0.8);
     return id;
   });
   await a.mouse.up();

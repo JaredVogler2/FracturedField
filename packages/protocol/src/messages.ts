@@ -245,3 +245,8 @@ export function q3(n: number): number {
 export function q4(n: number): number {
   return Math.round(n * 10000) / 10000;
 }
+
+/** Rounds to 2 decimals (a hand's grip, push and twist, which are only drawn). */
+export function q2(n: number): number {
+  return Math.round(n * 100) / 100;
+}

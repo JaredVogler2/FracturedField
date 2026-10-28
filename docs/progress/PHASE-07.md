@@ -931,24 +931,41 @@ collide with nothing, and no cast ever waits for them.
   leather grained, the metal hammered — as a bump on the shading normal that fades out where its
   pattern is finer than a pixel. The tests check every shader hook the material patches exists in
   this three, and that low compiles the plain program under its own cache key.
-- **Spectral arm and energy motes** (`wielder-tether.ts`, 3 tests; `wielder-motes.ts`, 3 tests):
-  a ribbon from the acting hand to its spectral hand over the force point (D10's "spectral arm
-  extension"), faint while aiming and flaring with a cast; ten motes per wielder orbiting between the hands at rest and
-  gathering at the acting hand ("idle hovering energy"). Both wielders' arms and motes are one
-  mesh: one draw call.
+- **Spectral arm, energy motes and gauntlet flares** (`wielder-tether.ts`, 4 tests;
+  `wielder-motes.ts`, 4 tests): a ribbon from the acting hand to its spectral hand over the force
+  point (D10's "spectral arm extension"), faint while aiming and flaring with a cast; ten motes
+  per wielder orbiting between the hands at rest and gathering at the acting hand ("idle hovering
+  energy"); a flare at the acting gauntlet, faint while reaching and bright with a cast, at least
+  5 render pixels in radius, so a phone sees which wielder acts where its figure is a few pixels
+  tall. The arm is laid at least 2 render pixels wide (on a phone it is thinner than a pixel
+  across the arena), its light spread over the extra width and its flowing pulses shallower, so
+  it reads as a line, not dashes. Both wielders' arms, motes and flares are one mesh: one draw
+  call.
 - **Spectral hands** (`spectral-hand.ts`, 7 tests): the hand each wielder reaches across the
   field with (WP9; ADR-0009's luminous hands), translucent in its seat's colour at the force
   point: open, palm down over the force point, reaching from its wielder's side with the acting
   hand's handedness (a left hand is the mirror image); closed into a fist round the body the
   authoritative grip holds, and turning with a spinning core (the player's twist, as the
-  authority keeps it). The open hand and the fist share one topology, so both seats' hands are
+  authority keeps it). It mirrors the seat's hand channel: as closed as the hand; a push presses
+  it down toward the field and flatter, a pull lifts it and curls it into a claw, a twist turns
+  it (seen from above) the way it would spin a held core. This device's own seat draws its hand
+  at once (cosmetic, as its reticle); the rival's comes from the snapshots, which now carry each
+  seat's live hand (grip, push and twist, rounded; none for keys, touch without hands-on, the bot
+  or a stale hand). Small on screen, a hand grows to keep 24 render pixels of length (at most
+  ×1.75), fills in, and keeps its colour (less gain, and it dims the floor behind it instead of
+  washing out to cream). The open hand and the fist share one topology, so both seats' hands are
   one mesh, blended per hand in the vertex shader: one draw call. The spectral arm arrives at its
   wrist.
 - **Scene** (`Wielders.tsx`): each frame the animator's targets become bone rotations (the torso
   spread over hips, spine and chest; the head toward its look within a natural turn and nod; arms
   and legs by IK with the feet planted; fingers curled by the fist; the coat's tails less the
   hips' own lean). Larger than life (×1.5) to read from across the arena. Test runs expose
-  `__ffWielders` (moves played per wielder, the main thread's time per frame).
+  `__ffWielders` (moves played per wielder, the main thread's time per frame, each spectral
+  hand's curl, size, push and place).
+- **Physics Lab: a held hand** (`__ffLab.hand(slot, grip, push, twist)`; in captures
+  `R4:8+4^0=1_0_0`): from the next tick a seat describes that hand as a camera would, toward its
+  own aim, so the spectral hands' states can be shot at an exact moment. A what-if outside the
+  fixture's script, like a material change.
 
 ### Capture → critique → revision (frames in `docs/visual-evidence/phase-07/7d/`)
 
@@ -1016,13 +1033,51 @@ frames.
    down over its force point. Close to the force point (`spectral-hand-w6.jpg`) the hand is a
    palm-down open hand in the seat's colour, the arm arriving at its wrist from the wielder on the
    far plinth. On a landscape phone on low (`gameplay-throw-phone-low-w6.jpg`) the figures are
-   about 10 CSS pixels tall: the cyan hand reads, the amber one faintly, and the arms break into
-   dashes. The phone is where the wielders still fall short (below). A pale, striped panel on
+   small — about 19 CSS pixels tall, as measured in w7 (this round's text first said 10, an
+   estimate by eye) — the cyan hand reads, the amber one faintly, and the arms break into
+   dashes. The phone is where the wielders still fell short (w7–w9). A pale, striped panel on
    TIDE's coat front did not change with the lining, nor in a last frame with the skirt's
    front-edge trim taken off (its colour had smeared across a whole skirt segment; the skirt now
    keeps only its trimmed hem). It is the rim light in the seat's colour lifting the panel where
    it turns edge-on to the camera, with the quilting striping it: open for 7E, where tightening
    the rim has to be weighed against the outline it gives the figures at gameplay distance.
+8. **w7 — phones, measured** (`compare-phone-w6-w9.jpg`). A probe of the gameplay framing (the
+   game's own camera fit; the figures' feet and heads, a hand at the centre and a metre at the
+   far wall projected per layout) put the wielders at 24 CSS pixels tall on a landscape phone
+   with its touch controls (19 without), 17–22 in portrait — at the screen's left edge — and 71
+   on a 1080p desktop; a spectral hand at 12–19 CSS pixels on phones; a metre at the far wall at
+   8–10. The low tier renders at 0.8× and has no bloom, so the arm (9–14 cm wide) was under a
+   render pixel — the dashes — and a hand 15 pixels long was an outline a pixel wide. Changes, no
+   new draw call: the arm laid at least 2 render pixels wide (its light spread over the extra
+   width); a hand small on screen grows to keep 24 render pixels (at most ×1.75) and fills in; a
+   flare at the acting gauntlet. Found: both hands now read as hands on a phone, the cyan one in
+   its colour, and the flare marks EMBER's raised gauntlet as it throws; but the arm still read as
+   dashes — its flowing pulses (0.1 to 1.0) at phone scale — and the amber hand washed out to
+   cream, filled in at full additive gain over the stone. Desktop unchanged: 0.02 % of the high
+   frame's pixels moved by more than 40 levels, all along the arm beside EMBER.
+9. **w8 — a line, and the hand channel.** The arm's pulses shallow (0.76 to 1.0) when it is thin:
+   a phone now sees a continuous line from the flaring gauntlet down to the hand. Less gain on a
+   filled hand: the amber hand went from cream to peach (additive light over a light floor pales
+   any colour). The spectral hands now mirror the hand channel (§ Spectral hands), and the
+   Physics Lab can hold a seat's hand for captures. The captures of the open hand's states came
+   out without their bodies: a race in the capture script, not the game. A second page in a
+   batch, its code already compiled, reached its tick before its scene had mounted, so its frames
+   drew nothing and its shot came out bare (the lab's state was right: tick 12, playing, five
+   bodies). The script now redraws the paused moment every 200 ms until the scene draws, and the
+   same count three times running, before its moment.
+10. **w9 — colour, and the hand's states** (`compare-phone-w6-w9.jpg`, `hands-w9.jpg`,
+    `hands-phone-low-w9.jpg`, `phone-portrait-low-w9.jpg`). A small hand now also dims what lies
+    behind it (its light is added as before and the background kept but for up to 0.6 of the
+    hand's opacity; on desktop that share is zero, so nothing changed there): on a phone EMBER's
+    hand holds an amber hue over the stone instead of going cream (still pale in the palm beside
+    the white-hot core). The held hand's states, close up on high: a fist closed on top of the
+    core it lifted, half lost in the core's halo; a push, the open hand pressed down and flat over
+    the force point; a pull — the clearest — raised, fingers curled down; a twist on an empty
+    hand, a quarter turn about the vertical, subtle from a low camera; a twisting fist turning
+    with the spin swirl beside it. On a low landscape phone the fist (its arm drawn from the
+    flaring gauntlet) and the push read as EMBER's; the pull's claw is small. In a live portrait
+    match both hands read in their colours, the cyan arm a faint line back to TIDE's plinth at the
+    screen's left edge.
 
 ### D10 checklist
 
@@ -1030,7 +1085,7 @@ frames.
 | --- | --- |
 | Original wielders: heroic silhouettes in layered ceremonial coats, sashes and harnesses; faceless masks with controlled eye emissive; conductor gauntlets; boots on the plinths | Built (§ Body). Procedural and original; no franchise costume |
 | Amber/copper and cyan/silver; stage symmetry | Built; the mirror test (`wielder-anim.test.ts`) checks mirrored play gives the mirrored wielder to 1e-9 |
-| A spectral arm extension to the remote target | Built: the arm (ribbon) from the acting hand to the spectral hand over the force point |
+| A spectral arm extension to the remote target | Built: the arm (ribbon) from the acting hand to the spectral hand over the force point, which mirrors the seat's hand channel (grip, push, twist) |
 | Procedural mesh characters with torso, joints, limbs, cloth-like geometry, normal/detail maps and skeleton animation; reasonable LODs | Built: lofted, skinned to 24 bones; detail as a procedural relief (medium and high); the low tier has fewer rings and no relief. Not glTF; no artist-made maps |
 | Head/mask, articulated shoulders, elbows, wrists and hands, torso, coat, sash, boots, ambient particles, energy attachments; plausible joint limits | Built; the fingers are one bone per hand (a fist, not single fingers); joint limits in the IK and the head's turn |
 | Clips: idle hover, aim, Pulse throw, Sweep arc, Lift sustain, Guard cross, Infuse channel, stagger, celebrate; upper body over idle | Built as procedural moves (plus freeze, charge, magnetize, gravity, focus, draw, the grip), layered over the base |
@@ -1041,23 +1096,23 @@ frames.
 | Large enough at the broadcast view to recognise casts; colour and shape on gauntlets; the loadout's motif | ×1.5, rim, ring, glowing gauntlets, the arm and the spectral hand (frames below). The loadout motif is not built (the loadout is not in the snapshot) |
 | Camera Stand: a local debug silhouette in the HUD | Not built (Phase 05's tracking chip and practice view show the camera's view of the hand) |
 | Privacy: no facial capture | Nothing of the player is drawn on the wielder; its moves come from the game's events |
-| Phones: simpler clothing and bones, an expressive silhouette | Low tier: 10-ring lofts, no relief, no shadows; the same 24 bones |
+| Phones: simpler clothing and bones, an expressive silhouette | Low tier: 10-ring lofts, no relief, no shadows; the same 24 bones. At 17–24 CSS pixels the figures' poses barely read on a phone: the acts are carried by the gauntlet flare, the arm (at least 2 render pixels) and the spectral hand (at least 24, filled in, in its colour) |
 | Tests: mirrored players, both hands correct, no hyperextension; lift then guard, celebration over a move, a lost hand, a disconnect; four poses a player; a short animation review | All as unit tests; the browser test matches every pulse cast to one throw on its own wielder in a real match; poses and motion strips as frames (no video) |
 
 ### Render counts (counts, not timings)
 
-Renderer counters for one frame, all passes (`capture-arena.mjs`; w1 drew the bodies only, w6
-is the final look):
+Renderer counters for one frame, all passes (`capture-arena.mjs`; w1 drew the bodies only; w6
+and w9 the later looks — the phone work added no draw call):
 
-| View | Tier | w1 | w6 |
-| --- | --- | --- | --- |
-| Gameplay, 1920 × 1080 | high | 145 draws / 206 k triangles | 147 / 209 k |
-| Phone landscape 844 × 390 | medium | 147 / 203 k | 149 / 209 k |
-| Phone landscape 844 × 390 | low | 91 / 68 k | 93 / 71 k |
-| Phone portrait 390 × 844 | low | 85 / 59 k | 87 / 63 k |
+| View | Tier | w1 | w6 | w9 |
+| --- | --- | --- | --- | --- |
+| Gameplay, 1920 × 1080 | high | 145 draws / 206 k triangles | 147 / 209 k | 145 / 209 k |
+| Phone landscape 844 × 390 | medium | 147 / 203 k | 149 / 209 k | 149 / 209 k |
+| Phone landscape 844 × 390 | low | 91 / 68 k | 93 / 71 k | 93 / 71 k |
+| Phone portrait 390 × 844 | low | 85 / 59 k | 87 / 63 k | 87 / 63 k |
 
-The wielders take four draw calls (two bodies, the arms and motes, the hands) and on low 6.5 k
-triangles: two bodies of 2.5 k, 1.3 k for both hands, 152 for the arms and motes. On high it is
+The wielders take four draw calls (two bodies, the arms, motes and flares, the hands) and on low
+6.5 k triangles: two bodies of 2.5 k, 1.3 k for both hands, 160 for the arms, motes and flares. On high it is
 10 k, and the bodies are drawn again into the shadow map. Budgets (docs/3D_VISUAL_STANDARD.md):
 100 draws and 80 k triangles on low, 170 draws on medium, 210 on high. 
 
@@ -1080,22 +1135,35 @@ and passed on the next.
 
 ### Tests
 
-- **Unit:** 46 wielder tests in 7 files — IK 8, animation 16, body 7, material 2, spectral arm
-  3, motes 3, spectral hands 7 — and the whole suite passes (415 tests in 50 files). The ones a browser cannot
-  show: mirrored play gives the mirrored wielder; a cast at the near field points out over it;
+- **Unit:** 48 wielder tests in 7 files — IK 8, animation 16, body 7, material 2, spectral arm
+  4, motes and flares 4, spectral hands 7 — and two in the sim (each live hand in the snapshot,
+  rounded, gone once stale or disconnected; the lab's held hand reaches the snapshot every tick
+  while the fixture's script still runs); the whole suite passes (419 tests in 50 files). The
+  ones a browser cannot show: the arm keeps 2 render pixels from far away and says how wide it
+  really is; mirrored play gives the mirrored wielder; a cast at the near field points out over it;
   the coat trails a lunge and settles; no frame moves a hand 8 cm; every part faces outward (the
   test fails on the old winding); the material takes every hook it patches in this three; the
   fist's fingertips meet the palm with every bone its length; a left hand is a right hand's
   mirror image.
 - **Browser:** `e2e/phase07-wielders.spec.ts` plays a bot match: every pulse cast is one throw
-  on its own wielder and the bot's casts play on the bot's wielder (on the final build: seat 0
-  cast 3 pulses and its wielder threw 3, the bot cast 3 and its wielder threw 3; the wielders
-  took 0.57 ms of the main thread a frame for both, a mean over 52 frames on this container's
-  CPU, not a phone); the
-  hands-on match test (`phase06m-match.spec.ts`) now also checks that the gripping seat's
-  spectral hand closes. On the final build the timing-sensitive tests passed with the wielders
-  in every match: 8 of 8 in 8.4 min — the wielders test, both hands-on match tests, the camera
-  goal test (a goal in its first stretch) and the four bot and local-duel tests.
+  on its own wielder and the bot's casts play on the bot's wielder. The hands-on match tests
+  (`phase06m-match.spec.ts`) check that the gripping seat's spectral hand closes and, online,
+  that the rival's device has that seat's hand from the room's snapshots and draws it as a fist.
+  On the w9 build, 9 of 9 timing-sensitive tests passed in 13.3 min (this container, four cores):
+  the wielders test (seat 0 cast 3 pulses and its wielder threw 3, the bot cast 2 and its
+  wielder threw 2; 0.59 ms of the main thread a frame for both, on this container's CPU, not a
+  phone), both hands-on match tests, the camera goal test, the four local-match tests in
+  `phase02.spec.ts` and the online loadout test.
+- **CI on PR #4 (`9706e0f`): 44 of 46.** The online loadout and online camera tests failed where
+  the guest joins: its lobby was not visible within 30 s. Pinned to two cores, a probe of the
+  guest's join (`scripts/probe-join.mjs`, three runs per build) found the guest freezing for
+  32–39 s right after its WELCOME, on main (31.6, 38.6, 35.4 s) as with the wielders (35.3, 32.1,
+  35.0 s): its page compiles the arena's shaders again for the match view it joins into. The
+  online loadout test failed on two cores on main too (at the guest's seat), and on this branch
+  (at the guest's invite page). Not 7D's fault, then, though every scene drawing a little more may
+  have tipped a slow runner. `openRoom` now gives the guest's join steps 90 s (the steps and their
+  checks unchanged); on two cores both tests then passed (2.8 and 2.9 min). One renderer kept
+  across the menu and matches would remove the second compile; it stays a recorded limit.
 - `pnpm typecheck`, `pnpm lint` and `pnpm format:check` are clean.
 
 ### Honest limits
@@ -1103,14 +1171,14 @@ and passed on the next.
 - Headless SwiftShader frames only: no GPU, no phone. D10's "don't disrupt 30+ fps on the mobile
   tier" is not measured on a phone; what is measured here is the low tier's draw calls and
   triangles against the budget and the wielders' main-thread time on this container's CPU.
-- On phones the wielders are small (the plinths stand behind the far wall): about 10 CSS pixels
-  tall on a landscape phone, less in portrait. What carries their acts there is colour and
-  light — the spectral hands, the arms, the gauntlets — not the figures' poses, and on low (no
-  bloom) the amber hand and both arms are faint. This is what keeps 7D open.
-- The spectral hands open and close with the authoritative grip and turn with a spinning core;
-  they do not push (WP9 asks for it; push is not in the snapshot) and they do not mirror the
-  local player's own hand shape. The fist is checked by a browser test, not captured (no lab
-  fixture grips).
+- On phones the wielders are small (the plinths stand behind the far wall): 19–24 CSS pixels
+  tall on a landscape phone, 17–22 in portrait at the screen's left edge (measured in w7 from
+  the game's camera fit). Their poses barely read there; the acts are carried by the gauntlet
+  flare, the arm and the spectral hand, which now read on low (w9). The figures were not scaled
+  up for phones: larger than ×1.5 they would stand as giants on their plinths.
+- The spectral hands mirror the hand channel: the local seat's at once, the rival's from the
+  room's snapshots (the browser test checks the grip reaches the rival). A twist on an empty hand
+  is subtle from a low camera, and a fist on the core half disappears in the core's halo (w9).
 - The fingers are one bone per hand (a fist or an open hand, no single fingers); the body is
   procedural lofts, not an artist's glTF, and its detail is procedural relief, not painted maps.
 - Not built: the loadout's motif on the wielder (the loadout is not in the snapshot), a reaction
@@ -1123,16 +1191,16 @@ and passed on the next.
 ## Next instruction
 
 **7D — Wielder characters and IK** (prompts/deep-dives/D10-CHARACTERS-IK.md): the wielders are in
-the game, posed by IK from authoritative events and snapshot state, with spectral arms, motes and
-spectral hands; rounds w0–w6 are critiqued in §7D. What keeps 7D open:
-- **Phones.** On a landscape phone on low the figures are about 10 CSS pixels tall and only the
-  spectral hands carry the acts, the amber one faintly, the arms in dashes (low has no bloom).
-  Make the cast readable there — stronger arms and hands on low, larger hands on phones, a phone
-  framing that gives the plinths more room — and capture it, landscape and portrait.
-- **The spectral hands' push and the local hand's shape** (WP9): push and twist from the hand
-  channel are in the authority but not in the snapshot; the local player's own hand could drive
-  its spectral hand cosmetically (ADR-0009's 0 ms feedback).
-- Then the 7D gate review against D10's gate and 7E.
+the game, posed by IK from authoritative events and snapshot state, with spectral arms, motes,
+gauntlet flares and spectral hands that mirror the hand channel; rounds w0–w9 are critiqued in
+§7D, the phones in w7–w9. Next:
+- **The 7D gate review** against D10's gate ("two rendered characters clearly read as powerful
+  players capable of acting on the same world … don't disrupt 30+ fps on the mobile tier"), its
+  failure line (a perfect hero still with rigid combat animation) and the checklist above. Decide
+  first whether two unbuilt items belong in 7D: the loadout's motif on the wielders (the
+  loadout is known from the lobby, not the snapshot) and a reaction to a hit near one's own
+  goal. Then judge, with the phone figures' size (17–24 CSS pixels) recorded as a limit.
+- Then 7E (D11).
 
 Open from 7C, moved on: the core's speckle at phone size (7E); GPU cost and Safari on a device
 (Phase 11's device checks); rune circles where casts land (WP8's leftover, with 7D's casting).

@@ -31,7 +31,7 @@ import type {
   Vec3,
   WorldSnapshot,
 } from '@ff/protocol';
-import { EFFECT_FLAG, q3, q4 } from '@ff/protocol';
+import { EFFECT_FLAG, q2, q3, q4 } from '@ff/protocol';
 import { initPhysics, RAPIER } from './rapier.js';
 import { PhysicsWorld, restoreRapierWorld, GROUP, type EntityRecord } from './physics.js';
 import { Rng, type RngState } from './rng.js';
@@ -2585,6 +2585,7 @@ export class GameWorld {
     const cd: Partial<Record<AbilityId, number>> = {};
     for (const [k, val] of Object.entries(p.cooldowns))
       if (val && val > 0) cd[k as AbilityId] = val;
+    const hand = this.handNow(p);
     return {
       slot: p.slot,
       m: [q3(p.mx), q3(p.mz)],
@@ -2593,6 +2594,10 @@ export class GameWorld {
       hold: p.hold ? p.hold.ability : null,
       holdTarget: p.hold ? p.hold.target : -1,
       grasp: p.grasp ? p.grasp.target : -1,
+      // The live hand, for drawing only (a seat without one sends none, as before).
+      ...(hand.tick >= 0
+        ? { hand: { grip: q2(hand.grip), push: q2(hand.push), twist: q2(hand.twist) } }
+        : {}),
       connected: p.connected,
     };
   }
@@ -2736,6 +2741,12 @@ export class GameWorld {
     const c = this.clampToSide(slot, x, z);
     p.mx = p.tx = c.x;
     p.mz = p.tz = c.z;
+  }
+
+  /** Debug/test-only: where the seat's force point is heading (its last aim), world x, z. */
+  debugAimTarget(slot: PlayerSlot): [number, number] {
+    const p = this.players[slot];
+    return [p.tx, p.tz];
   }
 
   debugSetEnergy(slot: PlayerSlot, energy: number): void {

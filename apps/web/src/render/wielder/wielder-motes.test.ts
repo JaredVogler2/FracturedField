@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { layMotes, moteCorner, MOTES } from './wielder-motes';
+import { layFlare, layMotes, moteCorner, MOTES } from './wielder-motes';
 
 const right = new THREE.Vector3(1, 0, 0);
 const up = new THREE.Vector3(0, 1, 0);
@@ -59,5 +59,24 @@ describe('energy motes (7D, D10): sparks about the hands', () => {
     layMotes(new THREE.Vector3(), 0.2, 0.05, 1, 0, right, up, pos, glow, MOTES * 4);
     for (let i = 0; i < MOTES * 4 * 3; i++) expect(pos[i]).toBe(9);
     for (let i = 0; i < MOTES * 4; i++) expect(glow[i]).toBe(9);
+  });
+
+  it('lays the gauntlet flare as one camera-facing quad of its radius, in its own slot', () => {
+    const centre = new THREE.Vector3(11, 4.5, -14);
+    const pos = new Float32Array(8 * 3).fill(9);
+    const glow = new Float32Array(8).fill(9);
+    layFlare(centre, 0.3, 0.8, right, up, pos, glow, 4);
+    for (let i = 0; i < 4 * 3; i++) expect(pos[i]).toBe(9); // the slot before untouched
+    const q = [0, 1, 2, 3].map((c) => new THREE.Vector3().fromArray(pos, (4 + c) * 3));
+    const mid = q.reduce((a, b) => a.add(b), new THREE.Vector3()).multiplyScalar(0.25);
+    expect(mid.distanceTo(centre)).toBeLessThan(1e-5);
+    for (const [c, corner] of q.entries()) {
+      const [sx, sy] = moteCorner(c);
+      // Half a side is the radius, along the camera's right and up only (the motes' corners).
+      expect(corner.x - centre.x).toBeCloseTo(sx * 0.3, 5);
+      expect(corner.y - centre.y).toBeCloseTo(sy * 0.3, 5);
+      expect(corner.z - centre.z).toBeCloseTo(0, 5);
+    }
+    expect([...glow.slice(4)]).toEqual([0.8, 0.8, 0.8, 0.8].map(Math.fround));
   });
 });
