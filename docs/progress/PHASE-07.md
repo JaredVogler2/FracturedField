@@ -448,10 +448,12 @@ Built (`apps/web/src/render/core/`):
   a rift spark (the heart's hot centre) gives a phone a focal point. Its light is the scene's
   always-mounted core light, so a goal's collapse never changes the light count (which would
   recompile every lit shader).
-- **Trail** (`CoreTrail.tsx`, replacing the flat ribbon of Phase 02): a camera-facing ribbon as
-  wide and bright as the core's authoritative speed, a hot line down its middle, the core's seam
-  colour, a slight chromatic fringe on high only; steam veils it, a goal fades it, a teleport
-  never streaks across the arena.
+- **Trail** (`CoreTrail.tsx`, replacing the flat ribbon of Phase 02; `trail-path.ts`, 6 tests): a
+  camera-facing ribbon along the path the core took, its samples 0.18 m apart however far the core
+  went in a frame (so it is as long at 30 fps as at 120), as wide and bright as the core's
+  authoritative speed, tapering to a point, a hot line down its middle, the core's seam colour, a
+  slight chromatic fringe on high only; steam veils it, a goal fades it, a teleport never streaks
+  across the arena and a core at rest starts a new one.
 
 Capture → critique → revision (`node scripts/capture-arena.mjs` with `ONLY=core,phones`: a still
 of the core in the Hands Lab with a camera that follows it, the core moving in a match, high and
@@ -507,9 +509,8 @@ shaders are judged on frames only.
 Honest limits (the core):
 - Every frame is a software render. Shader cost on a phone GPU (the plates sample the plasma
   per pixel, twice on medium and high) is not measured.
-- The collapse into the gate and the forming at kickoff are tested as numbers, not yet seen in
-  a captured goal; the trail is built but not yet judged in a frame; they come with the
-  ten-condition evidence.
+- The collapse into the gate and the trail are now seen in frames (the ten-condition evidence
+  below); the forming at kickoff is tested as numbers only.
 
 ### The element systems (in progress)
 
@@ -520,7 +521,8 @@ state (snapshot effects, entity element state, events) and decides nothing.
   tests): pools darker toward their depth, ripple rings and foam round the bodies standing in
   them, a broken shore foam band, branching surface arcs while electrified. The ice plate is the
   collider's own frustum cut into facets (corners move by at most 4 %, tested). It freezes in
-  from the rim over 0.35 s when the pool's ICE flag sets; the collider exists at once. It has a
+  from the rim over 0.35 s when the pool's ICE flag sets (the collider exists at once), over the
+  water, which stays where the front has not reached and fades out as it closes. It has a
   spectral rim (iridescence) on medium and high, cracks radiating from strikes, frost toward its
   base and a deeper blue toward its thick middle. A thaw takes it back into the pool over 0.5 s;
   a break (`shatter`) throws crystal fragments from the strike and the water is back at once.
@@ -535,7 +537,8 @@ state (snapshot effects, entity element state, events) and decides nothing.
   throw steam. Fractures and crumbling guards throw dust that settles.
 - **Electric** (`electric.tsx`; `bolt-path.ts`, 5 tests): branching arcs along each CHARGE event's
   conduction links, between the authority's own node positions. They are seeded from the event,
-  so both devices draw the same lightning, and restrike within 0.35 s; conductors flare and spark.
+  so both devices draw the same lightning, bow well up between conductors, brighter than the
+  charged water's own crackle, and restrike within 0.35 s; conductors flare and spark.
   Reduced flashes halves the restrike flicker, and nothing lights the whole screen.
 - **Air** (`FieldEffects.tsx`, `ribbons.ts`): straight streamlines flowing downwind, brightest
   where the authority's push is strongest, dashed wisps along the field's two edges and fine dust
@@ -554,7 +557,8 @@ state (snapshot effects, entity element state, events) and decides nothing.
 
 Capture → critique → revision (`ONLY=elements node scripts/capture-arena.mjs`; the Physics
 Lab's reaction fixtures with the close camera). A moment after an event is captured by seeking to
-its tick and stepping one tick, e.g. `ELEMENT_TICKS=R5:11+1`.
+its tick and stepping one tick, e.g. `ELEMENT_TICKS=R5:11+1`; since round ev the lab draws frame by
+frame, so the moment is exact.
 
 1. **e1 (the baseline, on the core build).** R1 at tick 60 on high: the ice was a flat pale disc
    and the guard a white box with a cyan edge.
@@ -573,19 +577,114 @@ its tick and stepping one tick, e.g. `ELEMENT_TICKS=R5:11+1`.
 4. **e5.** The ice is deeper and translucent (the floor shows through it on high) with no hole;
    the fire bed is softer; the bolts bow up, wider and more violet; the air streamlines run
    straight and parallel with edge wisps along the wind; the chips are lit and irregular.
+5. **ev (the D09 evidence round).** Assembling the ten conditions turned up six faults, all fixed
+   before the evidence frames were taken, and one framing problem.
+   - **The captures were a lottery.** Under load the software renderer drew a frame in 0.7–1.2 s
+     and took 5–7 s per screenshot (measured: the first shot 7.3 s after the key press), so an
+     effect lasting a fraction of a second was gone before the shot, and `ELEMENT_STEP_MS` meant
+     nothing. The charge arcs had been drawn all along, but the e4 and e5 charge frames show only
+     the water's crackle: the e5 line above that the bolts "bow up, wider and more violet"
+     described the code, not anything a frame showed. The Physics Lab can now draw frame by
+     frame (`frames=manual`: R3F's `advance` draws one frame at an exact render time), and the
+     capture script steps the fixture a tick at a time with one frame per tick, then shoots an
+     exact render time after the event (`R5:11+1` with `ELEMENT_STEP_MS=50` is the charge 50 ms
+     after it struck). Playing on with the space bar also overshot (the screenshot took long
+     enough for the lab to play on), so a play-on is now ticks and frames too.
+   - **The lab ran moving bodies ahead of their tick.** Its client extrapolated up to 100 ms past
+     the newest snapshot while the lab sat paused, so a paused frame showed the core up to 1.4 m
+     ahead of the tick it named, by a different amount each frame (read back through a temporary
+     probe). The lab's client now shows each published tick exactly (3 tests).
+   - **The core's trail depended on the frame rate.** It laid a sample only when the core moved
+     0.18 m within one frame: at 60 fps a core slower than about 11 m/s left no trail at all
+     (at 120 fps, slower than 22 m/s); at a software renderer's few frames per second the trail
+     ran long; and a short trail ended in a full-width square edge (the flat rectangle beside the
+     core in the first R1 frames). `trail-path.ts` now lays samples 0.18 m apart along the path
+     whatever the frame rate (6 tests); the fade and the taper run its actual length, so it
+     always ends in a point.
+   - **The water's crackle outshone the discharge.** The charged water's arcs (a state) were
+     brighter than the charge arcs (the event that charged it). The crackle is now under half as
+     bright; the arcs are brighter, with a wider glow, and bow higher between conductors.
+   - **The freeze front crossed bare floor.** A pool hid its water the moment it froze, so the
+     plate's open middle showed the floor, a hole rather than water crystallizing from the rim.
+     The water now stays where the front has not reached and fades as it closes (ice-state test).
+   - **The trail was too faint** to read against the stone once it followed the path: it is 1.8×
+     brighter and fades more slowly along its length.
+   - **Framing: R2 cannot show the guard**: from its close camera the SE pillar hides it. The
+     ricochet comes from R3's control variant (no steam: the shot hits the guard at tick 71,
+     impulse 199) with a camera placed by hand (`ELEMENT_VIEW`), and the goal from a camera in
+     front of the gate.
 
 Frames (headless SwiftShader; inspected; not GPU or phone evidence) are in
 `docs/visual-evidence/phase-07/7c-el/`: ice e1 → e2 → e5 (low and high), air e2 against e5,
 the charge chain and the fracture e4 against e5, and fire and wind beside ice, steam, the gravity
-well, the quench and the melt.
+well, the quench and the melt. Round ev is in `docs/visual-evidence/phase-07/7c-ev/`: the ten
+conditions on high and on low (one sheet each), the charge chain, the stone impact, the ricochet
+and the goal full size on high, and the charge chain as e5 captured it against round ev.
 
 Open (element systems):
-- Heat refraction is not drawn, and the steam has no vision veil (optional in D09).
-- The flames lean with the crosswind in code, but the lean is not yet judged in a frame.
-- On high, only R1 is captured; the high-tier fire capture hit SwiftShader's screenshot error.
-- The ten-condition evidence is not yet assembled.
-- The new systems' draw calls and shader programs are not yet measured (one or two draws each,
-  but every program compiles when a match view mounts, which matters on slow devices).
+- Heat refraction above flames (D09: "restrained heat refraction") is not drawn, and the steam
+  has no vision veil (optional in D09).
+- The steam reads as a soft column rather than distinct rolling billows, on both tiers.
+- Air is a directional gust in this ruleset, so "air vortex" is shown as its streamlines; there
+  is no rotating vortex to draw.
+- Shader compatibility in Safari is not tested (no WebKit here), and the element moments are
+  captured at 1920 × 1080 only, not in phone views.
+- The element systems' draw calls are not measured (one or two per active effect by
+  construction; the Physics Lab page reports no render counts). Their shader programs are
+  counted below.
+
+### The ten conditions (D09 evidence)
+
+Physics Lab fixtures, drawn frame by frame (`frames=manual`) on high and low; the tick each frame
+shows is logged by the capture script. Frames in `docs/visual-evidence/phase-07/7c-ev/`.
+
+| D09 condition | Moment | What the frames show |
+| --- | --- | --- |
+| Fast core spin | R1 control, spin 14 rad/s set at tick 57, then 15 ticks drawn (`R1/control:57~14*500`) | The spin swirl circling the core, its seams brighter and plates parted; its trail along the path it flew toward the guard |
+| Stone impact | R8, 150 ms after the fracture (`R8:5+1`) | The boulder bursting into lit chunks and chips over a dust puff, a shock ring spreading on the floor |
+| Wet/freeze | R1, 150 ms after the freeze (`R1:0+1`) and at tick 60 | The plate closing in from the rim over the still-liquid water, frost sparkling at its open middle; then the finished faceted, translucent plate with crack lines, the core against it |
+| Steam burst | R10, 600 ms after the quench (`R10:28+1`); R3 at tick 40 | A steam column rising from the foaming pool round the red-hot, cracked stone; the steam over R3's fire, veiling the core it lifts |
+| Charge chain | R5, 50 ms after the discharge (`R5:11+1`) | The arc leaping from beside the core into the first pool, across to the second and on toward the guard, forking, a strike ring on each conductor; the soaked guard bursting into chips |
+| Air vortex | R9 at tick 20 | The two gusts' streamlines across the field (the air ability is a directional gust: there is no rotating vortex to show) |
+| Gravity curve | R7 at tick 18; then 12 ticks drawn from tick 12 (`R7:12*400`) | The well's dark heart and lensing ring, field arcs flowing in, shards orbiting; the core's trail as the well pulls it in |
+| Fire + wind | R6 at tick 40 | The flames leaning downwind into the ice they melt, wind streaks across the floor, the core above heated red at its rim |
+| Shield ricochet | R3 control, 100 ms after the hit (`R3/control:71+1`) and 12 ticks drawn from tick 64, from a camera at the guard | The core against the basalt columns, its seams flaring, a shock ring at the contact; then the core rebounding, the ring still spreading, sparks between them |
+| Scored goal | R1, 300 ms after the goal (`R1:164+1`) and 7 ticks drawn from tick 156, from a camera at the gate | The core at the gate mouth; then collapsing into the portal as it flares and throws cyan and amber motes, the score ring sweeping the floor |
+
+### WebGL contexts over ten matches (D09 failure criteria)
+
+D09 rejects a WebGL context leak after ten rematches. A rematch inside a match keeps its canvas;
+what makes contexts is the menu round trip (every match started from the menu, and every return
+to it, mounts a new canvas). `e2e/phase07-rematch.spec.ts` counts the page's contexts as they are
+made (weak references, so counting keeps none alive) and, after every switch, the ones still alive
+(neither lost nor collected): ten matches from the menu and back make 21 contexts, and after each
+switch exactly one is alive, the view on screen. Twenty-one is more than the sixteen a page may
+keep, so a leak would also have made the browser drop one (the test fails on that warning too).
+The first version of this test (pushed in `56db850`) only waited for that warning, which six
+round trips (13 contexts) can never trigger. The new test passed locally in 4.9 min (with the
+CPU shared with a capture batch); the six-trip version took 1.2 min on CI.
+
+### Shader programs (counts, not timings)
+
+`node scripts/probe-programs.mjs` lists every program a page links in 45 s of a bot match (a
+match view compiles all of them when it mounts: the join freeze on a slow device). Before 7C (the
+build of `567aa71`: the Phase 02 core and effects) a match linked 40 programs on low and 47 on
+high; with the 7C core and the element systems it links 45 and 52. By their defines, the new
+ones are four double-sided shader materials, the physical ice material (clearcoat and
+iridescence on high), a textured sprite material and two plain shader materials; three
+vertex-colour programs of the old effects are gone.
+
+### Tests (round ev)
+
+- Unit: 366 tests pass (42 files), among them the trail path (6), the snapshot buffer (3) and the
+  revised ice-state test; typecheck, lint and format are clean.
+- Browser, local (headless SwiftShader): the ten-match context test passed (4.9 min). With a
+  capture batch running alongside (software GL at full load on the same four cores), the Physics
+  Lab test and the Hands Lab mouse test passed, while the online loadout test timed out opening
+  its room and the Hands Lab camera test's throw fell short (the core reached −8.6 m, not past
+  −12.5 m). With the CPU free, both passed (2 of 2, 3.2 min).
+- The evidence captures exit non-zero on a page error, a shader or WebGL console error, or a
+  frame that never rendered; all ten capture runs (30 frames) exited 0.
 
 ### Commits (7C)
 
@@ -593,24 +692,32 @@ Open (element systems):
   shell over a plasma heart".
 - The element systems: "Phase 7C (in progress): element systems as modules on authoritative
   state" and "Phase 7C (in progress): element revisions from capture rounds e2–e5".
+- Round ev: "Render: the core trail lays its path by distance, the same at any frame rate", "Render:
+  the discharge leads, the charged water's crackle follows", "Physics Lab: exact ticks and exact
+  frames for evidence captures", "Render: water stays under a freeze front; the core trail reads
+  against the floor" and "Browser test: ten matches from the menu, each view releasing its WebGL
+  context".
 
 ## 7D — Wielder characters and IK (D10) — NOT STARTED
 ## 7E — Golden screenshots and art critique (D11) — NOT STARTED
 
 ## Next instruction
 
-**7C, continued** (prompts/deep-dives/D09-CORE-ELEMENTAL-VFX.md): the element systems are built
-and revised through e5. Next:
-- the full browser suite on the element build, then push;
-- the high tier for the remaining fixtures;
-- the flame lean in a frame;
-- the draw-call and program counts of the new systems;
-- the ten-condition evidence: fast spin, stone impact (R8 `5+1`), wet/freeze (R1), steam burst
-  (R10 `28+1`), charge chain (R5 `11+1`), air vortex (R9), gravity curve (R7 at 18), fire + wind
-  (R6), shield ricochet (R2 `123+1` or R6 `142+1`) and the scored goal, which also shows the
-  core's collapse and trail.
+**7C, continued** (prompts/deep-dives/D09-CORE-ELEMENTAL-VFX.md): the ten-condition evidence is
+assembled (round ev; frames in `docs/visual-evidence/phase-07/7c-ev/`), drawn frame by frame on
+high and low. Before the 7C gate review:
+- heat refraction above flames (D09's fire asks for it; restrained, high tier only);
+- the steam as rolling billows rather than a soft column;
+- the element moments in phone views on the low tier (the capture script's element section needs
+  a phone viewport option);
+- Safari: shader compatibility needs a Safari browser (WebKit is not installed here) — a limit to
+  record, or a check for the owner on a device;
+- then the gate review against D09's gate statement, and 7D.
 
-The plan (docs/3D_IMPLEMENTATION_PLAN.md, WP8) adds rune circles where casts land. Capture with
-`node scripts/capture-arena.mjs <url> <dir> <round>` (`ONLY=core,phones` for the core,
-`ONLY=elements` with `ELEMENT_TICKS`, `ELEMENT_QUALITY` and `ELEMENT_STEP_MS` for element
-moments) and compare against the e5, c9 and b6 frames.
+The plan (docs/3D_IMPLEMENTATION_PLAN.md, WP8) adds rune circles where casts land.
+
+Capture with `node scripts/capture-arena.mjs <url> <dir> <round>`: `ONLY=elements` with
+`ELEMENT_TICKS` (`R5:11+1` an event moment, `~14` a spin, `*400` a play-on, `R3/control:71` a
+control variant), `ELEMENT_STEP_MS` (render time after the event), `ELEMENT_QUALITY`, `ELEMENT_CAM`
+and `ELEMENT_VIEW` (a camera placed by hand); `ONLY=core,phones` for the core. Compare against the
+ev, c9 and b6 frames.
