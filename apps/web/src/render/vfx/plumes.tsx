@@ -37,7 +37,12 @@ function puffMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
-    uniforms: { uTime: { value: 0 }, uKey: { value: KEY_DIR } },
+    uniforms: {
+      uTime: { value: 0 },
+      uKey: { value: KEY_DIR },
+      // Lumpy lighting from the noise's slope (two more noise reads a pixel): medium and high.
+      uDetail: { value: 1 },
+    },
     vertexShader: /* glsl */ `
       // centre (world), size (m)
       attribute vec4 iA;
@@ -69,6 +74,7 @@ function puffMaterial(): THREE.ShaderMaterial {
     fragmentShader: /* glsl */ `
       uniform float uTime;
       uniform vec3 uKey;
+      uniform float uDetail;
       varying vec2 vUv;
       varying vec4 vColor;
       varying float vSeed;
@@ -80,13 +86,27 @@ function puffMaterial(): THREE.ShaderMaterial {
         vec2 c = vUv * 2.0 - 1.0;
         float r = length(c);
         if (r > 1.0) discard;
-        float n = fbm(c * 1.7 + vSeed * 13.0 + vec2(0.0, -uTime * 0.12));
-        float dens = smoothstep(1.0, 0.2, r + (n - 0.5) * 0.7);
-        // A billow: light from the key on the side facing it, a cool shadow underneath.
+        vec2 q = c * 2.1 + vSeed * 13.0 + vec2(0.0, -uTime * 0.1);
+        float n = fbm(q);
+        // A billow: a dense body with lobed edges cut by the noise, not a soft disc; a slow warp
+        // bends the card's circle into an irregular blob.
+        vec2 warp = vec2(noise(q * 0.5 + 3.1), noise(q * 0.5 + 7.7)) - 0.5;
+        float rb = length(c + warp * 0.55);
+        float dens = smoothstep(0.02, 0.3, 0.8 - rb + (n - 0.5) * 1.15);
         vec3 N = normalize(c.x * vRight + c.y * vUp + sqrt(max(0.0, 1.0 - r * r)) * vToCam);
+        if (uDetail > 0.5) {
+          float nx = fbm(q + vec2(0.07, 0.0));
+          float ny = fbm(q + vec2(0.0, 0.07));
+          N = normalize(N + ((nx - n) * vRight + (ny - n) * vUp) * 5.0);
+        }
         float lit = max(dot(N, uKey), 0.0);
-        vec3 col = vColor.rgb * mix(vec3(0.5, 0.56, 0.68), vec3(1.06, 1.0, 0.9), lit);
-        col *= 0.85 + 0.3 * n;
+        // Lit from the key, its underside in its own shadow, a bright lining where the light
+        // grazes its edge.
+        float under = smoothstep(0.6, -0.8, c.y);
+        float rim = pow(1.0 - max(dot(N, vToCam), 0.0), 3.0) * lit;
+        vec3 col = vColor.rgb * mix(vec3(0.42, 0.48, 0.6), vec3(1.08, 1.02, 0.92), lit);
+        col *= 1.0 - 0.35 * under;
+        col += vColor.rgb * rim * 0.5;
         float a = dens * vColor.a;
         if (a < 0.004) discard;
         gl_FragColor = vec4(col, a);
@@ -207,6 +227,7 @@ export function Plumes({ tier = 'high' }: { tier?: Tier }) {
     const dt = Math.min(rawDt, 0.1);
     const t = clock.elapsedTime;
     parts.mat.uniforms.uTime!.value = t;
+    parts.mat.uniforms.uDetail!.value = tier === 'low' ? 0 : 1;
     const effects: readonly EffectSnapshot[] = frame.current?.latest?.effects ?? [];
     const stage = parts.stage;
     let n = 0;
@@ -249,7 +270,7 @@ export function Plumes({ tier = 'high' }: { tier?: Tier }) {
           const x = fx.p[0] + Math.cos(sd.a + life * 0.7) * rr + w.x * 0.05 * life;
           const z = fx.p[2] + Math.sin(sd.a + life * 0.7) * rr + w.z * 0.05 * life;
           const y = 0.35 + life * EL.steam.ceiling * 0.75;
-          const a = dens * 0.42 * Math.pow(Math.sin(life * Math.PI), 0.9) * fade;
+          const a = dens * 0.48 * Math.pow(Math.sin(life * Math.PI), 0.9) * fade;
           put(x, y, z, (1.0 + 2.4 * life) * sd.size * scale, STEAM, a, sd.phase, sd.spin * t);
         }
       } else if (fx.kind === 'flame') {
