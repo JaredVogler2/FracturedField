@@ -1,0 +1,202 @@
+{
+  "arena-brass-b1.jpg": {
+    "p5": 0.028,
+    "p50": 0.169,
+    "p95": 0.458,
+    "range": 0.43,
+    "clippedPct": 0,
+    "warmCool": 0.231
+  },
+  "arena-channel-b1.jpg": {
+    "p5": 0.022,
+    "p50": 0.255,
+    "p95": 0.749,
+    "range": 0.727,
+    "clippedPct": 0.001,
+    "warmCool": 0.169
+  },
+  "arena-element-R1-t120-b1.jpg": {
+    "p5": 0.027,
+    "p50": 0.216,
+    "p95": 0.613,
+    "range": 0.585,
+    "clippedPct": 0.062,
+    "warmCool": 0.095
+  },
+  "arena-element-R3-t90-b1.jpg": {
+    "p5": 0.046,
+    "p50": 0.231,
+    "p95": 0.678,
+    "range": 0.632,
+    "clippedPct": 0.001,
+    "warmCool": 0.069
+  },
+  "arena-element-R5-t110-b1.jpg": {
+    "p5": 0.027,
+    "p50": 0.222,
+    "p95": 0.511,
+    "range": 0.484,
+    "clippedPct": 0.001,
+    "warmCool": 0.105
+  },
+  "arena-element-R5-t20-b1.jpg": {
+    "p5": 0.029,
+    "p50": 0.228,
+    "p95": 0.586,
+    "range": 0.557,
+    "clippedPct": 0.004,
+    "warmCool": 0.045
+  },
+  "arena-element-R6-t150-b1.jpg": {
+    "p5": 0.028,
+    "p50": 0.222,
+    "p95": 0.486,
+    "range": 0.458,
+    "clippedPct": 0.015,
+    "warmCool": 0.133
+  },
+  "arena-element-R6-t30-b1.jpg": {
+    "p5": 0.029,
+    "p50": 0.217,
+    "p95": 0.656,
+    "range": 0.627,
+    "clippedPct": 0.086,
+    "warmCool": 0.12
+  },
+  "arena-gate-b1.jpg": {
+    "p5": 0.02,
+    "p50": 0.112,
+    "p95": 0.347,
+    "range": 0.327,
+    "clippedPct": 0,
+    "warmCool": 0.013
+  },
+  "arena-hero-b1.jpg": {
+    "p5": 0.025,
+    "p50": 0.185,
+    "p95": 0.507,
+    "range": 0.482,
+    "clippedPct": 0.001,
+    "warmCool": 0.195
+  },
+  "arena-kickoff-high-b1.jpg": {
+    "p5": 0.027,
+    "p50": 0.185,
+    "p95": 0.519,
+    "range": 0.492,
+    "clippedPct": 0,
+    "warmCool": 0.088
+  },
+  "arena-light-dark-kickoff-b1.jpg": {
+    "p5": 0,
+    "p50": 0.055,
+    "p95": 0.207,
+    "range": 0.207,
+    "clippedPct": 0,
+    "warmCool": 0.082
+  },
+  "arena-light-dark-phone-b1.jpg": {
+    "p5": 0.001,
+    "p50": 0.051,
+    "p95": 0.282,
+    "range": 0.282,
+    "clippedPct": 0.003,
+    "warmCool": 0.114
+  },
+  "arena-light-flat-kickoff-b1.jpg": {
+    "p5": 0.036,
+    "p50": 0.175,
+    "p95": 0.361,
+    "range": 0.325,
+    "clippedPct": 0.001,
+    "warmCool": 0.079
+  },
+  "arena-light-flat-phone-b1.jpg": {
+    "p5": 0.043,
+    "p50": 0.15,
+    "p95": 0.395,
+    "range": 0.352,
+    "clippedPct": 0.003,
+    "warmCool": 0.121
+  },
+  "arena-menu-desktop-high-b1.jpg": {
+    "p5": 0.029,
+    "p50": 0.13,
+    "p95": 0.287,
+    "range": 0.258,
+    "clippedPct": 0,
+    "warmCool": 0.087
+  },
+  "arena-menu-phone-landscape-medium-b1.jpg": {
+    "p5": 0.032,
+    "p50": 0.113,
+    "p95": 0.544,
+    "range": 0.512,
+    "clippedPct": 0,
+    "warmCool": 0.349
+  },
+  "arena-menu-phone-portrait-low-b1.jpg": {
+    "p5": 0.054,
+    "p50": 0.127,
+    "p95": 0.566,
+    "range": 0.512,
+    "clippedPct": 0,
+    "warmCool": 0.355
+  },
+  "arena-phone-landscape-low-b1.jpg": {
+    "p5": 0.04,
+    "p50": 0.194,
+    "p95": 0.452,
+    "range": 0.412,
+    "clippedPct": 0.002,
+    "warmCool": 0.145
+  },
+  "arena-phone-landscape-medium-b1.jpg": {
+    "p5": 0.032,
+    "p50": 0.157,
+    "p95": 0.457,
+    "range": 0.425,
+    "clippedPct": 0.003,
+    "warmCool": 0.134
+  },
+  "arena-phone-portrait-low-b1.jpg": {
+    "p5": 0.048,
+    "p50": 0.175,
+    "p95": 0.325,
+    "range": 0.277,
+    "clippedPct": 0.002,
+    "warmCool": 0.149
+  },
+  "arena-rim-b1.jpg": {
+    "p5": 0.015,
+    "p50": 0.091,
+    "p95": 0.356,
+    "range": 0.341,
+    "clippedPct": 0,
+    "warmCool": 0.073
+  },
+  "arena-stone-b1.jpg": {
+    "p5": 0.022,
+    "p50": 0.336,
+    "p95": 0.913,
+    "range": 0.891,
+    "clippedPct": 0,
+    "warmCool": 0.114
+  },
+  "arena-under-b1.jpg": {
+    "p5": 0.006,
+    "p50": 0.143,
+    "p95": 0.291,
+    "range": 0.284,
+    "clippedPct": 0,
+    "warmCool": 0.058
+  },
+  "arena-wide-b1.jpg": {
+    "p5": 0.037,
+    "p50": 0.135,
+    "p95": 0.242,
+    "range": 0.205,
+    "clippedPct": 0,
+    "warmCool": 0.067
+  }
+}

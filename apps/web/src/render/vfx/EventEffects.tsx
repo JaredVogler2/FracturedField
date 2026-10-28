@@ -13,8 +13,10 @@ const PARTICLES = 640;
 const SHARDS = 32;
 
 interface Ring {
-  mesh: THREE.Mesh;
-  mat: THREE.MeshBasicMaterial;
+  p: THREE.Vector3;
+  color: THREE.Color;
+  /** Opacity at birth (the ring fades from it). */
+  base: number;
   age: number;
   life: number;
   r0: number;
@@ -50,7 +52,7 @@ interface Shard {
 
 /**
  * Transient feedback effects spawned only from authoritative events (cast, impact, goal,
- * despawn, kickoff). Pooled meshes / particle buffers: no per-event allocation in steady state.
+ * despawn, kickoff; an ice plate's break is drawn with the plate, in water-ice.tsx). Pooled meshes / particle buffers: no per-event allocation in steady state.
  */
 export function EventEffects() {
   const client = useGameClient();
@@ -60,24 +62,44 @@ export function EventEffects() {
   const rand = useMemo(() => mulberry32(99), []);
 
   const ringGeo = useMemo(() => new THREE.RingGeometry(0.92, 1, 64, 1), []);
+  // Every ring in one draw call: an instance each, its colour scaled by its fade (additive
+  // blending adds colour × alpha, so a faded colour at full alpha draws the same).
+  const ringMat = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        color: '#ffffff',
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    [],
+  );
+  const ringMesh = useMemo(() => {
+    const m = new THREE.InstancedMesh(ringGeo, ringMat, RING_POOL);
+    // The colour buffer exists from the start, so the first ring never recompiles the material.
+    m.setColorAt(0, new THREE.Color(0, 0, 0));
+    m.instanceColor!.setUsage(THREE.DynamicDrawUsage);
+    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    m.count = 0;
+    m.visible = false;
+    m.frustumCulled = false;
+    m.renderOrder = 5;
+    return m;
+  }, [ringGeo, ringMat]);
   const rings = useMemo<Ring[]>(
     () =>
-      Array.from({ length: RING_POOL }, () => {
-        const mat = new THREE.MeshBasicMaterial({
-          color: '#ffffff',
-          transparent: true,
-          opacity: 0,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-        });
-        const mesh = new THREE.Mesh(ringGeo, mat);
-        mesh.rotation.x = -Math.PI / 2;
-        mesh.visible = false;
-        mesh.renderOrder = 5;
-        return { mesh, mat, age: 0, life: 1, r0: 0.3, r1: 3, active: false };
-      }),
-    [ringGeo],
+      Array.from({ length: RING_POOL }, () => ({
+        p: new THREE.Vector3(),
+        color: new THREE.Color(),
+        base: 0,
+        age: 0,
+        life: 1,
+        r0: 0.3,
+        r1: 3,
+        active: false,
+      })),
+    [],
   );
 
   const particles = useMemo<Particle[]>(
@@ -131,9 +153,10 @@ export function EventEffects() {
   );
   const nextParticle = useRef(0);
 
-  const shardGeo = useMemo(() => new THREE.TetrahedronGeometry(0.22, 0), []);
+  const shardGeo = useMemo(() => chipGeometry(), []);
   const shardMat = useMemo(
-    () => new THREE.MeshStandardMaterial({ color: '#4a4f58', roughness: 0.6, flatShading: true }),
+    // Lit stone chips (they read as black confetti when darker).
+    () => new THREE.MeshStandardMaterial({ color: '#7a736c', roughness: 0.85, flatShading: true }),
     [],
   );
   const shardMesh = useMemo(() => {
@@ -147,27 +170,26 @@ export function EventEffects() {
   useEffect(() => {
     const g = group.current;
     if (!g) return;
-    for (const r of rings) g.add(r.mesh);
+    g.add(ringMesh);
     g.add(shardMesh);
     return () => {
-      for (const r of rings) {
-        g.remove(r.mesh);
-        r.mat.dispose();
-      }
+      g.remove(ringMesh);
       g.remove(shardMesh);
     };
-  }, [rings, shardMesh]);
+  }, [ringMesh, shardMesh]);
 
   useEffect(
     () => () => {
       ringGeo.dispose();
+      ringMat.dispose();
+      ringMesh.dispose();
       pointsGeo.dispose();
       pointsMat.dispose();
       sprite.dispose();
       shardGeo.dispose();
       shardMat.dispose();
     },
-    [ringGeo, pointsGeo, pointsMat, shardGeo, shardMat, sprite],
+    [ringGeo, ringMat, ringMesh, pointsGeo, pointsMat, shardGeo, shardMat, sprite],
   );
 
   useEffect(() => {
@@ -188,10 +210,9 @@ export function EventEffects() {
       r.life = life;
       r.r0 = r0;
       r.r1 = r1;
-      r.mat.color.set(hex);
-      r.mat.userData.base = opacity;
-      r.mesh.position.set(x, y, z);
-      r.mesh.visible = true;
+      r.color.set(hex);
+      r.base = opacity;
+      r.p.set(x, y, z);
     };
     const burst = (
       x: number,
@@ -244,8 +265,15 @@ export function EventEffects() {
       }
     };
     const pulseRadius = DEFAULT_ABILITIES.pulse.radius;
+    // Ice plates break and thaw in WaterAndIce (crystal fragments, the pool back), not as stone.
+    const icePlates = new Set<number>();
+    const guards = new Set<number>();
     return client.events.on((e: GameEvent) => {
       switch (e.type) {
+        case 'spawn':
+          if (e.kind === 'ice') icePlates.add(e.entity);
+          else if (e.kind === 'guard') guards.add(e.entity);
+          break;
         case 'cast': {
           const hex = TEAM_COLORS[e.slot];
           if (e.ability === 'pulse') {
@@ -262,7 +290,10 @@ export function EventEffects() {
             );
             burst(e.p[0], 1.0, e.p[2], hex, 18, 6, 0.35, 0, 0.2);
           } else if (e.ability === 'guard') {
-            burst(e.p[0], 0.4, e.p[2], hex, 30, 4, 0.6, 6, 1.2);
+            // The wall comes up through the floor: a ripple, stone chips shed, a few motes.
+            spawnRing(e.p[0], 0.05, e.p[2], hex, 0.6, 3.2, 0.45, 0.6);
+            shatter(e.p[0], 0.4, e.p[2], 8);
+            burst(e.p[0], 0.3, e.p[2], hex, 10, 2.5, 0.5, 6, 1.0);
           } else if (e.ability === 'sweep') {
             spawnRing(e.p[0], 0.05, e.p[2], hex, 1, DEFAULT_ABILITIES.sweep.radius, 0.45, 0.5);
           } else if (e.ability === 'lift' && e.phase === 'start') {
@@ -307,20 +338,15 @@ export function EventEffects() {
             case 'melt':
               burst(x, 0.2, z, '#7fd3ff', 30, 3, 0.6, 6, 1.0);
               break;
-            case 'boil':
-              burst(x, 0.5, z, '#f2f6fa', 60, 3.5, 1.1, -3, 2.2);
-              break;
-            case 'douse':
-            case 'quench':
-              burst(x, Math.max(0.3, y), z, '#dfe6ec', 28, 2.5, 0.8, -2.5, 1.8);
-              break;
+            // boil, douse and quench throw steam: plumes.tsx draws it.
             case 'shatter':
               spawnRing(x, 0.06, z, '#dff8ff', 0.4, 3.6, 0.4, 0.9);
               burst(x, y, z, '#eafcff', 70, 8, 0.8, 10, 1.4);
               break;
             case 'fracture':
-              shatter(x, y, z, 12);
-              burst(x, y, z, '#c9a27e', 40, 6, 0.7, 9, 1.2);
+              // Chips and a few hot sparks; the dust is a plume (plumes.tsx).
+              shatter(x, y, z, 8);
+              burst(x, y, z, '#ffd2a0', 14, 7, 0.4, 12, 1.0);
               break;
             case 'shock':
               spawnRing(x, 0.06, z, '#8fd0ff', 0.3, 2.8, 0.25, reducedFlashes ? 0.25 : 0.8);
@@ -370,9 +396,15 @@ export function EventEffects() {
           break;
         }
         case 'despawn': {
+          const ice =
+            icePlates.delete(e.entity) || frame.current?.entities.get(e.entity)?.kind === 'ice';
+          if (ice) break;
           if (e.reason === 'broken') {
             shatter(e.p[0], e.p[1], e.p[2], 14);
-            burst(e.p[0], e.p[1] + 0.4, e.p[2], '#cdd6e0', 40, 6, 0.7, 8, 1.2);
+            burst(e.p[0], e.p[1] + 0.4, e.p[2], '#cdd6e0', 12, 6, 0.5, 8, 1.2);
+          } else if (e.reason === 'expired' && guards.delete(e.entity)) {
+            // A guard that runs out crumbles back into the floor.
+            shatter(e.p[0], e.p[1], e.p[2], 10);
           } else if (e.reason === 'expired') {
             burst(e.p[0], e.p[1], e.p[2], '#9aaab7', 16, 2, 0.6, -1, 0.5);
           }
@@ -391,22 +423,35 @@ export function EventEffects() {
   const tmpMatrix = useMemo(() => new THREE.Matrix4(), []);
   const tmpQuat = useMemo(() => new THREE.Quaternion(), []);
   const tmpScale = useMemo(() => new THREE.Vector3(), []);
+  const tmpColor = useMemo(() => new THREE.Color(), []);
+  const flat = useMemo(
+    () => new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2),
+    [],
+  );
 
   useFrame((_, rawDt) => {
     const dt = Math.min(rawDt, 0.05);
+    // The live rings packed into the first instances; the count draws only those.
+    let live = 0;
     for (const r of rings) {
       if (!r.active) continue;
       r.age += dt;
       const t = r.age / r.life;
       if (t >= 1) {
         r.active = false;
-        r.mesh.visible = false;
         continue;
       }
       const ease = 1 - (1 - t) * (1 - t);
       const s = r.r0 + (r.r1 - r.r0) * ease;
-      r.mesh.scale.set(s, s, s);
-      r.mat.opacity = (r.mat.userData.base as number) * (1 - t) * (1 - t);
+      ringMesh.setMatrixAt(live, tmpMatrix.compose(r.p, flat, tmpScale.set(s, s, s)));
+      ringMesh.setColorAt(live, tmpColor.copy(r.color).multiplyScalar(r.base * (1 - t) * (1 - t)));
+      live++;
+    }
+    ringMesh.count = live;
+    ringMesh.visible = live > 0;
+    if (live > 0) {
+      ringMesh.instanceMatrix.needsUpdate = true;
+      ringMesh.instanceColor!.needsUpdate = true;
     }
 
     const pos = pointsGeo.attributes.position as THREE.BufferAttribute;
@@ -499,4 +544,26 @@ function makeSoftSprite(): THREE.DataTexture {
   tex.magFilter = THREE.LinearFilter;
   tex.needsUpdate = true;
   return tex;
+}
+
+/**
+ * A stone chip: a dodecahedron about 0.3 m across with its corners pushed in or out by up to a
+ * third (shared corners move together, so it stays closed), flat-shaded like broken rock rather
+ * than a regular solid.
+ */
+function chipGeometry(): THREE.BufferGeometry {
+  const g = new THREE.DodecahedronGeometry(0.16, 0);
+  const pos = g.attributes.position as THREE.BufferAttribute;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    let h = Math.imul(Math.round(v.x * 1000), 73856093);
+    h ^= Math.imul(Math.round(v.y * 1000), 19349663);
+    h ^= Math.imul(Math.round(v.z * 1000), 83492791);
+    h = Math.imul(h ^ (h >>> 13), 0x5bd1e995);
+    const k = 0.7 + (((h ^ (h >>> 15)) >>> 0) / 4294967296) * 0.6;
+    pos.setXYZ(i, v.x * k, v.y * k * 0.8, v.z * k);
+  }
+  g.computeVertexNormals();
+  return g;
 }

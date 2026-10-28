@@ -199,7 +199,9 @@ button {
   position: fixed;
   inset: 0;
   display: flex;
-  align-items: center;
+  /* Centred by the card's auto margins, not align-items: a card taller than the screen then
+     scrolls from its top instead of losing its title above the fold. */
+  align-items: flex-start;
   padding: max(16px, var(--safe-top)) max(16px, var(--safe-right)) max(16px, var(--safe-bottom))
     max(5vw, var(--safe-left));
   background: linear-gradient(
@@ -213,6 +215,55 @@ button {
 }
 .menu-card {
   width: min(420px, 100%);
+  margin-block: auto;
+}
+/* Short landscape phones (≈ 390 px tall): a compact card that fits without scrolling — one-line
+   title, no tagline, tighter rows; every target stays ≥ 44 px. */
+@media (orientation: landscape) and (max-height: 480px) {
+  .menu-card {
+    width: min(360px, 100%);
+  }
+  .menu .title {
+    font-size: 30px;
+    letter-spacing: 0.12em;
+    white-space: nowrap;
+  }
+  .menu .tagline {
+    display: none;
+  }
+  .menu .col {
+    margin-top: 14px;
+    gap: 8px;
+  }
+  .menu .btn.big {
+    font-size: 15px;
+    padding: 9px 16px;
+  }
+}
+/* Portrait: the menu docks to the bottom, so the cinematic arena fills the top of the screen (an
+   auto margin, not flex-end: if the card is taller than the screen it still scrolls from its top). */
+@media (orientation: portrait) {
+  .menu {
+    flex-direction: column;
+    align-items: stretch;
+    padding-left: max(16px, var(--safe-left));
+    background: linear-gradient(
+      0deg,
+      rgba(4, 10, 16, 0.92) 0%,
+      rgba(4, 10, 16, 0.66) 50%,
+      rgba(4, 10, 16, 0) 74%
+    );
+  }
+  .menu-card {
+    width: 100%;
+    margin-block: auto 0;
+  }
+  .menu .title {
+    font-size: clamp(30px, 9vw, 42px);
+  }
+  .menu .tagline {
+    margin: 8px 0 14px;
+  }
 }
 .title {
   margin: 0;
@@ -242,7 +293,7 @@ button {
   background: rgba(10, 22, 32, 0.7);
   color: var(--text-dim);
   border: 0;
-  min-height: 38px;
+  min-height: 44px;
   text-transform: capitalize;
   cursor: pointer;
 }

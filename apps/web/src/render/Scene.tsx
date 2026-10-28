@@ -6,14 +6,23 @@ import { ToneMappingMode } from 'postprocessing';
 import { MERIDIAN_ARENA } from '@ff/game-data';
 import { Arena } from './Arena';
 import { Entities, Manipulators } from './Entities';
-import { FrameDriver, useGameClient } from './frame-context';
+import { FrameDriver, useGameClient, useRenderFrame } from './frame-context';
 import { view } from './view';
 import { useSettings } from '../game/settings';
 import { EventEffects } from './vfx/EventEffects';
-import { AimPreview, CoreTrail, LiftTethers, Reticles, SweepFields } from './vfx/FieldEffects';
-import { ChargeBolts, ElementRegions, MagnetFields, WaterAndIce } from './vfx/ElementEffects';
+import { AimPreview, GripFeedback, LiftTethers, Reticles, SweepFields } from './vfx/FieldEffects';
+import { CoreTrail } from './core/CoreTrail';
+import { MagnetFields } from './vfx/magnet';
+import { GravityWells } from './vfx/gravity';
+import { ChargeArcs } from './vfx/electric';
+import { HeatHaze } from './vfx/HeatHaze';
+import { Fire } from './vfx/fire';
+import { Plumes } from './vfx/plumes';
+import { WaterAndIce } from './vfx/water-ice';
 import type { PlayerSlot } from '@ff/protocol';
 import {
+  CLOUD_SHADOWS,
+  ENVIRONMENT,
   LIGHT_VARIANTS,
   POST,
   QUALITY,
@@ -22,7 +31,8 @@ import {
   type LightVariantName,
   type QualityTier,
 } from './art-tokens';
-import { fitBroadcastCamera } from './camera';
+import { cloudShadowTexture, keyLightUniforms } from './key-light';
+import { attractPose, fitBroadcastCamera } from './camera';
 import { createSkyMaterial } from './shaders';
 import { renderStats } from './render-stats';
 import { installAtmosphericFog, SUN_DIR } from './atmosphere';
@@ -53,6 +63,14 @@ export interface SceneProps {
   readonly textureTier?: QualityTier['name'];
   /** Adapt the tier to the measured frame rate, starting at (and never above) `quality`. */
   readonly onAdapt?: (tier: TierName) => void;
+  /** The menu's slow cinematic camera instead of the fitted gameplay framing. */
+  readonly cinematic?: boolean;
+  /**
+   * 'never': nothing renders on its own; each R3F advance(t) draws one frame at render time t (s).
+   * Physics Lab evidence captures step effects frame by frame this way, independent of how slowly
+   * a software renderer draws.
+   */
+  readonly frameloop?: 'always' | 'never';
   readonly children?: ReactNode;
 }
 
@@ -60,6 +78,8 @@ export interface CameraOverride {
   readonly position: readonly [number, number, number];
   readonly target: readonly [number, number, number];
   readonly fov: number;
+  /** Review shots of a moving subject: position and target are offsets from the core. */
+  readonly follow?: 'core';
 }
 
 /** The 3D arena canvas: lighting, atmosphere, arena, authoritative entities and post. */
@@ -73,6 +93,8 @@ export function GameScene({
   light = 'final',
   textureTier,
   onAdapt,
+  cinematic = false,
+  frameloop = 'always',
   children,
 }: SceneProps) {
   const tier = QUALITY[quality];
@@ -80,6 +102,7 @@ export function GameScene({
   const variant: LightingVariant = LIGHT_VARIANTS[light];
   return (
     <Canvas
+      frameloop={frameloop}
       shadows={tier.shadows ? { type: THREE.PCFSoftShadowMap } : false}
       dpr={[1, tier.dpr]}
       gl={{
@@ -101,32 +124,38 @@ export function GameScene({
         portraitSlot={portraitSlot}
         override={camera}
         controlsSide={controlsSide}
+        cinematic={cinematic && !camera}
       />
       <Atmosphere variant={variant} sky={tier.sky} />
       <Lights tier={tier} variant={variant} />
+      <CloudShadows on={tier.cloudShadows} />
       {renders('arena') && (
         <Arena
           textureSize={textures.textureSize}
           tier={textures.name}
           gateLights={tier.pointLights >= 3}
           lowSurfaces={tier.name === 'low'}
+          bakedShadows={!tier.shadows}
         />
       )}
       {renders('clouds') && <CloudSheets count={tier.cloudLayers} />}
       {tier.shafts && renders('shafts') && <LightShafts />}
       {tier.dust > 0 && renders('dust') && <DustMotes count={tier.dust} />}
       {renders('contact') && <ContactShadows strength={tier.shadows ? 0.38 : 0.62} />}
-      {renders('entities') && <Entities />}
+      {renders('entities') && <Entities tier={tier.name} />}
       <Manipulators />
       {renders('vfx') && (
         <>
-          <WaterAndIce />
-          <CoreTrail />
-          <SweepFields />
-          <ElementRegions density={tier.particles} />
+          <WaterAndIce tier={tier.name} />
+          <CoreTrail tier={tier.name} />
+          <SweepFields tier={tier.name} />
+          <GravityWells tier={tier.name} />
+          <Fire tier={tier.name} />
+          <Plumes tier={tier.name} />
           <MagnetFields />
-          <ChargeBolts />
+          <ChargeArcs />
           <LiftTethers />
+          <GripFeedback />
         </>
       )}
       <AimPreview slots={localSlots} />
@@ -137,6 +166,7 @@ export function GameScene({
       {onAdapt && <AdaptiveProbe start={textureTier ?? quality} onAdapt={onAdapt} />}
       {!renders('post') ? null : tier.bloom ? (
         <EffectComposer multisampling={0}>
+          {tier.heatHaze ? <HeatHaze /> : <></>}
           <Bloom
             luminanceThreshold={POST.bloomThreshold}
             intensity={POST.bloomIntensity}
@@ -164,18 +194,65 @@ function CameraRig({
   portraitSlot,
   override,
   controlsSide,
+  cinematic,
 }: {
   side: 1 | -1;
   portraitSlot: 0 | 1;
   override?: CameraOverride | undefined;
   controlsSide: 'left' | 'right' | null;
+  cinematic: boolean;
 }) {
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
   const size = useThree((s) => s.size);
   const client = useGameClient();
+  const frame = useRenderFrame();
   const reducedMotion = useSettings((s) => s.reducedMotion);
   const base = useRef(new THREE.Vector3());
   const shake = useRef(0);
+  // A review camera that follows the core keeps its offset from the displayed (interpolated) core.
+  useFrame(() => {
+    if (override?.follow !== 'core') return;
+    const f = frame.current;
+    if (!f) return;
+    for (const e of f.entities.values()) {
+      if (e.kind !== 'core') continue;
+      const [ox, oy, oz] = override.position;
+      const [tx, ty, tz] = override.target;
+      camera.position.set(e.px + ox, e.py + oy, e.pz + oz);
+      camera.lookAt(e.px + tx, e.py + ty, e.pz + tz);
+      break;
+    }
+  });
+  // The cinematic camera's clock, its smoothed focus (the core, eased so it never jerks) and the
+  // pose it writes each frame.
+  const film = useRef({
+    t: 0,
+    focus: { x: 0, z: 0 },
+    pose: { position: new THREE.Vector3(), target: new THREE.Vector3(), fov: 0 },
+  });
+  useFrame((_, dt) => {
+    if (!cinematic) return;
+    const f = film.current;
+    // Under reduced motion it holds still: no drift, and no panning after the core.
+    if (!reducedMotion) f.t += dt;
+    const entities = reducedMotion ? undefined : client.buffer.latest?.entities;
+    if (entities) {
+      for (const e of entities) {
+        if (e.kind !== 'core') continue;
+        const k = 1 - Math.exp(-dt / 2.5);
+        f.focus.x += (e.p[0] - f.focus.x) * k;
+        f.focus.z += (e.p[2] - f.focus.z) * k;
+        break;
+      }
+    }
+    const pose = attractPose(f.t, size.width / Math.max(1, size.height), f.focus, f.pose);
+    camera.position.copy(pose.position);
+    camera.lookAt(pose.target);
+    if (camera.fov !== pose.fov) {
+      camera.fov = pose.fov;
+      camera.updateProjectionMatrix();
+    }
+  });
   useEffect(() => {
     const w = Math.max(1, size.width);
     const h = Math.max(1, size.height);
@@ -245,7 +322,8 @@ function CameraRig({
     [client],
   );
   useFrame(({ clock }, dt) => {
-    if (shake.current <= 0) return;
+    // The cinematic and following review cameras never shake (they are not the player's view).
+    if (cinematic || override?.follow || shake.current <= 0) return;
     shake.current = Math.max(0, shake.current - dt * 0.9);
     const amp = reducedMotion ? 0 : shake.current * shake.current;
     const t = clock.elapsedTime * 38;
@@ -349,6 +427,35 @@ function Lights({ tier, variant }: { tier: QualityTier; variant: LightingVariant
   );
 }
 
+/**
+ * The storm overhead: cloud shadows drift across the platform on the key light (medium and high —
+ * one texture read per lit pixel). Reduced motion freezes them where they are.
+ */
+function CloudShadows({ on }: { on: boolean }) {
+  const reducedMotion = useSettings((s) => s.reducedMotion);
+  useEffect(() => {
+    if (!on) return;
+    const u = keyLightUniforms;
+    const tex = cloudShadowTexture();
+    u.ffCloudMap.value = tex;
+    u.ffCloud.value.w = CLOUD_SHADOWS.strength;
+    return () => {
+      u.ffCloudMap.value = null;
+      u.ffCloud.value.w = 0;
+      tex.dispose();
+    };
+  }, [on]);
+  useFrame((_, dt) => {
+    if (reducedMotion || !on) return;
+    const c = keyLightUniforms.ffCloud.value;
+    // The noise tiles every `tileMetres`: wrap the offset so it never grows past float precision.
+    const tile = CLOUD_SHADOWS.tileMetres;
+    c.y = (c.y + CLOUD_SHADOWS.drift[0] * dt) % tile;
+    c.z = (c.z + CLOUD_SHADOWS.drift[1] * dt) % tile;
+  });
+  return null;
+}
+
 /** Cube face size of the baked sky (half float: ~3 MB for all six faces). */
 const SKY_BAKE_SIZE = 256;
 
@@ -397,9 +504,10 @@ function buildStormEnvironment(gl: THREE.WebGLRenderer): THREE.Texture {
     envScene.add(m);
     panels.push(m);
   };
-  addPanel(SKY.glow, 6, SUN_DIR.clone().multiplyScalar(32), [18, 9]); // storm break (key)
-  addPanel('#7fb0d8', 1.4, new THREE.Vector3(0, 40, 0), [60, 60]); // overcast zenith
-  addPanel('#3b6f93', 1.2, new THREE.Vector3(30, 6, 22), [34, 10]); // cool horizon (fill side)
+  const E = ENVIRONMENT;
+  addPanel(E.breakColor, E.breakRadiance, SUN_DIR.clone().multiplyScalar(32), [18, 9]); // break
+  addPanel(E.zenithColor, E.zenithRadiance, new THREE.Vector3(0, 40, 0), [60, 60]); // storm zenith
+  addPanel(E.horizonColor, E.horizonRadiance, new THREE.Vector3(30, 6, 22), [34, 10]); // fill side
   const pmrem = new THREE.PMREMGenerator(gl);
   const rt = pmrem.fromScene(envScene, 0.02);
   pmrem.dispose();
@@ -431,6 +539,11 @@ function StatsProbe({ tier, adaptive }: { tier: TierName; adaptive: boolean }) {
   useEffect(() => {
     renderStats.tier = tier;
     renderStats.adaptive = adaptive;
+    const log = renderStats.tierLog;
+    if (log[log.length - 1]?.tier !== tier) {
+      log.push({ tier, at: performance.now() });
+      if (log.length > 16) log.shift();
+    }
   }, [tier, adaptive]);
   useEffect(() => {
     // The composer renders several passes per frame; count them all and reset once per frame.

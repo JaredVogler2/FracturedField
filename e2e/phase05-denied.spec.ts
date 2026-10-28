@@ -28,6 +28,13 @@ test('no camera permission (headless browser cannot prompt) → message, fallbac
   await page.goto('/?mode=bot&difficulty=easy&test=1&quality=low&seed=3');
   await page.getByTestId('controls-camera').click();
   await expect(page.getByTestId('start-match')).toBeDisabled();
+  // Picking the rear camera warns that it faces away from this screen.
+  const lens = page.getByTestId('camera-setup').getByRole('combobox', { name: /^Camera/ });
+  await expect(page.getByTestId('cam-rear-warn')).toBeHidden();
+  await lens.selectOption('environment');
+  await expect(page.getByTestId('cam-rear-warn')).toBeVisible();
+  await lens.selectOption('user');
+  await expect(page.getByTestId('cam-rear-warn')).toBeHidden();
   await page.getByTestId('camera-start').click();
   await expect(page.getByTestId('camera-error')).toBeVisible({ timeout: 20_000 });
   await page.getByTestId('camera-fallback').click();
@@ -102,4 +109,16 @@ test('Settings → Camera control: hand, sensitivity, sign hold time, self-view,
     preview: true,
     calibration: null,
   });
+  // Hands (ADR-0009): the camera grips and throws by default; signs stay selectable, and the
+  // mouse, touch and a controller can play hands-on too.
+  const hands = page.getByTestId('hands-settings');
+  await expect(hands.getByTestId('camera-scheme')).toHaveValue('hands');
+  await hands.getByTestId('camera-scheme').selectOption('signs');
+  await hands.getByTestId('hands-on').selectOption('hands');
+  const controls = await page.evaluate(
+    () =>
+      (JSON.parse(localStorage.getItem('ff.settings.v1') ?? '{}') as { controls: unknown })
+        .controls,
+  );
+  expect(controls).toMatchObject({ cameraScheme: 'signs', handsOn: true });
 });

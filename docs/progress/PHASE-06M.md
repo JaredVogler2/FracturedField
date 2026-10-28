@@ -1,7 +1,9 @@
 # MILESTONE 06M — Continuous physical manipulation
 
-**Status: IN PROGRESS — M1 (authority) done; the M2 camera mapper and the M3 task judge are
-built and tested; their client integration (input adapters, the Hands Lab page) is next.**
+**Status: IN PROGRESS — M1 (authority), M2 (inputs: camera, mouse, touch, gamepad), M3 (the Hands
+Lab) and M4 (match integration) are built and tested in this container (synthetic hands and
+scripted players, software rendering); the people study — the milestone's real gate — has not
+been run.**
 
 Inserted by the owner's direction (October 2026) between Phase 06 and the rest of Phase 07:
 *development should demonstrate that real people can intuitively bend physical objects with
@@ -56,7 +58,7 @@ taught, and which mappings they find natural.
   deliberate spin `s` in its entity snapshot.
 - **Tuning** (`@ff/game-data → DEFAULT_RULES.hand`): engage 0.6 / release 0.35, reach 3.2 m,
   stiffness 6–40 s⁻² with damping ratio 0.7 and velocity matching, hold height 2.2 m, accelerations
-  capped (hold 40, sweep 30, push 40 m/s², all inside the per-body field cap), 0.3 s stale hand,
+  capped (hold 40, sweep 30, push 40 m/s², all inside the per-body field cap), 0.6 s stale hand,
   0.2 s regrip, spin 14 rad/s, Magnus 0.05 capped at 4 m/s², energy 4/s holding plus 0.6 per
   m/s of Δv given (a full swing-and-throw costs about a PULSE).
 - **Simulation** (`@ff/sim → GameWorld`, tick step 4): grip engages on the nearest movable body
@@ -102,7 +104,7 @@ taught, and which mappings they find natural.
   50°. The gesture engine now reports the locked hand's features and knuckle angle.
 - **Intent emitter** (`@ff/controls`): the hand rides on aim intents — clamped, sent on change,
   re-sent every 100 ms while an input describes one, open and still included (the authority's
-  stale time is 300 ms, and only a present hand sweeps); when an input stops describing a hand an
+  stale time is 600 ms, and only a present hand sweeps); when an input stops describing a hand an
   open hand is sent once, so whatever it held is let go at once.
 - **Adapters** (`apps/web/src/input`), active when the seat is hands-on (the Hands Lab, the
   `handsOn` control setting, or `?hands=1`); only the device that owns the aim describes the
@@ -167,3 +169,152 @@ taught, and which mappings they find natural.
   try judged from frames before its setup.
 - **Not covered:** a touch or gamepad player completing the tasks in the browser (their adapters
   have unit tests only), and the people study.
+
+### M4 — match integration (built; local evidence)
+
+- **Camera control is hands-on by default** (setting `controls.cameraScheme`, default `hands`;
+  `signs` keeps the sign vocabulary). The mouse, touch and a controller play hands-on when chosen
+  (`controls.handsOn`); Settings → *Hands* sets both, and `?hands=1` / `?hands=0` overrides them
+  for one page. In the hands scheme the camera's practice step asks for a closed and then an
+  opened hand — measured against the authority's own grip thresholds — instead of PULSE, and
+  the gesture reference lists what the hand does (hold, throw, spin, sweep, press) before the
+  signs that remain (GUARD, WET, HEAT, the picks).
+- **On-field feedback**, drawn from authoritative snapshots only: a team-coloured tether from a
+  player's force point to the body their hand holds and a clasp around it; a swirl around the
+  core while it carries a deliberate spin (it turns the way the core does, so it says which way
+  the shot will bend); the local reticle tightens and brightens as the hand closes and widens
+  with a push.
+- **Online:** the room client copied only the intent fields it knew and dropped the hand — the
+  channel never reached the room. Fixed; a network test (two clients through the real room
+  authority over simulated links) grips the core with a hand kept alive at 60 ms and both
+  clients see the grip; it fails without the fix.
+- **Browser tests** (`e2e/phase06m-match.spec.ts`, local SwiftShader): a camera player, hands-on
+  by default, scores against the bot by gripping, swinging and letting go — no sign or move
+  sent, only aims carrying the hand. In its final form it scored in 3 of 3 runs (0.5–1.1 min,
+  local authority at half speed), each time with one held throw down the middle at 13–21 m/s;
+  in two runs an earlier swing had already lost its grip before the let-go, and the core stayed
+  back. Earlier forms of the player failed: they stopped after too few tries, and let go past
+  the reach limit from off-centre spots. They were fixed in the player (a time budget; a carry
+  to a set-up spot first), not in the rules. Online, both seats hands-on with the mouse grip
+  the core in turn through the room, both devices see each grip, and the room refuses no intent
+  (1.4 min; it plays the standard match clock, see *CI on PR #3*). The camera tests of the sign
+  scheme now select it explicitly (`hands=0`); the settings test covers the *Hands* group.
+- **Not yet:** the bot still plays with discrete moves (Phase 10); the handheld-motion mapping;
+  a touch or gamepad player in a match in the browser; anything on a physical device; the
+  people study.
+
+
+### CI on PR #3 (slower runners)
+
+The browser job runs on slower machines than this container. Hands tests failed there in two
+rounds, and each failure was reproduced here with the page's CPU throttled
+(`E2E_CPU_THROTTLE=N`, `e2e/throttle.ts`):
+
+- `3c1d5a8`: the online grip never held, and the Hands Lab's scripted mouse throw came out at
+  3.7 m/s. The authority dropped a hand after 0.3 s without an update and a throttled page drew
+  a frame every ~0.45 s, so every grip let go between frames — as a render hitch or a burst of
+  network jitter would for a person. Fixed in `51b79c7`: the stale time is 0.6 s (a unit test
+  with updates 0.45 s apart fails at 0.3 s), the online test reaches in with a closed hand, and
+  the lab's scripted strokes keep their play speed.
+- `51b79c7`: the online test's second carry stopped at x = 3.75 m (needed > 4). The room's match
+  had ended mid-carry: the test played the short test rounds (25 s, two to win) and on a slow
+  runner took longer than the whole match, so the authority let go of every grip and stopped
+  (reproduced at 3× throttle: 3.74 m, `match_end` in the room's log). Throttled runs then showed
+  two more weaknesses of the scripted mouse player, both in the test:
+  - Its hand closed first and then travelled to the core (the `51b79c7` change), so it took the
+    first body that came within reach on the way — a boulder — dragged it along and took it again
+    on every retry, spending its energy; under the short rounds a mid-test round reset had been
+    refilling that energy. It now reaches as a person does: with energy for a hold, the open hand
+    goes over the core (quickly most of the way, 0.2 m at a time at the end, too slow to drag
+    anything) and closes on top of it.
+  - The room's clock runs in real time, so a slow enough machine outlasts any round. The test
+    plays the standard clock (90 s rounds plus the golden rift; no goal is scored in it), and a
+    step that a round end interrupts (every grip let go, the core back at the centre) starts over
+    in the next round; any other failure fails the test. Its two pages use small canvases
+    (640 × 360), which keep their frames well inside the stale time (0.23–0.35 s at 3× throttle
+    here).
+
+  After the fix the test passed 3 of 3 runs here (2.8 and 3.0 min at 3× throttle, 2.3 min at
+  normal speed).
+- `d150d2d`: the hands tests passed, but six other online tests failed where the guest joins the
+  room (`openRoom`: the guest's seat never arrived, or the lobby never opened). None had failed
+  before Phase 7B. CPU throttling did not reproduce it; pinning the browser, the preview server
+  and the room worker to two of this machine's four cores (`taskset -c 0,1`) did, on the first
+  run. (CI's runner has four virtual CPUs; the browser job there behaved like this machine with
+  two.) A probe of the guest page (`scripts/probe-join.mjs`: WebSocket and fetch events, long
+  tasks) showed the cause: the guest received its WELCOME and lobby within 50 ms, then its page
+  froze for 22 s (two long tasks of 7.5 and 14.4 s) while it built the match scene, and when it
+  woke its room client closed the healthy socket itself as "connection stalled" (no message for
+  15 s; a frozen page cannot send pings, so no pongs come back). A CPU profile put 48 of the
+  guest's 69 s of main-thread time in three.js's first-use program check, waiting on software
+  WebGL to compile and link 47 shader programs (about 1 s each on two cores). Joining replaces the
+  menu's canvas with a new WebGL context, so every program compiles a second time. The client's
+  deadlines (connect 8 s, stall 4 s live / 15 s idle) and the room API's 8 s request timeout
+  counted the page's own freeze as network silence. That is a product defect, not only a test
+  one: a phone compiling shaders can freeze too. Depending on where the freeze lands, the client
+  either dropped a link that had just been welcomed, or abandoned a socket whose WELCOME was
+  already queued behind the timer and then reconnected into the next freeze.
+
+  The deadlines now count only time the page was awake: a heartbeat counts at most 1 s
+  (`MAX_BEAT_MS`), and the room API's timeout counts at most 0.5 s per 0.25 s tick. A dead link
+  is still found: every heartbeat counts. `client-freeze.test.ts` covers a WELCOME queued behind
+  a 20 s freeze, a 22 s freeze after WELCOME, a link that stays silent while the page is awake
+  (found dead after 15 s of awake silence, freeze or not) and the awake connect timeout; the
+  first three fail on the previous client. `awake-deadline.test.ts` covers the request timeout.
+  With only this fix, pinned to two cores, the six tests went from 0 of 6 joining to 3 of 6
+  passing: the other three were seated but ran out of time later, behind more compile freezes.
+  A probe of the programs a page links (`scripts/probe-programs.mjs`) showed why there were so
+  many: 52 on the low tier, 17 of
+  them a second time when the core appeared. The core's point light was mounted with the core's
+  visual (when the first snapshot listed the core), and three.js compiles the number of point
+  lights into every lit program, so every lit material compiled twice. The light is now mounted
+  with the scene (`CoreLight` in `Entities.tsx`), follows the core and is dark while there is
+  none: 40 programs, each compiled once. With both fixes, pinned to two cores, five of the six
+  passed in one run. The sixth, leaving mid-match, did everything it checks and then ran out of
+  its 120 s budget: over that test the guest builds its scene three times (menu, match, menu
+  again), each a full compile. Its budget is now 180 s, as the refresh test's is; no assertion
+  changed. It then passed (1.7 min).
+
+  On four cores the full browser suite then passed 42 of 44. Both failures had also failed on
+  `main`'s own last run (the PR #2 merge), and neither involves this change:
+  - **Hands Lab, mouse:** the first task's core never reached its start. The lab placed the task
+    50 ms after its panel appeared, but the sim worker drops a placement made before its world
+    exists, which on a slow page is still the case when Start is pressed. Later tasks, started by
+    hand once play runs, were never affected. The panel now starts a task once the snapshot shows
+    the match playing. This is a product fix: on a slow device a player saw the same. Pinned to
+    two cores the test then passed twice.
+  - **The first online duel** lost a round on territory. Its host is a scripted mouse player that
+    lines up behind the core within 1 m at 1.4 m (up to 35° off) and pulses from as far as 20 m,
+    where a goal needs about 7°. Most of its shots rebound off the end wall, and a round without
+    a goal goes to whichever half the core is in when the golden rift ends: a coin flip. A
+    headless model of this duel (the real sim, the player's rule with its page delays, 30 matches
+    each) has the host winning 2–0 in 27 of 30 matches on a busy page and 23 of 30 on a slower
+    one. The player now runs inside the page (`mouseAutopilotInPage`), deciding on every rendered
+    frame as the touch and camera players do, and leads the core by a frame plus the force point's
+    travel; its lineup and shot rule are unchanged. In the model (40 matches each) it wins 2–0 in
+    40 of 40 at frames of 0.2 s and of 0.33 s, where the old player won 32 of 40 at its slower
+    pace; a tighter lineup was worse on slow frames (33 of 40), so it was not adopted. Pinned to
+    two cores here the duel test then passed 3 of 3 runs (2.6, 2.3 and 2.1 min; the old player
+    took 2.8–2.9 min when it passed).
+
+  Joining still compiles every program a second time, because each match view creates its own
+  WebGL context. Keeping one renderer across the menu and matches would remove that freeze too.
+  That is a performance item for later (D15), not part of this fix.
+- `23bc3f8`: 43 of 44 passed, the duel test among them (2.6 min). The camera test against the
+  bot ("camera, hands-on by default…") failed inside `learnAim`: the match was over. Under the
+  fast test rules two goals win a match, and on a slow page the stand-in learns its aim slowly.
+  When a goal interrupted the aim probe, `learnAim` waited for play to resume and timed out at
+  `matchEnd`; it never pressed REMATCH, though the test's own loop does. Fixed in `567aa71`:
+  `learnAim` presses REMATCH when the match is over and probes again. No assertion changed.
+  Reproduced with a throwaway spec that lets the bot win before `learnAim` runs: it failed as
+  on CI (`Expected: "playing"`, `Received: "matchEnd"` at `camera.ts:190`), and with the fix it
+  got past the match end. The same test passed on `864bb15`'s CI run and in the local suite.
+  CI then passed all 44 browser tests on `567aa71` (40.1 min) and the live room checks.
+
+  Two-core runs here stopped being a guide after this container restarted: the machine came
+  back about three times slower (the same production build took 5.7 s on four cores, against
+  3.5 s on two before). On it, the pushed head fails the six online tests pinned to two cores
+  at page load, before any join. A probe of the join (`scripts/probe-join.mjs`, pinned to two
+  cores) measured the pushed head and the 7C Rift Core build alike: the guest's seat appeared
+  75–80 s after it opened the invite on the head and 73–77 s on 7C (two runs each). So the 7C
+  core does not add a measurable compile freeze.

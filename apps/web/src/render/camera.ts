@@ -82,3 +82,55 @@ export function fitBroadcastCamera(
   const position = target.clone().addScaledVector(dir, -hi);
   return { position, target, fov };
 }
+
+/** One slow cycle of the menu's cinematic camera (s). */
+export const ATTRACT_PERIOD_S = 80;
+
+/**
+ * The menu's cinematic camera (attract mode): the first impression, composed instead of the
+ * gameplay framing. It looks from the TIDE (+X) end down the length of the field toward the storm
+ * break: the arena backlit, the EMBER gate and the rim columns dark against the bright sky, the
+ * sky islands' towers in the haze beyond, long shadows reaching toward the viewer.
+ *
+ * - Landscape: a slow drift beyond the TIDE gate, a little to the near side, with the break in
+ *   the upper right — the menu on the left covers the near wall and sky, not the action.
+ * - Portrait: higher and straighter down the axis — the field recedes up the screen to the far
+ *   gate and the break above it, clear of the menu docked at the bottom: a vertical composition,
+ *   not a crop of the landscape one.
+ *
+ * The aim leans toward `focus` (the core), so the camera follows the play without chasing it.
+ * Pure: a pose for a time; reduced motion holds t = 0.
+ */
+export function attractPose(
+  t: number,
+  aspect: number,
+  focus?: { readonly x: number; readonly z: number },
+  /** Written in place when given (the per-frame caller allocates nothing). */
+  out: { position: THREE.Vector3; target: THREE.Vector3; fov: number } = {
+    position: new THREE.Vector3(),
+    target: new THREE.Vector3(),
+    fov: 0,
+  },
+): CameraPose {
+  const phi = (2 * Math.PI * t) / ATTRACT_PERIOD_S;
+  const fx = THREE.MathUtils.clamp(focus?.x ?? 0, -16, 16);
+  const fz = THREE.MathUtils.clamp(focus?.z ?? 0, -9, 9);
+  if (aspect < 0.9) {
+    out.position.set(
+      36 + 2 * Math.sin(phi),
+      11 + 0.8 * Math.sin(2 * phi + 0.7),
+      3 + 4 * Math.sin(phi),
+    );
+    // Pitched down ~22°: the far gate sits a third of the way up from the centre, the storm above.
+    out.target.set(8 + 0.2 * fx, -0.5, -1 + 0.3 * fz);
+    out.fov = 66;
+    return out;
+  }
+  const z = 8 + 5 * Math.sin(phi);
+  out.position.set(33 + 2 * Math.cos(phi), 9.5 + 0.8 * Math.sin(2 * phi + 0.7), z);
+  // The aim pans with the dolly (half as far): the far gate and the centre stay framed.
+  out.target.set(-8 + 0.3 * fx, 2.4, -2 + 0.5 * (z - 8) + 0.2 * fz);
+  // Narrower screens need a wider lens.
+  out.fov = 52 + 22 * (1.7 - Math.min(1.7, Math.max(0.9, aspect)));
+  return out;
+}

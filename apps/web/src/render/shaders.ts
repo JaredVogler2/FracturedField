@@ -7,7 +7,7 @@ import { SKY } from './art-tokens';
  * `uTime` (and state uniforms) per frame and dispose on unmount.
  */
 
-const NOISE_GLSL = /* glsl */ `
+export const NOISE_GLSL = /* glsl */ `
   vec3 hash33(vec3 p) {
     p = fract(p * vec3(443.897, 441.423, 437.195));
     p += dot(p, p.yxz + 19.19);
@@ -31,112 +31,6 @@ const NOISE_GLSL = /* glsl */ `
     return s;
   }
 `;
-
-export interface CoreUniforms {
-  uTime: { value: number };
-  uEnergy: { value: number };
-  uColorA: { value: THREE.Color };
-  uColorB: { value: THREE.Color };
-  [key: string]: { value: unknown };
-}
-
-/** Inner plasma volume of the Rift Core: view-dependent depth illusion with turbulent filaments. */
-export function createCorePlasmaMaterial(): THREE.ShaderMaterial & { uniforms: CoreUniforms } {
-  const uniforms: CoreUniforms = {
-    uTime: { value: 0 },
-    uEnergy: { value: 0 },
-    uColorA: { value: new THREE.Color('#9c7dff') },
-    uColorB: { value: new THREE.Color('#e9f4ff') },
-  };
-  return new THREE.ShaderMaterial({
-    uniforms,
-    vertexShader: /* glsl */ `
-      varying vec3 vPos;
-      varying vec3 vNormal;
-      varying vec3 vView;
-      void main() {
-        vPos = position;
-        vNormal = normalize(normalMatrix * normal);
-        vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        vView = normalize(-mv.xyz);
-        gl_Position = projectionMatrix * mv;
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform float uTime;
-      uniform float uEnergy;
-      uniform vec3 uColorA;
-      uniform vec3 uColorB;
-      varying vec3 vPos;
-      varying vec3 vNormal;
-      varying vec3 vView;
-      ${NOISE_GLSL}
-      void main() {
-        float facing = clamp(dot(vNormal, vView), 0.0, 1.0);
-        vec3 p = vPos * 2.4;
-        float t = uTime * 0.35;
-        float n1 = fbm3(p + vec3(t, -t * 0.7, t * 0.4));
-        float n2 = fbm3(p * 1.9 - vec3(t * 1.3, t, -t * 0.8));
-        float filaments = smoothstep(0.04, 0.0, abs(n1 - n2)) + smoothstep(0.035, 0.0, abs(n1 - 0.5)) * 0.9;
-        float depth = pow(facing, 1.6);
-        vec3 col = mix(uColorA * 0.55, uColorB, depth * (0.55 + 0.45 * n2));
-        col += uColorB * filaments * (0.8 + uEnergy);
-        col *= 1.4 + uEnergy * 1.6;
-        gl_FragColor = vec4(col, 1.0);
-      }
-    `,
-  }) as THREE.ShaderMaterial & { uniforms: CoreUniforms };
-}
-
-export interface ShellUniforms {
-  uTime: { value: number };
-  uColor: { value: THREE.Color };
-  uIntensity: { value: number };
-  [key: string]: { value: unknown };
-}
-
-/** Thin refractive-looking outer shell: Fresnel rim with drifting hairline cracks. */
-export function createCoreShellMaterial(): THREE.ShaderMaterial & { uniforms: ShellUniforms } {
-  const uniforms: ShellUniforms = {
-    uTime: { value: 0 },
-    uColor: { value: new THREE.Color('#b9a8ff') },
-    uIntensity: { value: 1 },
-  };
-  return new THREE.ShaderMaterial({
-    uniforms,
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    vertexShader: /* glsl */ `
-      varying vec3 vNormal;
-      varying vec3 vView;
-      varying vec3 vPos;
-      void main() {
-        vPos = position;
-        vNormal = normalize(normalMatrix * normal);
-        vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        vView = normalize(-mv.xyz);
-        gl_Position = projectionMatrix * mv;
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform float uTime;
-      uniform vec3 uColor;
-      uniform float uIntensity;
-      varying vec3 vNormal;
-      varying vec3 vView;
-      varying vec3 vPos;
-      ${NOISE_GLSL}
-      void main() {
-        float f = 1.0 - clamp(dot(vNormal, vView), 0.0, 1.0);
-        float rim = pow(f, 2.6);
-        float cracks = smoothstep(0.03, 0.0, abs(noise3(vPos * 3.1 + uTime * 0.05) - 0.5));
-        float a = rim * 0.85 + cracks * 0.35 * (0.4 + f);
-        gl_FragColor = vec4(uColor * a * uIntensity, a);
-      }
-    `,
-  }) as THREE.ShaderMaterial & { uniforms: ShellUniforms };
-}
 
 export interface MembraneUniforms {
   uTime: { value: number };

@@ -76,12 +76,19 @@ export function HandsLabPanel({
     [place],
   );
 
-  // Start (and restart) the selected task once the match is running.
+  // Start (and restart) the selected task once the match is running. Placed any earlier, the task
+  // was lost: the sim worker drops a placement before its world exists, which on a slow device is
+  // still the case when Start is pressed (the first task then never set up).
   useEffect(() => {
     const t = HANDS_TASKS[index]!;
-    const id = window.setTimeout(() => begin(t), 50);
+    let id = 0;
+    const attempt = () => {
+      if (client.buffer.latest?.match.phase === 'playing') begin(t);
+      else id = window.setTimeout(attempt, 50);
+    };
+    id = window.setTimeout(attempt, 50);
     return () => window.clearTimeout(id);
-  }, [index, begin]);
+  }, [index, begin, client]);
 
   useEffect(() => client.events.on((e) => queue.current.push(e)), [client]);
   useEffect(() => () => setLabTask(null), []);

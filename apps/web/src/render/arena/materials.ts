@@ -12,7 +12,9 @@
  * - normal: world-space triplanar normal mapping (whiteout blend);
  * - wet: darker and glossier (world material state can drive it);
  * - glowing cracks: emissive along the crack mask (fresh fractures, rift-charged stone);
- * - a firefly clamp on the outgoing radiance (metal glints stay bright without flooding bloom).
+ * - a firefly clamp on the outgoing radiance (metal glints stay bright without flooding bloom);
+ * - the key light's drifting cloud shadows and, on tiers without shadow maps, its baked static
+ *   shadows (render/key-light.ts).
  *
  * Everything is tuned in art-tokens (SURFACES); nothing per-frame allocates.
  *
@@ -22,6 +24,7 @@
  */
 import * as THREE from 'three';
 import { SURFACES, type SurfaceRecipe } from '../art-tokens';
+import { patchKeyLight } from '../key-light';
 import { surfaceTextures } from './surfaces';
 
 export type SurfaceName = keyof typeof SURFACES;
@@ -142,10 +145,21 @@ const NORMAL = /* glsl */ `
 /**
  * Firefly clamp: a raking sun on polished metal makes HDR glints of 20–30 that the thresholded
  * bloom smears into white bars. Capping the outgoing radiance keeps a glint bright (it still tone
- * maps to near white) while true emissives — the core, glyphs, VFX — remain what blooms.
+ * maps to near white) while true emissives — the core, glyphs, VFX — remain what blooms. Stone
+ * caps at 1.5 (7B round b5: sun glare on polished slabs from the backlit menu view went white).
+ *
+ * Metals get a lower cap (7B round b3): where the gameplay camera sits in the sun's mirror
+ * direction, flat brass and steel tops lit the whole length of a rail or beam, which read as neon
+ * tubes or a white bar however rough the metal. Capped, they still catch the light — the
+ * brightest set dressing on screen — without competing with the core and the casts.
  */
 const CLAMP = /* glsl */ `
-outgoingLight = min( outgoingLight, vec3( 4.0 ) );
+{
+  // Scaled by the brightest channel, so a capped glint keeps its hue (brass stays gold).
+  float cap = mix( 1.5, 1.1, step( 0.5, metalnessFactor ) );
+  float peak = max( outgoingLight.r, max( outgoingLight.g, outgoingLight.b ) );
+  outgoingLight *= min( 1.0, cap / max( peak, 1e-4 ) );
+}
 #include <opaque_fragment>
 `;
 
@@ -182,6 +196,7 @@ export class SurfaceMaterial extends THREE.MeshStandardMaterial {
     };
     this.applyRecipe(recipe, textureSize);
     this.onBeforeCompile = (shader) => {
+      patchKeyLight(shader);
       Object.assign(shader.uniforms, this.tri);
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', `#include <common>\n${VERTEX_DECL}`)
@@ -196,7 +211,7 @@ export class SurfaceMaterial extends THREE.MeshStandardMaterial {
         .replace('#include <opaque_fragment>', CLAMP);
     };
     // Every SurfaceMaterial of a detail level compiles the same program; only uniforms differ.
-    this.customProgramCacheKey = () => (low ? 'ff-surface-v3-low' : 'ff-surface-v3');
+    this.customProgramCacheKey = () => (low ? 'ff-surface-v4-low' : 'ff-surface-v4');
     if (import.meta.env.DEV) {
       this.onBeforeRender = (_r, _s, _c, geometry, object) => {
         if (geometry.hasAttribute('color') || uncoloured.has(geometry)) return;

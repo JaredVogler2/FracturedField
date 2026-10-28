@@ -104,6 +104,14 @@ const FATAL_CLOSE = new Set<number>([
 ]);
 
 const HEARTBEAT_MS = 500;
+/**
+ * The most one heartbeat counts toward the connect and stall deadlines. A heartbeat that comes late
+ * means this page was busy (a long frame, a shader compile, a background tab), not that the link
+ * went quiet: whatever the server sent meanwhile is still queued behind the timer, and nothing
+ * could be sent. So the deadlines count only time the page was awake to hear a reply, and a frozen
+ * page never drops a healthy connection. A dead link is still found: every heartbeat counts.
+ */
+const MAX_BEAT_MS = 2 * HEARTBEAT_MS;
 
 /**
  * Client half of the room protocol, transport- and runtime-agnostic. Handles the HELLO handshake,
@@ -120,7 +128,11 @@ export class RoomClient {
   /** Live pings count from 1; seq 0 is reserved for the fixed idle keep-alive frame. */
   private pingSeq = 1;
   private lastPingAt = 0;
-  private openedAt = 0;
+  private lastBeatAt = 0;
+  /** Awake time this socket has waited for its WELCOME (see MAX_BEAT_MS). */
+  private waitedMs = 0;
+  /** Awake time since the last message from the server (see MAX_BEAT_MS). */
+  private quietMs = 0;
   private disconnectedAt = 0;
   private attempt = 0;
   private stopped = false;
@@ -185,7 +197,8 @@ export class RoomClient {
       return;
     }
     this.socket = socket;
-    this.openedAt = this.opts.clock.now();
+    this.waitedMs = 0;
+    this.quietMs = 0;
     this.startHeartbeat();
     socket.onopen = () => {
       if (this.socket !== socket) return;
@@ -250,6 +263,7 @@ export class RoomClient {
 
   private startHeartbeat(): void {
     this.stopHeartbeat();
+    this.lastBeatAt = this.opts.clock.now();
     this.heartbeat = this.opts.clock.setInterval(() => this.beat(), HEARTBEAT_MS);
   }
 
@@ -260,13 +274,20 @@ export class RoomClient {
 
   private beat(): void {
     const now = this.opts.clock.now();
+    // Time since the previous heartbeat, or since the last message if one came in between, up to
+    // MAX_BEAT_MS: on time, the steps add up to the wall-clock time; late, the freeze is left out.
+    const since = Math.max(this.lastBeatAt, this.stats.lastMessageAt);
+    const step = Math.min(Math.max(0, now - since), MAX_BEAT_MS);
+    this.lastBeatAt = now;
     if (!this.socket) return;
     if (!this.welcomed) {
-      if (now - this.openedAt > this.t.connectTimeoutMs) this.abandon('connect timeout');
+      this.waitedMs += step;
+      if (this.waitedMs > this.t.connectTimeoutMs) this.abandon('connect timeout');
       return;
     }
+    this.quietMs += step;
     const stale = this.live ? this.t.liveStaleMs : this.t.idleStaleMs;
-    if (now - this.stats.lastMessageAt > stale) {
+    if (this.quietMs > stale) {
       this.abandon('connection stalled');
       return;
     }
@@ -293,6 +314,7 @@ export class RoomClient {
     this.stats.messagesIn++;
     this.stats.bytesIn += data.length;
     this.stats.lastMessageAt = now;
+    this.quietMs = 0;
     const decoded = decodeServerMessage(data);
     if (!decoded.ok) return;
     const msg = decoded.msg;
@@ -369,6 +391,10 @@ export class RoomClient {
       source: intent.source,
       ...(intent.dir ? { dir: [intent.dir[0], intent.dir[1]] as [number, number] } : {}),
       ...(intent.modifier !== undefined ? { modifier: intent.modifier } : {}),
+      // The continuous hand (ADR-0009) rides on aim intents; the room validates and clamps it.
+      ...(intent.hand
+        ? { hand: { grip: intent.hand.grip, push: intent.hand.push, twist: intent.hand.twist } }
+        : {}),
     };
     const ok = this.raw({ t: 'intent', i });
     if (ok) this.stats.intentsSent++;

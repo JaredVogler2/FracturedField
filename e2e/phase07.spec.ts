@@ -17,8 +17,9 @@ test('adaptive quality: a slow renderer steps down from high on its own; the mat
     if (m.type() === 'error' && /shader|webgl|THREE/i.test(m.text())) errors.push(m.text());
   });
   // The controller measures from the first rendered frame (menu and countdown included), so the
-  // earliest a step down may come is the 5 s hold after the page loads.
-  const loaded = Date.now();
+  // earliest a step down may come is the 5 s hold after the scene first renders. How long the
+  // match takes to start on a software renderer does not matter: the scene logs when each tier
+  // began.
   await page.goto('/?mode=bot&difficulty=easy&test=1&adaptive=1&seed=5');
   await page.getByTestId('start-match').click();
   await expect
@@ -26,12 +27,14 @@ test('adaptive quality: a slow renderer steps down from high on its own; the mat
     .toMatch(/countdown|playing/);
   const first = await debug(page, 'renderStats');
   expect(first?.adaptive).toBe(true);
-  expect(first?.tier).toBe('high');
-  // Down after the hold (≥ 5 s of a low smoothed rate), never instantly.
+  // It starts at the device's tier (high here) and steps down only after the hold — never
+  // instantly — however long the start took.
   await expect
     .poll(async () => (await debug(page, 'renderStats'))?.tier, { timeout: 60_000 })
     .not.toBe('high');
-  expect(Date.now() - loaded).toBeGreaterThan(5000);
+  const log = (await debug(page, 'renderStats'))!.tierLog;
+  expect(log[0]?.tier).toBe('high');
+  expect(log[1]!.at - log[0]!.at).toBeGreaterThan(5000);
   // Still slow: it keeps stepping (after the cooldown) down to low, and stays there.
   await expect
     .poll(async () => (await debug(page, 'renderStats'))?.tier, { timeout: 60_000 })

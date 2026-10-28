@@ -1,0 +1,186 @@
+{
+  "arena-brass-b3.jpg": {
+    "p5": 0.011,
+    "p50": 0.179,
+    "p95": 0.382,
+    "range": 0.371,
+    "clippedPct": 0,
+    "warmCool": 0.148
+  },
+  "arena-channel-b3.jpg": {
+    "p5": 0.008,
+    "p50": 0.234,
+    "p95": 0.787,
+    "range": 0.778,
+    "clippedPct": 0.001,
+    "warmCool": 0.154
+  },
+  "arena-element-R1-t120-b3.jpg": {
+    "p5": 0.011,
+    "p50": 0.183,
+    "p95": 0.627,
+    "range": 0.616,
+    "clippedPct": 0.086,
+    "warmCool": 0.121
+  },
+  "arena-element-R3-t90-b3.jpg": {
+    "p5": 0.012,
+    "p50": 0.22,
+    "p95": 0.741,
+    "range": 0.729,
+    "clippedPct": 0.002,
+    "warmCool": 0.043
+  },
+  "arena-element-R5-t20-b3.jpg": {
+    "p5": 0.011,
+    "p50": 0.203,
+    "p95": 0.595,
+    "range": 0.584,
+    "clippedPct": 0.004,
+    "warmCool": 0.085
+  },
+  "arena-element-R6-t30-b3.jpg": {
+    "p5": 0.012,
+    "p50": 0.179,
+    "p95": 0.665,
+    "range": 0.653,
+    "clippedPct": 0.09,
+    "warmCool": 0.133
+  },
+  "arena-gate-b3.jpg": {
+    "p5": 0.008,
+    "p50": 0.098,
+    "p95": 0.314,
+    "range": 0.307,
+    "clippedPct": 0,
+    "warmCool": -0.011
+  },
+  "arena-hero-b3.jpg": {
+    "p5": 0.008,
+    "p50": 0.153,
+    "p95": 0.516,
+    "range": 0.507,
+    "clippedPct": 0.002,
+    "warmCool": 0.152
+  },
+  "arena-kickoff-high-b3.jpg": {
+    "p5": 0.008,
+    "p50": 0.13,
+    "p95": 0.469,
+    "range": 0.46,
+    "clippedPct": 0.003,
+    "warmCool": 0.117
+  },
+  "arena-light-dark-kickoff-b3.jpg": {
+    "p5": 0,
+    "p50": 0.043,
+    "p95": 0.294,
+    "range": 0.294,
+    "clippedPct": 0,
+    "warmCool": 0.032
+  },
+  "arena-light-dark-phone-b3.jpg": {
+    "p5": 0,
+    "p50": 0.049,
+    "p95": 0.36,
+    "range": 0.36,
+    "clippedPct": 0.009,
+    "warmCool": 0.072
+  },
+  "arena-light-flat-kickoff-b3.jpg": {
+    "p5": 0.022,
+    "p50": 0.104,
+    "p95": 0.385,
+    "range": 0.363,
+    "clippedPct": 0,
+    "warmCool": 0.07
+  },
+  "arena-light-flat-phone-b3.jpg": {
+    "p5": 0.028,
+    "p50": 0.092,
+    "p95": 0.345,
+    "range": 0.318,
+    "clippedPct": 0.003,
+    "warmCool": 0.146
+  },
+  "arena-menu-desktop-high-b3.jpg": {
+    "p5": 0.013,
+    "p50": 0.104,
+    "p95": 0.269,
+    "range": 0.256,
+    "clippedPct": 0,
+    "warmCool": 0.112
+  },
+  "arena-menu-phone-landscape-medium-b3.jpg": {
+    "p5": 0.023,
+    "p50": 0.096,
+    "p95": 0.548,
+    "range": 0.525,
+    "clippedPct": 0,
+    "warmCool": 0.335
+  },
+  "arena-menu-phone-portrait-low-b3.jpg": {
+    "p5": 0.036,
+    "p50": 0.108,
+    "p95": 0.566,
+    "range": 0.53,
+    "clippedPct": 0,
+    "warmCool": 0.334
+  },
+  "arena-phone-landscape-low-b3.jpg": {
+    "p5": 0.013,
+    "p50": 0.118,
+    "p95": 0.443,
+    "range": 0.43,
+    "clippedPct": 0.007,
+    "warmCool": 0.139
+  },
+  "arena-phone-landscape-medium-b3.jpg": {
+    "p5": 0.013,
+    "p50": 0.106,
+    "p95": 0.487,
+    "range": 0.474,
+    "clippedPct": 0.003,
+    "warmCool": 0.103
+  },
+  "arena-phone-portrait-low-b3.jpg": {
+    "p5": 0.031,
+    "p50": 0.117,
+    "p95": 0.306,
+    "range": 0.275,
+    "clippedPct": 0.002,
+    "warmCool": 0.141
+  },
+  "arena-rim-b3.jpg": {
+    "p5": 0.004,
+    "p50": 0.082,
+    "p95": 0.359,
+    "range": 0.354,
+    "clippedPct": 0,
+    "warmCool": 0.081
+  },
+  "arena-stone-b3.jpg": {
+    "p5": 0.008,
+    "p50": 0.407,
+    "p95": 0.962,
+    "range": 0.954,
+    "clippedPct": 0,
+    "warmCool": 0.057
+  },
+  "arena-under-b3.jpg": {
+    "p5": 0.004,
+    "p50": 0.138,
+    "p95": 0.301,
+    "range": 0.297,
+    "clippedPct": 0,
+    "warmCool": 0.06
+  },
+  "arena-wide-b3.jpg": {
+    "p5": 0.026,
+    "p50": 0.115,
+    "p95": 0.254,
+    "range": 0.228,
+    "clippedPct": 0.001,
+    "warmCool": 0.069
+  }
+}

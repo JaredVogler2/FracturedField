@@ -5,6 +5,7 @@ import {
   type CreateRoomResponse,
   type RoomInfoResponse,
 } from '@ff/protocol';
+import { awakeDeadline } from './awake-deadline';
 import { roomServiceUrl } from './room-service';
 
 /** A seat granted by the room service: public invite code + private seat ticket. */
@@ -32,7 +33,9 @@ async function call(path: string, method: 'GET' | 'POST'): Promise<unknown> {
   const base = roomServiceUrl();
   if (!base) throw new RoomApiError('not_configured', 'Online play is not configured.', 0);
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 8000);
+  // 8 s of waiting while the page is awake (a page busy compiling shaders must not abort a reply
+  // that already arrived).
+  const stop = awakeDeadline(8000, () => ctrl.abort());
   let res: Response;
   try {
     // No custom headers or body: a CORS "simple request" (no preflight round trip).
@@ -40,7 +43,7 @@ async function call(path: string, method: 'GET' | 'POST'): Promise<unknown> {
   } catch {
     throw new RoomApiError('network', 'Could not reach the room service.', 0);
   } finally {
-    clearTimeout(timer);
+    stop();
   }
   let body: unknown = null;
   try {

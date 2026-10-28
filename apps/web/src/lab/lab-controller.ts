@@ -318,6 +318,17 @@ export class LabController {
     this.set({ modifiedAt: this.state.modifiedAt ?? run.t });
   }
 
+  /** The core's deliberate spin at the current tick (Lab captures; invalidates later marks). */
+  setCoreSpin(spin: number): void {
+    const run = this.run;
+    if (!run || this.busy) return;
+    run.world.debugSetCoreSpin(spin);
+    this.marks = this.marks.filter((m) => m.t < run.t);
+    this.marks.push(run.mark());
+    this.publish(run.world.snapshot(), [], true);
+    this.set({ modifiedAt: this.state.modifiedAt ?? run.t });
+  }
+
   dispose(): void {
     this.gen++;
     this.stopTimer();

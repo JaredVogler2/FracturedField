@@ -12,6 +12,7 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import { cameraActive, drive, handFor, learnAim, type AimMap, type HandPose } from './camera';
+import { throttle } from './throttle';
 
 interface Body {
   id: number;
@@ -73,6 +74,7 @@ const heldOverRing = (page: Page, r: number) =>
 async function openLab(page: Page, controls?: 'camera') {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
+  await throttle(page);
   // Half-speed authority (test runs only): every hand frame of this slow page reaches it in time.
   await page.goto('/lab/hands?test=1&quality=low&seed=3&timescale=0.5');
   if (controls === 'camera') {
@@ -112,6 +114,34 @@ const mouseAt = async (page: Page, x: number, z: number) => {
   await page.mouse.move(p.x, p.y);
 };
 
+/** The lab's pace in these tests: its URL's `timescale` (the authority at half speed). */
+const LAB_PACE = 0.5;
+
+/** Re-paces the local authority (test runs only; rules unchanged): `scale` × real time. */
+const pace = (page: Page, scale: number) =>
+  page.evaluate(
+    (v) =>
+      (
+        window as unknown as { __ffDebug?: { timeScale?: (s: number) => void } }
+      ).__ffDebug?.timeScale?.(v),
+    scale,
+  );
+
+/**
+ * A scripted hand's speed is the point of a swing or a stroke, so it must be the same in seconds
+ * of play on any machine. Times one hand step on this page (a move to (x, z), then `waitMs`) and
+ * slows the authority so that a step lasts `stepPlayMs` of play — what it takes on a fast machine
+ * at the lab's pace. A slow page (CI) gets a slower authority, never a slower hand. Restore with
+ * `pace(page, LAB_PACE)`.
+ */
+async function paceHandSteps(page: Page, x: number, z: number, stepPlayMs: number, waitMs = 0) {
+  const t0 = Date.now();
+  await mouseAt(page, x, z);
+  if (waitMs) await page.waitForTimeout(waitMs);
+  const wall = Math.max(1, Date.now() - t0);
+  await pace(page, Math.min(LAB_PACE, Math.max(0.05, stepPlayMs / wall)));
+}
+
 /** Presses on (x0, z0), waits for the grip, and drags to (x1, z1) in `steps`. */
 async function mouseGripAndDrag(
   page: Page,
@@ -143,11 +173,14 @@ async function mouseSwingAndRelease(page: Page, z: number, notches = 0) {
   await mouseGripAndDrag(page, [-8, z], [-14, z], 4, 150);
   await expect.poll(async () => (await core(page)).p[0], { timeout: 15_000 }).toBeLessThan(-12.5);
   for (let k = 0; k < notches; k++) await page.mouse.wheel(0, 100);
+  // Each of the swing's four steps lasts ~75 ms of play, however slow this page is.
+  await paceHandSteps(page, -14, z, 75);
   for (let i = 1; i <= 4; i++) await mouseAt(page, -14 + (16 * i) / 4, z);
   await expect
-    .poll(async () => (await core(page)).p[0], { timeout: 10_000, intervals: [30] })
+    .poll(async () => (await core(page)).p[0], { timeout: 30_000, intervals: [30] })
     .toBeGreaterThan(-6);
   await page.mouse.up();
+  await pace(page, LAB_PACE);
   await expect.poll(() => grasp(page)).toBe(-1);
 }
 
@@ -195,10 +228,13 @@ test('Hands Lab, mouse: place, throw, curve and clear; the export holds task met
       await mouseAt(page, x, z);
       await page.waitForTimeout(400);
     }
+    // A stroke at the same speed in play on any machine: 1 m per ~150 ms of play.
+    await paceHandSteps(page, -6, -6, 150, 250);
     for (let i = 1; i <= 12; i++) {
       await mouseAt(page, -6, -6 + i);
       await page.waitForTimeout(250);
     }
+    await pace(page, LAB_PACE);
     await mouseAt(page, -13, 6);
     await expect
       .poll(async () => Math.hypot(...(await boulderNear(page, -6, 3)).v), { timeout: 15_000 })

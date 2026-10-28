@@ -4,7 +4,7 @@
  * Nothing is injected: each page only uses its own mouse/keyboard and reads its own public view.
  */
 import { expect, test } from '@playwright/test';
-import { autopilotUntilGoal, debug, openRoom, project, readyUp, snapshot } from './helpers';
+import { debug, mouseAutopilotInPage, openRoom, project, readyUp, snapshot } from './helpers';
 
 test('online duel: create → invite → join → ready → both act → goals → identical result → rematch', async ({
   browser,
@@ -38,7 +38,7 @@ test('online duel: create → invite → join → ready → both act → goals �
 
   // Player 1 scores with real mouse input until the (fast-rules) match is decided.
   for (let i = 0; i < 4; i++) {
-    const outcome = await autopilotUntilGoal(a, 0, 150_000);
+    const outcome = await mouseAutopilotInPage(a, 0, 150_000);
     if (outcome === 'end') break;
     await expect
       .poll(
@@ -125,7 +125,9 @@ test('online duel: a refresh resumes the same seat mid-match; the rival is pause
 });
 
 test('online duel: leaving mid-match forfeits and the rival is told', async ({ browser }) => {
-  test.setTimeout(120_000);
+  // The guest builds its scene three times (menu, match, menu again), each a full shader compile:
+  // about 20 s apiece on a software renderer with two cores to spare (PR #3, round 3).
+  test.setTimeout(180_000);
   const { ctxA, ctxB, a, b, errors } = await openRoom(browser);
   await readyUp(a, b);
   await b.keyboard.press('Escape');

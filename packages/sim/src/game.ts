@@ -2860,6 +2860,16 @@ export class GameWorld {
     return true;
   }
 
+  /**
+   * Debug/Lab-only: sets the core's deliberate spin (rad/s about +y, clamped to the hand's maximum),
+   * as a hand's twist would, so a paused Physics Lab frame can show a fast-spinning core (D09
+   * evidence). Not reachable from any network message.
+   */
+  debugSetCoreSpin(spin: number): void {
+    const max = this.rules.hand.maxSpin;
+    this.coreSpin = Number.isFinite(spin) ? clamp(spin, -max, max) : 0;
+  }
+
   /** Debug/test-only: entity ids of a kind, ascending. */
   debugEntities(kind: string): EntityId[] {
     const out: EntityId[] = [];

@@ -122,9 +122,15 @@ Tools: `node scripts/capture-arena.mjs <url> <dir> <round>` (golden frames + cou
 
 | Tier | DPR cap | Shadows | Bloom | Floor tex | Cloud sheets | Shafts | Dust | Sky | Particles | Point lights |
 |---|---|---|---|---|---|---|---|---|---|---|
-| low | 0.8 | off (contact shadows) | off | 1024, no normal map | 0 | off | 0 | baked (256² cube) | × 0.5 | 1 |
+| low | 0.8 | baked static key shadows (768² ground mask) + contact shadows; no cloud shadows | off | 1024, no normal map | 0 | off | 0 | baked (256² cube) | × 0.5 | 1 |
 | medium | 1.25 | 1024 | on | 2048 | 2 | on | 260 | low | × 0.75 | 3 |
 | high | 2 | 2048 | on | 2048 | 2 | on | 560 | high | × 1 | 3 |
+
+On every tier (7B): the braziers (embers 6 per fire on low, 14 above), the far world's islands,
+towers and waterfalls (three draws), and the rune inscriptions. Drifting cloud shadows on the key
+(one texture read) are drawn on medium and high; the low tier leaves them out to hold its frame
+cost and keeps the baked key shadows instead. Highlights are capped by channel in the surface
+material (stone 1.5, metal 1.1).
 
 Reflections are image-based on every tier (no probes or SSR); environment meshes use the low LOD
 on the low tier. The low tier is built for weak GPUs and software rasterisers, which shade every
@@ -140,9 +146,10 @@ draw calls, triangles, shader programs, geometries, textures and texture-generat
 
 ## Open problems (next)
 
-- **7B (paused for 06M):** the light rig, aerial perspective, storm layers, contact shadows and
-  quality tiers above are built; still owed are final-settings captures, the D08 comparison set
-  and a critique with two revision rounds (docs/progress/PHASE-07.md §7B).
+- **7B: done** (docs/progress/PHASE-07.md §7B). The lighting, practicals, far world and menu camera
+  are described in docs/3D_VISUAL_STANDARD.md. Still open from 7B: the field floor is a regular
+  flagstone grid (wet patches and shadows break it up), and the distant formations and towers are
+  simple shapes (silhouettes read, detail does not).
 - **7C:** world element state does not yet drive the surfaces (`applyRecipe`, `uWet`, crack glow);
   no "impact near gate" frame without impact VFX.
 - **7E:** normal-based edge wear also marks curved surfaces; the field floor's veins can read as

@@ -14,6 +14,11 @@ export interface CameraUi {
   readonly lastGesture: { readonly action: GestureAction; readonly at: number } | null;
   /** Practice goals reached (onboarding requires a successful PULSE and GUARD). */
   readonly practiced: Readonly<Partial<Record<GestureAction, number>>>;
+  /**
+   * Hands-on practice (ADR-0009): when the hand last closed past the grip that holds and opened
+   * past the grip that lets go.
+   */
+  readonly handsPracticed: { readonly hold?: number; readonly release?: number };
 }
 
 export const useCamera = create<CameraUi>(() => ({
@@ -25,6 +30,7 @@ export const useCamera = create<CameraUi>(() => ({
   calibration: null,
   lastGesture: null,
   practiced: {},
+  handsPracticed: {},
 }));
 
 export function resetCameraUi(): void {
@@ -37,5 +43,6 @@ export function resetCameraUi(): void {
     calibration: null,
     lastGesture: null,
     practiced: {},
+    handsPracticed: {},
   });
 }

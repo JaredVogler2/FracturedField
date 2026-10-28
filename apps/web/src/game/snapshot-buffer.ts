@@ -23,6 +23,8 @@ export interface RenderEntity {
   veiled: boolean;
   shocked: boolean;
   energized: number;
+  /** The core's deliberate spin (rad/s about +y) from the newer snapshot; 0 for other bodies. */
+  spin: number;
 }
 
 export interface RenderManipulator {
@@ -76,6 +78,11 @@ export class SnapshotBuffer {
   /** Bodies snapped instead of interpolated (teleports such as kickoff resets). */
   teleports = 0;
   adaptive: AdaptiveDelay | null = null;
+  /**
+   * How far past the newest snapshot a frame may run ahead (ticks): about 100 ms by default, 0 for
+   * the Physics Lab, which shows each published tick exactly as simulated, however long it waits.
+   */
+  maxExtrapolationTicks = 3;
 
   constructor(
     private readonly tickMs: number,
@@ -147,7 +154,7 @@ export class SnapshotBuffer {
     this.sampledFrames++;
 
     if (target >= latest.tick) {
-      const ahead = Math.min(target - latest.tick, 3); // cap extrapolation to ~100 ms
+      const ahead = Math.min(target - latest.tick, this.maxExtrapolationTicks);
       f.extrapolating = ahead > 0;
       if (f.extrapolating) this.extrapolatedFrames++;
       this.write(latest, latest, 0, (ahead * this.tickMs) / 1000);
@@ -200,6 +207,7 @@ export class SnapshotBuffer {
           veiled: false,
           shocked: false,
           energized: 0,
+          spin: 0,
         };
         map.set(eb.id, r);
       }
@@ -231,6 +239,7 @@ export class SnapshotBuffer {
       r.veiled = eb.veil === 1;
       r.shocked = eb.sh === 1;
       r.energized = eb.en ?? 0;
+      r.spin = eb.s ?? 0;
     }
     for (const id of map.keys()) if (!seen.has(id)) map.delete(id);
     for (const slot of [0, 1] as const) {

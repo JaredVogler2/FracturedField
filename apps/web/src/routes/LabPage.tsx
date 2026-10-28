@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { advance } from '@react-three/fiber';
 import type { EntitySnapshot, WorldSnapshot } from '@ff/protocol';
 import type { ScenarioFixture, VariantName } from '@ff/sim/scenario';
 import { GameClient } from '../game/client';
@@ -6,6 +7,7 @@ import { GameClientProvider } from '../render/frame-context';
 import { GameScene, type CameraOverride } from '../render/Scene';
 import { LabController, LAB_FIXTURES, type LabState } from '../lab/lab-controller';
 import { LabOverlays } from '../lab/LabOverlays';
+import { renderStats } from '../render/render-stats';
 
 const SPEEDS = [0.1, 0.25, 0.5, 1] as const;
 const MATERIAL_KINDS = new Set(['core', 'boulder', 'lodestone', 'shard', 'guard']);
@@ -31,15 +33,26 @@ function params(): URLSearchParams {
   return new URLSearchParams(window.location.search);
 }
 
+/** `view=px,py,pz,tx,ty,tz`: the close camera placed by hand (evidence captures of one spot). */
+function viewParam(): CameraOverride | undefined {
+  const v = params().get('view')?.split(',').map(Number);
+  if (v?.length !== 6 || v.some((n) => !Number.isFinite(n))) return undefined;
+  return { position: [v[0]!, v[1]!, v[2]!], target: [v[3]!, v[4]!, v[5]!], fov: 42 };
+}
+
 /**
  * Development Physics Lab (`/lab`): replays the D04 reaction fixtures through the real renderer
  * with step / pause / rewind, velocity and field overlays, impulse markers, the event sequence and
  * manual material toggles. A development tool — not a game mode — and it never talks to a room.
  *
- * URL: ?fx=R3&v=control&t=120&cam=close&vectors=0 (reproducible captures).
+ * URL: ?fx=R3&v=control&t=120&cam=close&vectors=0 (reproducible captures); with cam=close,
+ * view=px,py,pz,tx,ty,tz places the camera by hand. frames=manual draws nothing on its own:
+ * __ffLab.frame(ms) draws one frame ms of render time after the last, so an effect is caught at
+ * an exact age however slowly the renderer draws.
  */
 export function LabPage() {
-  const client = useMemo(() => new GameClient(1), []);
+  // Exact ticks: a paused lab never shows a moving body run ahead of the state it is at.
+  const client = useMemo(() => new GameClient({ delayTicks: 1, extrapolate: false }), []);
   const lab = useMemo(() => new LabController(client), [client]);
   const state = useSyncExternalStore(lab.subscribe, lab.getState);
   const [vectors, setVectors] = useState(() => params().get('vectors') !== '0');
@@ -52,6 +65,7 @@ export function LabPage() {
     const q = params().get('quality');
     return q === 'low' || q === 'medium' || q === 'high' ? q : 'high';
   }, []);
+  const frameloop = useMemo(() => (params().get('frames') === 'manual' ? 'never' : 'always'), []);
 
   useEffect(() => {
     const p = params();
@@ -63,8 +77,28 @@ export function LabPage() {
       if (p.has('play')) lab.play();
     });
     const w = window as unknown as Record<string, unknown>;
+    // Render time of the last manual frame (s): frames=manual only.
+    let renderAt = 0;
     if (p.has('test'))
-      w.__ffLab = { state: () => lab.getState(), seek: (n: number) => lab.seek(n) };
+      w.__ffLab = {
+        state: () => lab.getState(),
+        seek: (n: number) => lab.seek(n),
+        spin: (v: number) => lab.setCoreSpin(v),
+        step: () => lab.stepOnce(),
+        frame: (ms: number) => {
+          renderAt += ms / 1000;
+          advance(renderAt);
+        },
+        // Totals of the frame before the last one drawn (all passes): draw frame(0) first to
+        // read the last frame's own.
+        stats: () => ({
+          drawCalls: renderStats.drawCalls,
+          triangles: renderStats.triangles,
+          geometries: renderStats.geometries,
+          textures: renderStats.textures,
+          programs: renderStats.programs,
+        }),
+      };
     return () => {
       delete w.__ffLab;
       lab.dispose();
@@ -86,16 +120,17 @@ export function LabPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [lab]);
 
+  const view = useMemo(() => viewParam(), []);
   const camera = useMemo(
-    () => (cam === 'close' ? closeUp(state.fixture, state.variant) : undefined),
-    [cam, state.fixture, state.variant],
+    () => (cam === 'close' ? (view ?? closeUp(state.fixture, state.variant)) : undefined),
+    [cam, view, state.fixture, state.variant],
   );
 
   return (
     <GameClientProvider client={client}>
       <div className="lab" data-testid="lab">
         <div className="lab-stage">
-          <GameScene quality={quality} {...(camera ? { camera } : {})}>
+          <GameScene quality={quality} frameloop={frameloop} {...(camera ? { camera } : {})}>
             <LabOverlays vectors={vectors} regions={regions} impacts={impacts} />
           </GameScene>
           <div className="lab-tick" aria-live="off" data-testid="lab-tick">

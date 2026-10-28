@@ -34,6 +34,8 @@ export interface GameClientOptions {
   readonly remote?: boolean;
   /** Wall-clock ms per tick (a slowed test authority); 1000 / tickRate by default. */
   readonly tickMs?: number;
+  /** Run ahead of the newest snapshot (up to ~100 ms); false shows it exactly (Physics Lab). */
+  readonly extrapolate?: boolean;
 }
 
 /** Events older than this are released even if no frame has been rendered (hidden tab). */
@@ -63,6 +65,7 @@ export class GameClient implements SessionCallbacks {
     const o = typeof opts === 'number' ? { delayTicks: opts } : opts;
     this.remote = o.remote ?? false;
     this.buffer = new SnapshotBuffer(o.tickMs ?? 1000 / DEFAULT_RULES.match.tickRate, o.delayTicks);
+    if (o.extrapolate === false) this.buffer.maxExtrapolationTicks = 0;
     if (this.remote) {
       const spacing = DEFAULT_RULES.match.tickRate / DEFAULT_RULES.match.snapshotRate;
       this.buffer.adaptive = { min: spacing + 1, max: 9, base: spacing + 1.5 };

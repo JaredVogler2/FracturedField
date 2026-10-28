@@ -7,6 +7,7 @@ import type { RulesetId } from '@ff/game-data';
 import type {
   ActionResult,
   GameEvent,
+  HandState,
   IntentAction,
   IntentPhase,
   LobbyMessage,
@@ -381,7 +382,7 @@ export class TestPlayer {
     action: IntentAction,
     phase: IntentPhase,
     at: readonly [number, number],
-    extra: { modifier?: number; dir?: readonly [number, number] } = {},
+    extra: { modifier?: number; dir?: readonly [number, number]; hand?: HandState } = {},
   ): number {
     const seq = this.seq;
     const ok = this.client.sendIntent(makeIntent(seq, action, phase, { at, ...extra }));

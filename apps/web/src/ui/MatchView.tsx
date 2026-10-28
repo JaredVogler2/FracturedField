@@ -77,6 +77,8 @@ const REVIEW_SHOTS = {
   under: { position: [-34, -5, 44], target: [-8, -4, 8], fov: 48 },
   /** Behind the +X gate: the carved channel and its inlay, the gyroscope's hanger and axle. */
   channel: { position: [37, 7.5, 9], target: [25, 2.5, 0], fov: 50 },
+  /** Close on the Rift Core, following it (7C): shells, halo rings, trail, the light it casts. */
+  core: { position: [2.6, 1.2, 3.4], target: [0, 0, 0], fov: 36, follow: 'core' },
 } as const satisfies Record<string, CameraOverride>;
 
 export type MatchMode =
@@ -272,15 +274,16 @@ export function MatchView({
   // What the Hands Lab's "what the game sees" meters read (stable, so its loop is not restarted).
   const labHand = useCallback(() => manager?.seats.get(0)?.hand ?? null, [manager]);
   const labSource = useCallback(() => manager?.seats.get(0)?.source ?? 'keyboard', [manager]);
-  // Hands-on control (ADR-0009): the solo player's input describes a hand. `?hands=1` (any
-  // build) turns it on for this page without changing the saved setting.
-  const handsOn = useMemo(
-    () =>
-      mode.kind === 'lab' ||
-      controls.handsOn ||
-      new URLSearchParams(window.location.search).get('hands') === '1',
-    [mode.kind, controls.handsOn],
-  );
+  // Hands-on control (ADR-0009): the solo player's input describes a hand — the camera's by
+  // default (its sign scheme stays selectable), the mouse, touch and a controller when chosen.
+  // `?hands=1` / `?hands=0` (any build) turns it on / off for this page without changing the
+  // saved settings; the Hands Lab is always hands-on.
+  const handsParam = useMemo(() => new URLSearchParams(window.location.search).get('hands'), []);
+  const handsOn =
+    mode.kind === 'lab' ||
+    handsParam === '1' ||
+    (handsParam !== '0' &&
+      (controlMode === 'camera' ? controls.cameraScheme === 'hands' : controls.handsOn));
   useEffect(() => {
     if (manager && soloSlot !== null) manager.setHandsOn(soloSlot, handsOn);
   }, [manager, soloSlot, handsOn]);
@@ -409,7 +412,11 @@ export function MatchView({
       lobby: () => useHud.getState().lobby,
       matchEnd: () => useHud.getState().matchEnd,
       // Renderer counters (all passes of the last frame) and texture-generation cost at load.
-      renderStats: () => ({ ...renderStats, surfaces: { ...surfaceStats } }),
+      renderStats: () => ({
+        ...renderStats,
+        tierLog: [...renderStats.tierLog],
+        surfaces: { ...surfaceStats },
+      }),
       // Test runs with a time scale only (the worker ignores it otherwise): a scripted player
       // re-paces the local authority to keep its reactions within a set time of play.
       timeScale: (v: number) => session.current?.setTimeScale?.(v),
@@ -650,6 +657,7 @@ export function MatchView({
           side={mySlot === 1 ? -1 : 1}
           portraitSlot={mySlot}
           controlsSide={touchUi ? controls.hand : null}
+          cinematic={mode.kind === 'attract'}
           {...(reviewShot ? { camera: reviewShot } : {})}
         >
           {setup.seats.length > 0 ? (
@@ -738,6 +746,7 @@ export function MatchView({
             manager={manager}
             loadout={seatLoadouts[soloSlot] ?? DEFAULT_LOADOUT}
             paused={paused || matchEnd !== null || (online ? inLobby : !started)}
+            hands={handsOn}
             onFallback={() => {
               setCameraReady(false);
               setControlMode(fallbackMode);

@@ -13,7 +13,7 @@ function cleanHand(h: HandState): HandState {
 /**
  * A described hand is re-sent at least this often — open and still included, so the authority
  * knows a hand is there (an open hand moving through the field drags bodies; no hand drags
- * nothing). The authority takes a hand older than 300 ms for gone: a lost connection or a lost
+ * nothing). The authority takes a hand older than 600 ms for gone: a lost connection or a lost
  * hand never leaves a body gripped.
  */
 export const HAND_KEEPALIVE_MS = 100;

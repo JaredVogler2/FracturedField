@@ -96,7 +96,8 @@ function cameraAutopilotUntilGoal(
 test('camera player: gesture input moves the core, scores a goal, and plays on after a rematch', async ({
   page,
 }) => {
-  test.setTimeout(900_000);
+  // Up to 9 minutes of play to score, then the match played out and a rematch.
+  test.setTimeout(1_200_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   // A small canvas leaves the software-rendered page enough main-thread time to feed the camera
@@ -105,7 +106,10 @@ test('camera player: gesture input moves the core, scores a goal, and plays on a
   // Fast rules: one goal wins a round, two rounds win the match. The authority runs at half
   // speed: the stand-in's hand goes through a software-rendered page and the camera pipeline,
   // the bot reacts every tick — the race must not depend on the test machine's speed.
-  await page.goto('/?mode=bot&difficulty=easy&fast=1&test=1&quality=low&seed=12&timescale=0.5');
+  // The sign scheme (hands-on is the camera's default): a palm pushed toward the camera is PULSE.
+  await page.goto(
+    '/?mode=bot&difficulty=easy&fast=1&test=1&quality=low&seed=12&timescale=0.5&hands=0',
+  );
   await page.getByTestId('controls-camera').click();
   await cameraActive(page);
   await page.getByTestId('start-match').click();
@@ -125,13 +129,34 @@ test('camera player: gesture input moves the core, scores a goal, and plays on a
 
   // Play until the camera player scores. The bot may win a match first: then rematch and go on
   // (every match after the first is itself played through a rematch with gesture input only).
+  // A goalless match lasts longer than one stretch of play: a fast round runs 25 s and a 10 s
+  // golden rift before territory decides it, so two rounds take some 160 s at half speed. A
+  // stretch that ends with the match still running plays on, within an overall limit.
   let goals = 0;
   let matches = 1;
   let pushes = 0;
+  let stretches = 0;
+  const playStart = Date.now();
   while (goals === 0) {
     const r = await cameraAutopilotUntilGoal(page, map, 150_000);
     pushes += r.pushes;
-    expect(r.outcome, 'the match neither produced a goal nor ended').not.toBe('timeout');
+    stretches++;
+    const s = await snap(page);
+    const sofar = await log(page, mark);
+    const accepted = sofar.acks.filter((a) => a.slot === 0 && a.action === 'pulse' && a.accepted);
+    const struck = sofar.casts.filter((c) => c.slot === 0 && c.ability === 'pulse' && c.mag > 0);
+    console.log(
+      `camera player: stretch ${stretches} (${r.outcome}), ${r.pushes} palm pushes; so far ` +
+        `${accepted.length} accepted PULSE casts, ${struck.length} struck the core; match ${matches}, ` +
+        `${s?.match.phase}, score ${s?.match.score.join('-')}, rounds ${s?.match.roundWins.join('-')}`,
+    );
+    if (r.outcome === 'timeout') {
+      expect(
+        Date.now() - playStart,
+        'the camera player did not score in 9 minutes of play',
+      ).toBeLessThan(540_000);
+      continue;
+    }
     if (r.outcome === 'goal') {
       goals++;
       await expect(page.locator('.banner-title', { hasText: /^GOAL$/ })).toBeVisible();

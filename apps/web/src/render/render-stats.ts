@@ -10,4 +10,6 @@ export const renderStats = {
   /** The tier rendering now, and whether it adapts to the frame rate. */
   tier: 'high' as 'low' | 'medium' | 'high',
   adaptive: false,
+  /** Every tier the scene has rendered at, with when it began (performance.now() ms). */
+  tierLog: [] as { tier: 'low' | 'medium' | 'high'; at: number }[],
 };

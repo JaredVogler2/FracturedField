@@ -727,8 +727,10 @@ export function gate(p: GateParams): GateGeometry {
     beam.translate(0.35, y, 0);
     brass.push(beam);
   }
-  // Steel frame of the mouth (behind the posts, outside the scoring plane).
-  const frameTop = new RoundedBoxGeometry(0.5, 0.36, p.mouthHalfWidth * 2 + 1.2, 2, 0.05);
+  // Steel frame of the mouth (behind the posts, outside the scoring plane). Its top is rounded
+  // almost to a half-cylinder: from the gameplay camera a flat top mirrors the storm break whole
+  // (a white bar across the EMBER gate, 7B round b4); rounded, it catches the sun as a line.
+  const frameTop = new RoundedBoxGeometry(0.5, 0.36, p.mouthHalfWidth * 2 + 1.2, 5, 0.16);
   frameTop.translate(0.35, p.mouthHeight + 0.42, 0);
   steel.push(frameTop);
   // Gyroscope rings, centred on the origin: the component places them at gateRingHeight() and
@@ -924,6 +926,48 @@ export function underside(
 }
 
 /**
+ * A bronze fire brazier (Phase 07B practicals), standing on the ground at the origin: a stepped
+ * foot, a slender stem with a collar, and a wide flared bowl whose rim sits at `BRAZIER_RIM`.
+ * Returns the bronze body and the bed of coals inside the bowl (lit by the fire's own shader).
+ */
+export const BRAZIER_RIM = 1.42;
+
+export function brazier(lod: Lod): { bronze: THREE.BufferGeometry; coals: THREE.BufferGeometry } {
+  const seg = lod === 'high' ? 28 : 14;
+  // Outer profile from the foot up to the rim, then down the inside of the bowl.
+  const profile: [number, number][] = [
+    [0.0, 0.0],
+    [0.44, 0.0],
+    [0.44, 0.07],
+    [0.34, 0.11],
+    [0.3, 0.16],
+    [0.15, 0.24],
+    [0.11, 0.42],
+    [0.1, 0.92],
+    [0.17, 0.97],
+    [0.17, 1.02],
+    [0.13, 1.05],
+    [0.22, 1.09],
+    [0.46, 1.2],
+    [0.6, 1.36],
+    [0.66, BRAZIER_RIM],
+    [0.62, BRAZIER_RIM + 0.02],
+    [0.55, 1.36],
+    [0.4, 1.26],
+    [0.0, 1.22],
+  ];
+  const bronze = new THREE.LatheGeometry(
+    profile.map(([r, y]) => new THREE.Vector2(r, y)),
+    seg,
+  );
+  bronze.computeVertexNormals();
+  // A heaped bed of coals just below the rim.
+  const coals = new THREE.ConeGeometry(0.5, 0.16, seg, 1, true);
+  coals.translate(0, 1.3, 0);
+  return { bronze: merge([tint(bronze, 0.9)]), coals: merge([coals]) };
+}
+
+/**
  * A field pillar standing exactly on its collider: a fluted shaft (never wider than the collider
  * where the core can touch it), a low brass base, a banded stone capital, a glowing rune band.
  */
@@ -954,7 +998,8 @@ export function fieldPillar(
   cap.translate(0, height + 0.12, 0);
   const band = new THREE.CylinderGeometry(radius * 1.112, radius * 1.112, 0.08, seg, 1, true);
   band.translate(0, height + 0.12, 0);
-  const rune = new THREE.CylinderGeometry(radius * 1.004, radius * 1.004, 0.07, seg, 1, true);
+  // A band of inscription (render: a glyph texture wrapping it twice), not a solid glowing ring.
+  const rune = new THREE.CylinderGeometry(radius * 1.004, radius * 1.004, 0.18, seg, 1, true);
   rune.translate(0, height * 0.68, 0);
   return {
     stone: merge([tint(shaft, 1), tint(cap, 0.9)]),

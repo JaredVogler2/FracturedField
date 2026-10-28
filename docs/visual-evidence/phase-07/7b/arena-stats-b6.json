@@ -1,0 +1,154 @@
+{
+  "menu-desktop-high": {
+    "drawCalls": 159,
+    "triangles": 177431,
+    "geometries": 81,
+    "textures": 38,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 1055
+  },
+  "menu-phone-portrait-low": {
+    "drawCalls": 78,
+    "triangles": 56765,
+    "geometries": 83,
+    "textures": 16,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 353
+  },
+  "menu-phone-landscape-medium": {
+    "drawCalls": 139,
+    "triangles": 174587,
+    "geometries": 81,
+    "textures": 38,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 1094
+  },
+  "kickoff-high": {
+    "drawCalls": 163,
+    "triangles": 194445,
+    "geometries": 87,
+    "textures": 38,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 1053
+  },
+  "hero": {
+    "drawCalls": 137,
+    "triangles": 191363,
+    "geometries": 86,
+    "textures": 38,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 952
+  },
+  "gate": {
+    "drawCalls": 100,
+    "triangles": 169349,
+    "geometries": 72,
+    "textures": 38,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 1006
+  },
+  "rim": {
+    "drawCalls": 144,
+    "triangles": 188233,
+    "geometries": 82,
+    "textures": 38,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 1099
+  },
+  "wide": {
+    "drawCalls": 150,
+    "triangles": 178979,
+    "geometries": 83,
+    "textures": 38,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 1085
+  },
+  "stone": {
+    "drawCalls": 107,
+    "triangles": 162069,
+    "geometries": 70,
+    "textures": 37,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 1075
+  },
+  "brass": {
+    "drawCalls": 91,
+    "triangles": 159445,
+    "geometries": 65,
+    "textures": 37,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 922
+  },
+  "under": {
+    "drawCalls": 146,
+    "triangles": 178467,
+    "geometries": 83,
+    "textures": 38,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 993
+  },
+  "channel": {
+    "drawCalls": 125,
+    "triangles": 171627,
+    "geometries": 80,
+    "textures": 38,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 1058
+  },
+  "light-flat-kickoff": {
+    "drawCalls": 159,
+    "triangles": 194179,
+    "geometries": 86,
+    "textures": 38,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 917
+  },
+  "light-dark-kickoff": {
+    "drawCalls": 139,
+    "triangles": 191619,
+    "geometries": 87,
+    "textures": 38,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 1012
+  },
+  "light-flat-phone": {
+    "drawCalls": 139,
+    "triangles": 191373,
+    "geometries": 87,
+    "textures": 38,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 996
+  },
+  "light-dark-phone": {
+    "drawCalls": 137,
+    "triangles": 191363,
+    "geometries": 87,
+    "textures": 38,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 951
+  },
+  "phone-landscape-low": {
+    "drawCalls": 86,
+    "triangles": 64061,
+    "geometries": 86,
+    "textures": 16,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 309
+  },
+  "phone-landscape-medium": {
+    "drawCalls": 137,
+    "triangles": 191363,
+    "geometries": 87,
+    "textures": 38,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 983
+  },
+  "phone-portrait-low": {
+    "drawCalls": 82,
+    "triangles": 56805,
+    "geometries": 83,
+    "textures": 16,
+    "surfaceTextures": 5,
+    "surfaceGenMs": 309
+  }
+}
